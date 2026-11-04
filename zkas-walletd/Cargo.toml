@@ -1,0 +1,62 @@
+[package]
+name = "zkas-walletd"
+description = "ZKas local wallet daemon: a non-custodial, localhost-only REST wallet over the shielded (Orchard) pool. Wraps kaspa-shielded-core (keygen, note-scan, real Halo 2 shielded spend, message sign/verify) and drives a kaspad (ZKas) node over gRPC. Keys never leave the machine."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "zkas-walletd"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Address parse/format for the wallet's own shielded address + the recipient.
+kaspa-addresses.workspace = true
+# The version-2 shielded transaction shape + tx id.
+kaspa-consensus-core.workspace = true
+# Shared logger init.
+kaspa-core.workspace = true
+# gRPC transport to a running kaspad (ZKas) node.
+kaspa-grpc-client.workspace = true
+kaspa-rpc-core.workspace = true
+# The shielded engine: WalletDb (scan/witness/balance), the real Halo 2 payment
+# builder (circuit feature), coinbase-note reconstruction, and message sign/verify.
+kaspa-shielded-core = { workspace = true, features = ["circuit"] }
+zkas-gpu = { path = "../zkas-gpu" }
+# Canonical shielded-tx shape + its sighash context.
+kaspa-shielded-wallet.workspace = true
+zkas-wallet-engine.workspace = true
+zkas-sdk.workspace = true
+
+axum = "0.7"
+tower-http = { version = "0.5.2", features = ["cors"] }
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread", "time", "sync", "signal"] }
+# Parallel page decode: the per-block coinbase Sinsemilla commitment dominates scan CPU
+# (~1 ms/block serial — the measured ~900 blk/s ceiling); blocks are independent, so the
+# shared decode fans out across cores.
+rayon.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+log.workspace = true
+clap.workspace = true
+# CSPRNG for fresh wallet seeds + message signing.
+rand.workspace = true
+rand10 = { package = "rand", version = "0.10" }
+# Seed-file encryption at rest (XChaCha20-Poly1305 with an Argon2-derived key).
+argon2.workspace = true
+chacha20poly1305.workspace = true
+
+# Self-hosting mode (`--serve-public` / node-embedded): auto-generate a self-signed
+# TLS cert, serve HTTPS directly (no reverse proxy), and print a pairing QR so a
+# mobile wallet can pin the cert. Keeps the FVK off the wire in the clear.
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls.workspace = true
+rcgen = "0.13"
+qrcode = { version = "0.14", default-features = false }
+sha2.workspace = true
+hex.workspace = true

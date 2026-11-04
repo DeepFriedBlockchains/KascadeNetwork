@@ -1,0 +1,80 @@
+[package]
+name = "kaspa-shielded-core"
+description = "zkas shielded pool core: Orchard note-commitment tree, nullifier set, turnstile invariant"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Enables Halo 2 proof verification (the `verify` module's circuit path, single
+# + batch). Pulls halo2_proofs via orchard plus the batch/reconstruction deps;
+# kept opt-in so non-verifying consumers stay light.
+circuit = ["orchard/circuit", "orchard/multicore", "dep:nonempty"]
+
+[dependencies]
+# Orchard primitives (Halo 2 / Pasta). `circuit` (halo2_proofs) is enabled via
+# this crate's `circuit` feature, which the consensus verifier turns on.
+# EXACT-pinned, not semver-ranged: these crates carry the consensus's entire
+# anti-counterfeiting guarantee. zakura-orchard is a post-fix fork: its crate
+# postdates the June-2026 Orchard proof-forgery fix (halo2_gadgets 0.5.0 /
+# orchard 0.14.0), and `verify::CIRCUIT_VERSION` selects the fixed circuit.
+# `build.rs` bakes the exact crate identity into `verify::ORCHARD_CRATE`. A caret range would let `cargo update`
+# silently move us onto an unaudited (or regressed) release. Bump deliberately,
+# reading the changelog, never incidentally.
+orchard = { package = "zakura-orchard", version = "=1.0.1", default-features = false, features = ["std", "weighted-merkle"] }
+# Must match the incrementalmerkletree version Orchard links, so that
+# `MerkleHashOrchard: incrementalmerkletree::Hashable` is the same trait.
+# `legacy-api` provides CommitmentTree / IncrementalWitness, the wallet-side
+# witness tracking a real wallet needs (PLAN §2.9, `walletdb`).
+incrementalmerkletree = { version = "=0.8.2", features = ["legacy-api"] }
+# For the persisted frontier snapshot (FrontierState). incrementalmerkletree's
+# Frontier is not serde-serializable, so we persist a representation we control.
+serde = { workspace = true, features = ["derive"] }
+# Curve point handling for the encoding consensus rules (non-identity epk).
+# Versions are pinned to match what Orchard 0.14 links.
+group = "0.14"
+pasta_curves = { package = "zakura-pasta-curves", version = "=1.0.1" }
+# Shielded-transaction sighash.
+blake2b_simd = { workspace = true }
+chacha20 = "0.9"
+# Trial decryption is ~99% of a scan and is per-action independent, so a page batch
+# is split across cores. Needed by the library now, not only the benches.
+rayon.workspace = true
+# Bridge burn-accumulator hashing. SHA-256 rather than the chain's usual blake2b
+# because the verifier is the Kaspa-side risc0 peg-out guest, whose shared ABI
+# hashes with SHA-256; the two implementations must agree byte-for-byte.
+sha2 = { workspace = true }
+# Canonical-R witness chain (`witness_chain`): recompute a Kaspa block's KIP-21
+# `seq_commit` to prove a ZKas state root is committed by Kaspa's own PoW. The
+# SAME crate runs in the risc0 peg-out guest, so the two cannot drift. Pulled
+# `default-features = false` on purpose: the `std` feature depends on
+# kaspa-consensus-core, which depends back on kaspa-shielded-core — a cycle. The
+# no_std surface is exactly the hashing/types this module needs.
+kaspa-hashes = { workspace = true }
+# Specified by path (not `workspace = true`) so we can force `default-features = false`;
+# Cargo forbids overriding a workspace dependency's default-features on inherit.
+kaspa-seq-commit = { path = "../consensus/seq-commit", default-features = false }
+# Bundle reconstruction (batch verification) — enabled by the `circuit` feature.
+nonempty = { version = "0.11", default-features = false, optional = true }
+# RNG for RedPallas signing (message signatures + circuit proving). Non-optional:
+# `message` signing is available without the heavy `circuit` feature.
+rand = "0.10"
+rand_core = "0.10"
+# Note decryption for wallet scanning (the receive side). Must match the version
+# Orchard links so the OrchardDomain types agree.
+zcash_note_encryption = "0.4"
+# Human-facing shielded (Orchard) address encoding for the wallet facade
+# (Version::ShieldedOrchard, zkas: HRP). kaspa-addresses is a leaf crate, so
+# no dependency cycle with the consensus layer that depends on shielded-core.
+kaspa-addresses.workspace = true
+
+[dev-dependencies]
+# Benchmarks only (`bench_concurrent_vs_sequential_proofs`): scoped rayon pools to
+# give each concurrent proof its own bounded thread count.
+rayon.workspace = true

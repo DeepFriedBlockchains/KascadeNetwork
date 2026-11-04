@@ -1,0 +1,17 @@
+[package]
+name = "zkas-signer"
+description = "Key custody and anti-blind payment authorization for the ZKas SDK"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+rand = "0.10"
+kaspa-shielded-core.workspace = true
+orchard = { package = "zakura-orchard", version = "=1.0.1", default-features = false, features = ["std"] }
+zeroize.workspace = true

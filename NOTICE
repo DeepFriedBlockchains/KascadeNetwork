@@ -1,0 +1,79 @@
+KASCADE — provenance and attribution
+====================================
+
+KASCADE is a derivative work. This file records where the code came from and what
+obligations attach to it. It is not a substitute for the licence text in LICENSE.
+
+1. Lineage
+----------
+
+    rusty-kaspa            Kaspa developers            ISC
+        |
+        +-- zkas-rusty     ZKas project                ISC (inherited)
+                |
+                +-- KASCADE    KASCADE project         ISC (inherited)
+
+The overwhelming majority of the source in this repository originates in
+rusty-kaspa. KASCADE's contribution is a set of modifications on top of the
+ZKas fork of that codebase.
+
+2. Upstream copyright
+---------------------
+
+The upstream copyright notice is retained verbatim in LICENSE:
+
+    Copyright (c) 2022-2024 Kaspa developers
+
+That notice is not removed, abbreviated, or replaced anywhere in this
+repository. Individual source files that carried an upstream copyright header
+retain it.
+
+3. Licence terms
+----------------
+
+rusty-kaspa is distributed under the ISC licence. The ISC licence permits use,
+copying, modification and distribution provided that the copyright notice and
+the permission notice appear in all copies. Both notices are present in
+LICENSE, which is included in this repository and in every source distribution.
+
+ISC is compatible with the manner in which KASCADE is distributed. No additional
+restriction is imposed on the upstream code.
+
+4. Third-party dependencies
+---------------------------
+
+This repository depends on third-party crates and native libraries, each under
+its own licence. The authoritative list is Cargo.lock together with each crate's
+own licence metadata. Notable components include:
+
+    RocksDB                 Apache-2.0 / GPL-2.0 dual
+    Zcash Orchard / Halo 2  MIT / Apache-2.0 (via the zcash crate family)
+    tokio, hyper, tonic     MIT
+    secp256k1               MIT
+    blake2, sha2            MIT / Apache-2.0
+
+No third-party source is vendored into this repository except where a crate's
+own conventions require it. Dependency licences are the responsibility of the
+distributor of any binary built from this tree; anyone shipping a KASCADE
+binary should produce a licence bundle from Cargo.lock.
+
+5. What KASCADE does not claim
+------------------------------
+
+KASCADE is not affiliated with, endorsed by, or supported by the Kaspa
+developers or the ZKas project. The names "Kaspa", "rusty-kaspa" and "ZKas"
+appear in this repository only to describe provenance, compatibility
+(kHeavyHash proof-of-work is byte-identical to Kaspa's) and inherited
+identifiers, and are used descriptively.
+
+6. Inherited identifiers
+------------------------
+
+Some identifiers in the code still carry predecessor naming: the `zkas`/`zkastest`
+address prefixes, the `zkas-` datadir prefix, the `ZKMM` merge-mining magic, and
+various crate and binary names. These are retained because changing them changes
+consensus-visible behaviour (address encoding, network identity, AuxPoW binding)
+and that is a consensus change, not a rename. They are documented here so that
+their presence is not mistaken for a claim of continuity with the predecessor
+chain, which KASCADE does not have: KASCADE has no genesis, no network and no
+chain history.
