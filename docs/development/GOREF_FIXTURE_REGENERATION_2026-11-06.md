@@ -2,7 +2,9 @@
 
 **Date:** 2026-11-06
 **Branch:** `feature/goref-fixture-regeneration-20261106`
-**Base:** `feature/public-development-20261106` (`ba4ce3072bd7785e1b3061647f2dacbba044d8e6`)
+**Branch base:** `fix/public-ci-validation-20261106` (stacked on PR #2, so this PR's
+diff contains only the goref work). Pristine originals were extracted from
+`feature/public-development-20261106` (`ba4ce3072bd7785e1b3061647f2dacbba044d8e6`).
 **Related:** PR #2 (`fix/public-ci-validation-20261106`, head `91da4d8`), PR #1 (untouched)
 
 ---
