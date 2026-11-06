@@ -292,30 +292,27 @@ pub fn apply_chain_block_to<S: NullifierSet + ?Sized>(
         // A burn may never exceed what the bundle proved is leaving the pool. Checked before
         // conflict resolution so an invalid declaration invalidates the block rather than being
         // silently skipped.
-        if let Some(receipt) = &tx.burn {
-            if receipt.v > tx.fee {
-                return Err(ShieldedStateError::BurnExceedsValueBalance { burn: receipt.v, value_balance: tx.fee });
-            }
+        if let Some(receipt) = &tx.burn
+            && receipt.v > tx.fee
+        {
+            return Err(ShieldedStateError::BurnExceedsValueBalance { burn: receipt.v, value_balance: tx.fee });
         }
 
-        match resolver.try_accept(tx.nullifiers.iter().copied()) {
-            Ok(()) => {
-                for &cmx in &tx.commitments {
-                    subtree.push(cmx);
-                }
-                // Split the declared value_balance: the burn leaves the pool as a recorded exit,
-                // the remainder is an ordinary miner fee.
-                let burn_value = tx.burn.as_ref().map_or(0, |r| r.v);
-                total_burns += burn_value as u128;
-                total_fees += (tx.fee - burn_value) as u128;
-                if let Some(receipt) = &tx.burn {
-                    burn_receipts.push(*receipt);
-                }
-                accepted.push(i);
+        // A conflicting transaction (double-spend) is dropped: it records nothing — including
+        // no burn receipt. A dropped peg-out must not become claimable on Kaspa.
+        if let Ok(()) = resolver.try_accept(tx.nullifiers.iter().copied()) {
+            for &cmx in &tx.commitments {
+                subtree.push(cmx);
             }
-            // Conflicting transaction: dropped (double-spend), records nothing — including no
-            // burn receipt. A dropped peg-out must not become claimable on Kaspa.
-            Err(_) => {}
+            // Split the declared value_balance: the burn leaves the pool as a recorded exit,
+            // the remainder is an ordinary miner fee.
+            let burn_value = tx.burn.as_ref().map_or(0, |r| r.v);
+            total_burns += burn_value as u128;
+            total_fees += (tx.fee - burn_value) as u128;
+            if let Some(receipt) = &tx.burn {
+                burn_receipts.push(*receipt);
+            }
+            accepted.push(i);
         }
     }
     let new_nullifiers = resolver.into_accepted();
@@ -791,7 +788,14 @@ mod circuit_e2e {
         let value = 10_000u64;
         let rho = Option::<Rho>::from(Rho::from_bytes(&canon(1))).unwrap();
         let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(2), &rho)).unwrap();
-        let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+        let note = Option::<Note>::from(Note::from_parts(
+            keys.address(),
+            NoteValue::from_raw(value),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        ))
+        .unwrap();
 
         // Consensus recomputes the coinbase note commitment from its public
         // description + value, and it must equal the wallet's own note commitment.
@@ -831,7 +835,7 @@ mod circuit_e2e {
         // The §2.4 transition applies it: nullifier inserted, fee collected, tree advanced.
         let stx = ShieldedTx::from_bundle(&wire).unwrap();
         assert_eq!(stx.fee, 2_000);
-        let out2 = st.apply_chain_block(None, &[stx.clone()]).unwrap();
+        let out2 = st.apply_chain_block(None, std::slice::from_ref(&stx)).unwrap();
         assert_eq!(out2.accepted, vec![0], "the real spend is accepted");
 
         // Turnstile: minted 10_000 (coinbase), collected 2_000 fee -> pool 8_000.

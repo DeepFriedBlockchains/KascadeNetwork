@@ -13,7 +13,7 @@ repository.workspace = true
 default = ["keccak?/asm", "mem_size", "std", "workflow"]
 no-asm = ["keccak"]
 mem_size = ["kaspa-utils/mem_size"]
-std = ["blake2b_simd/std", "blake3/std", "borsh/std", "faster-hex/std", "js-sys?/std", "kaspa-utils/std", "serde/std", "sha2/std", "wasm-bindgen/std"]
+std = ["blake2b_simd/std", "blake3/std", "borsh/std", "faster-hex/std", "js-sys?/std", "kaspa-utils/std", "dep:num_cpus", "serde/std", "sha2/std", "wasm-bindgen/std"]
 workflow = ["std", "dep:workflow-wasm", "dep:js-sys"]
 zerocopy = ["dep:zerocopy"]
 
@@ -26,7 +26,9 @@ js-sys = { workspace = true, optional = true }
 kaspa-utils = { workspace = true, default-features = false }
 keccak = { workspace = true, optional = true }
 log.workspace = true
-num_cpus.workspace = true
+# Only the std-gated FishHash dataset builder uses this; keeping it optional
+# lets `--no-default-features` builds for bare-metal targets stay no_std.
+num_cpus = { workspace = true, optional = true }
 serde.workspace = true
 sha2.workspace = true
 sha2-const-stable.workspace = true

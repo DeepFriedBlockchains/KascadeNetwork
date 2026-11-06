@@ -22,11 +22,11 @@ pub mod scan {
     use group::GroupEncoding;
     use orchard::{
         Action,
-        keys::{Diversifier, FullViewingKey, IncomingViewingKey, PreparedIncomingViewingKey, Scope, SpendingKey},
-        note::{ExtractedNoteCommitment, Note, Nullifier, RandomSeed, Rho, TransmittedNoteCiphertext},
+        keys::{FullViewingKey, IncomingViewingKey, PreparedIncomingViewingKey, Scope, SpendingKey},
+        note::{ExtractedNoteCommitment, Note, Nullifier, TransmittedNoteCiphertext},
         note_encryption::{CompactAction, OrchardDomain},
         primitives::redpallas::{Signature, SpendAuth, VerificationKey},
-        value::{NoteValue, ValueCommitment},
+        value::ValueCommitment,
     };
     use pasta_curves::pallas;
     use zcash_note_encryption::{EphemeralKeyBytes, batch};
@@ -204,7 +204,7 @@ pub mod scan {
 
         /// Reconstruct the orchard [`CompactAction`] for trial decryption. `None`
         /// if the nullifier or commitment is not a canonical encoding.
-        fn to_compact_action(&self) -> Option<CompactAction> {
+        fn to_compact_action(self) -> Option<CompactAction> {
             let nf = Option::from(Nullifier::from_bytes(&self.nullifier))?;
             let cmx = Option::from(ExtractedNoteCommitment::from_bytes(&self.cmx))?;
             Some(CompactAction::from_parts(nf, cmx, EphemeralKeyBytes(self.ephemeral_key), self.enc_ciphertext))
@@ -312,12 +312,11 @@ pub mod scan {
         // strength of a microbenchmark it got worse, and every regression was visible in
         // the live counters within minutes. Change it only against a cold-scan blocks/s
         // measurement, and only with no unrelated test wallets syncing.
-        if actions.len() >= GPU_MIN_BATCH {
-            if let (Some(f), Some(sc)) = (GPU_AGREE.get(), agree_scalar) {
-                if let Some(found) = scan_compact_gpu_cached(prepared, actions, epks, |e| f(sc, e)) {
-                    return found;
-                }
-            }
+        if actions.len() >= GPU_MIN_BATCH
+            && let (Some(f), Some(sc)) = (GPU_AGREE.get(), agree_scalar)
+            && let Some(found) = scan_compact_gpu_cached(prepared, actions, epks, |e| f(sc, e))
+        {
+            return found;
         }
 
         // No device (or too small a batch): spread the batch across cores. Trial
@@ -546,19 +545,9 @@ pub mod scan {
         const FILTER_PAR_MIN: usize = 512;
         let candidates: Vec<usize> = if actions.len() >= FILTER_PAR_MIN {
             use rayon::prelude::*;
-            actions
-                .par_iter()
-                .zip(secrets.par_iter())
-                .enumerate()
-                .filter_map(|(i, (rec, secret))| filter(i, rec, secret))
-                .collect()
+            actions.par_iter().zip(secrets.par_iter()).enumerate().filter_map(|(i, (rec, secret))| filter(i, rec, secret)).collect()
         } else {
-            actions
-                .iter()
-                .zip(secrets.iter())
-                .enumerate()
-                .filter_map(|(i, (rec, secret))| filter(i, rec, secret))
-                .collect()
+            actions.iter().zip(secrets.iter()).enumerate().filter_map(|(i, (rec, secret))| filter(i, rec, secret)).collect()
         };
 
         if candidates.is_empty() {
@@ -792,15 +781,12 @@ pub mod scan {
         prep: Option<&PreparedEpks>,
         epks: Option<&[Option<pallas::Point>]>,
     ) -> Vec<ReceivedNote> {
-        if actions.len() >= GPU_MIN_BATCH {
-            if let (Some(f), Some(sc), Some(p)) = (GPU_FILTER.get(), agree_scalar, prep) {
-                if p.len() == actions.len() {
-                    if let Some(found) = scan_compact_gpu_filter(prepared, actions, p, |xy, rows, ct0| f(sc, xy, rows, ct0))
-                    {
-                        return found;
-                    }
-                }
-            }
+        if actions.len() >= GPU_MIN_BATCH
+            && let (Some(f), Some(sc), Some(p)) = (GPU_FILTER.get(), agree_scalar, prep)
+            && p.len() == actions.len()
+            && let Some(found) = scan_compact_gpu_filter(prepared, actions, p, |xy, rows, ct0| f(sc, xy, rows, ct0))
+        {
+            return found;
         }
         scan_compact_auto_cached(prepared, agree_scalar, actions, epks)
     }
@@ -812,10 +798,10 @@ pub mod scan {
 }
 
 pub use scan::{
-    CompactActionRecord, ReceivedNote, address_bytes_from_seed, gpu_enabled, install_gpu_agree, ivk_agreement_scalar, ivk_from_seed,
-    decompress_epk, scan_bundle, scan_bundle_prepared, scan_compact, scan_compact_auto, scan_compact_auto_cached, scan_compact_cpu, scan_compact_gpu, scan_compact_gpu_cached,
-    scan_compact_prepared, trim_memo,
-    PreparedEpks, gpu_filter_enabled, install_gpu_filter, prepare_epks, scan_compact_auto_prepared, scan_compact_gpu_filter,
+    CompactActionRecord, PreparedEpks, ReceivedNote, address_bytes_from_seed, decompress_epk, gpu_enabled, gpu_filter_enabled,
+    install_gpu_agree, install_gpu_filter, ivk_agreement_scalar, ivk_from_seed, prepare_epks, scan_bundle, scan_bundle_prepared,
+    scan_compact, scan_compact_auto, scan_compact_auto_cached, scan_compact_auto_prepared, scan_compact_cpu, scan_compact_gpu,
+    scan_compact_gpu_cached, scan_compact_gpu_filter, scan_compact_prepared, trim_memo,
 };
 
 #[cfg(feature = "circuit")]
@@ -834,7 +820,7 @@ pub mod build {
         value::NoteValue,
     };
     use pasta_curves::pallas;
-    use rand_core::{CryptoRng, RngCore};
+    use rand_core::CryptoRng;
     use std::sync::OnceLock;
 
     pub use crate::payment_check::{ActionDisclosure, PaymentCheckError, check_prepared_payment};
@@ -933,9 +919,11 @@ pub mod build {
         value: u64,
         network_domain: &[u8; 32],
         tx_context: &[u8],
-        mut rng: impl RngCore + CryptoRng,
+        mut rng: impl CryptoRng,
     ) -> Result<ShieldedBundle, BuildError> {
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, Anchor::empty_tree()).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder =
+            Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, Anchor::empty_tree())
+                .expect("orchard v2 ENABLED flags are always representable");
         builder
             .add_output(None, recipient, NoteValue::from_raw(value), [0u8; 512])
             .map_err(|e| BuildError::Builder(format!("{e:?}")))?;
@@ -975,11 +963,12 @@ pub mod build {
         output_value: u64,
         network_domain: &[u8; 32],
         tx_context: &[u8],
-        mut rng: impl RngCore + CryptoRng,
+        mut rng: impl CryptoRng,
     ) -> Result<ShieldedBundle, BuildError> {
         // The anchor is the root the supplied path proves the note into.
         let anchor = merkle_path.root(ExtractedNoteCommitment::from(note.commitment()));
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
+            .expect("orchard v2 ENABLED flags are always representable");
         builder.add_spend(keys.fvk.clone(), note, merkle_path).map_err(|e| BuildError::Builder(format!("{e:?}")))?;
         builder
             .add_output(None, recipient, NoteValue::from_raw(output_value), [0u8; 512])
@@ -1026,12 +1015,13 @@ pub mod build {
         fee: u64,
         network_domain: &[u8; 32],
         tx_context: &[u8],
-        mut rng: impl RngCore + CryptoRng,
+        mut rng: impl CryptoRng,
     ) -> Result<ShieldedBundle, BuildError> {
         let change = note.value().inner().checked_sub(amount).and_then(|v| v.checked_sub(fee)).ok_or(BuildError::Empty)?;
 
         let anchor = merkle_path.root(ExtractedNoteCommitment::from(note.commitment()));
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
+            .expect("orchard v2 ENABLED flags are always representable");
         builder.add_spend(keys.fvk.clone(), note, merkle_path).map_err(|e| BuildError::Builder(format!("{e:?}")))?;
         builder
             .add_output(None, recipient, NoteValue::from_raw(amount), [0u8; 512])
@@ -1097,8 +1087,14 @@ pub mod build {
         let desc = derive_coinbase_note_desc(keys.address().to_raw_address_bytes(), &seed);
         let rho = Option::<Rho>::from(Rho::from_bytes(&desc.rho)).ok_or(BuildError::Empty)?;
         let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(desc.rseed, &rho)).ok_or(BuildError::Empty)?;
-        let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(note_value), rho, rseed, orchard::note::NoteVersion::V2))
-            .ok_or(BuildError::Empty)?;
+        let note = Option::<Note>::from(Note::from_parts(
+            keys.address(),
+            NoteValue::from_raw(note_value),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        ))
+        .ok_or(BuildError::Empty)?;
 
         // Single-leaf witness: position 0, siblings are the empty-subtree roots.
         let auth_path: [MerkleHashOrchard; 32] =
@@ -1107,8 +1103,7 @@ pub mod build {
 
         let recipient = Option::<Address>::from(Address::from_raw_address_bytes(&recipient_addr)).ok_or(BuildError::Empty)?;
         let pk = proving_key();
-        let wire =
-            build_spend_bundle(pk, &keys, note, merkle_path, recipient, output_value, network_domain, tx_context, rand::rng())?;
+        let wire = build_spend_bundle(pk, &keys, note, merkle_path, recipient, output_value, network_domain, tx_context, rand::rng())?;
         Ok(wire.to_bytes())
     }
 
@@ -1192,7 +1187,8 @@ pub mod build {
 
         // The shared anchor: all supplied witnesses were taken at one tree state.
         let anchor = first_path.root(ExtractedNoteCommitment::from(first_note.commitment()));
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
+            .expect("orchard v2 ENABLED flags are always representable");
         for (note, merkle_path) in inputs {
             builder.add_spend(keys.fvk.clone(), note, merkle_path).map_err(|e| BuildError::Builder(format!("{e:?}")))?;
         }
@@ -1281,7 +1277,8 @@ pub mod build {
         let change = total_in.checked_sub(amount).and_then(|v| v.checked_sub(fee)).ok_or(BuildError::Empty)?;
         let anchor = first_path.root(ExtractedNoteCommitment::from(first_note.commitment()));
 
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
+            .expect("orchard v2 ENABLED flags are always representable");
         for (note, merkle_path) in inputs {
             builder.add_spend(fvk.clone(), note, merkle_path).map_err(|e| BuildError::Builder(format!("{e:?}")))?;
         }
@@ -1310,7 +1307,7 @@ pub mod build {
         for (i, action) in pczt.actions().iter().enumerate() {
             let spend = action.spend();
             if let Some(sk) = spend.dummy_sk() {
-                dummies.push((i, sk.clone()));
+                dummies.push((i, *sk));
             } else if let Some(alpha) = spend.alpha() {
                 spend_auth_requests.push((i, alpha.to_repr()));
             }
@@ -1367,7 +1364,6 @@ pub mod build {
             <[u8; 64]>::from(authorized.authorization().binding_signature()),
         ))
     }
-
 
     /// One party's contribution to a **shared** bundle: a note it owns, that note's
     /// path, and the VIEWING key the prover needs to build the circuit witness. The
@@ -1484,9 +1480,7 @@ pub mod build {
         let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
             .expect("orchard v2 ENABLED flags are always representable");
         for s in &spends {
-            builder
-                .add_spend(s.fvk.clone(), s.note, s.path.clone())
-                .map_err(|e| BuildError::Builder(format!("{e:?}")))?;
+            builder.add_spend(s.fvk.clone(), s.note, s.path.clone()).map_err(|e| BuildError::Builder(format!("{e:?}")))?;
         }
         for o in &outputs {
             let recipient = Option::<Address>::from(Address::from_raw_address_bytes(&o.recipient))
@@ -1511,9 +1505,7 @@ pub mod build {
         // rather than from input order.
         let mut spend_owners: Vec<(usize, usize)> = Vec::with_capacity(spends.len());
         for i in 0..spends.len() {
-            let action = meta
-                .spend_action_index(i)
-                .ok_or_else(|| BuildError::Builder(format!("builder lost spend {i}")))?;
+            let action = meta.spend_action_index(i).ok_or_else(|| BuildError::Builder(format!("builder lost spend {i}")))?;
             spend_owners.push((action, i));
         }
         spend_owners.sort_unstable();
@@ -1525,7 +1517,7 @@ pub mod build {
         for (i, action) in pczt.actions().iter().enumerate() {
             let spend = action.spend();
             if let Some(sk) = spend.dummy_sk() {
-                dummies.push((i, sk.clone()));
+                dummies.push((i, *sk));
             } else if let Some(alpha) = spend.alpha() {
                 spend_auth_requests.push((i, alpha.to_repr()));
             }
@@ -1553,7 +1545,6 @@ pub mod build {
             spend_owners,
         })
     }
-
 
     /// Decode a 96-byte full viewing key. Exposed so a caller assembling a shared
     /// bundle (walletd, an SDK) can turn a party's `fvk_hex` into a key without
@@ -1599,20 +1590,13 @@ pub mod build {
         let value = u64::from_le_bytes(b[43..51].try_into().ok()?);
         let rho = Option::<Rho>::from(Rho::from_bytes(&b[51..83].try_into().ok()?))?;
         let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(b[83..115].try_into().ok()?, &rho))?;
-        let note = Option::<Note>::from(Note::from_parts(
-            addr,
-            NoteValue::from_raw(value),
-            rho,
-            rseed,
-            orchard::note::NoteVersion::V2,
-        ))?;
+        let note =
+            Option::<Note>::from(Note::from_parts(addr, NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2))?;
         let position = u32::from_le_bytes(b[115..119].try_into().ok()?);
         let mut auth: Vec<MerkleHashOrchard> = Vec::with_capacity(32);
         for i in 0..32 {
             let at = 119 + i * 32;
-            auth.push(Option::<MerkleHashOrchard>::from(MerkleHashOrchard::from_bytes(
-                &b[at..at + 32].try_into().ok()?,
-            ))?);
+            auth.push(Option::<MerkleHashOrchard>::from(MerkleHashOrchard::from_bytes(&b[at..at + 32].try_into().ok()?))?);
         }
         let auth: [MerkleHashOrchard; 32] = auth.try_into().ok()?;
         Some((note, MerklePath::from_parts(position, auth)))
@@ -1645,7 +1629,14 @@ pub mod build {
             // A note worth 10_000 owned by the wallet.
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(1))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(2), &rho)).unwrap();
-            let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(10_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+            let note = Option::<Note>::from(Note::from_parts(
+                keys.address(),
+                NoteValue::from_raw(10_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
 
             // Single-leaf tree at position 0: siblings are the empty-subtree roots.
             let auth_path: [MerkleHashOrchard; 32] =
@@ -1654,8 +1645,7 @@ pub mod build {
 
             let recipient = ShieldedKeys::from_seed([6u8; 32]).unwrap().address();
             let net = [0x11u8; 32];
-            let wire =
-                build_spend_bundle(&pk, &keys, note, merkle_path, recipient, 8_000, &net, ctx, rand::rng()).expect("build");
+            let wire = build_spend_bundle(&pk, &keys, note, merkle_path, recipient, 8_000, &net, ctx, rand::rng()).expect("build");
 
             let msg = sighash(&wire, &net, ctx);
             crate::verify::verify_bundle(&wire, &msg).expect("wallet spend bundle must verify");
@@ -1685,7 +1675,14 @@ pub mod build {
             // A note worth 10_000 owned by the wallet, alone at tree position 0.
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(1))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(2), &rho)).unwrap();
-            let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(10_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+            let note = Option::<Note>::from(Note::from_parts(
+                keys.address(),
+                NoteValue::from_raw(10_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let auth_path: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
             let merkle_path = MerklePath::from_parts(0, auth_path);
@@ -1693,7 +1690,9 @@ pub mod build {
             let recipient = ShieldedKeys::from_seed([6u8; 32]).unwrap().address();
 
             // Spend 10_000, send 8_000 to the recipient, no change → fee = 2_000.
-            let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor).expect("orchard v2 ENABLED flags are always representable");
+            let mut builder =
+                Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, anchor)
+                    .expect("orchard v2 ENABLED flags are always representable");
             builder.add_spend(keys.fvk.clone(), note, merkle_path).expect("add_spend");
             builder.add_output(None, recipient, NoteValue::from_raw(8_000), [0u8; 512]).expect("out");
 
@@ -1738,7 +1737,6 @@ pub mod build {
 
         /// The reusable non-custodial API end to end, WITH change (so the bundle carries
         /// a padding dummy the server signs and a real spend the device signs).
-        #[test]
         /// THE ANTI-BLIND-SIGNING GUARD. A device must never sign a hash it cannot
         /// interpret: a malicious prover would simply hand back the sighash of a payment
         /// to *itself*. Here the prover is hostile — it prepares a payment to an attacker
@@ -1752,7 +1750,14 @@ pub mod build {
 
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(5))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(6), &rho)).unwrap();
-            let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(10_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+            let note = Option::<Note>::from(Note::from_parts(
+                keys.address(),
+                NoteValue::from_raw(10_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let auth_path: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
             let merkle_path = MerklePath::from_parts(0, auth_path);
@@ -1763,18 +1768,9 @@ pub mod build {
             // The HOSTILE prover: the user asked to pay `intended` 6_000, but it builds a
             // bundle paying `attacker` instead. (Everything else is honest, so only the
             // device's checks stand between the user and the theft.)
-            let evil = prepare_payment(
-                &keys.fvk,
-                vec![(note.clone(), merkle_path.clone())],
-                attacker,
-                6_000,
-                1_000,
-                &net,
-                ctx,
-                true,
-                [0u8; 512],
-            )
-            .unwrap();
+            let evil =
+                prepare_payment(&keys.fvk, vec![(note, merkle_path.clone())], attacker, 6_000, 1_000, &net, ctx, true, [0u8; 512])
+                    .unwrap();
 
             // The device checks the bundle against what the USER asked for, and refuses.
             // (Which action index carries the theft depends on the builder's shuffle.)
@@ -1836,7 +1832,14 @@ pub mod build {
 
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(3))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(4), &rho)).unwrap();
-            let note = Option::<Note>::from(Note::from_parts(keys.address(), NoteValue::from_raw(10_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+            let note = Option::<Note>::from(Note::from_parts(
+                keys.address(),
+                NoteValue::from_raw(10_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let auth_path: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
             let merkle_path = MerklePath::from_parts(0, auth_path);
@@ -1904,8 +1907,7 @@ pub mod build {
         fn scan_recovers_sent_note() {
             let pk = ProvingKey::build(crate::verify::CIRCUIT_VERSION);
             let recipient = ShieldedKeys::from_seed([2u8; 32]).expect("valid seed");
-            let wire =
-                build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
+            let wire = build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
 
             let ivk = crate::wallet::ivk_from_seed([2u8; 32]).unwrap();
             let received = crate::wallet::scan_bundle(&ivk, &wire);
@@ -1926,8 +1928,7 @@ pub mod build {
             use crate::wallet::CompactActionRecord;
             let pk = ProvingKey::build(crate::verify::CIRCUIT_VERSION);
             let recipient = ShieldedKeys::from_seed([2u8; 32]).expect("valid seed");
-            let wire =
-                build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
+            let wire = build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
 
             let ivk = crate::wallet::ivk_from_seed([2u8; 32]).unwrap();
 
@@ -1976,8 +1977,7 @@ pub mod build {
             use group::Curve;
             let pk = ProvingKey::build(crate::verify::CIRCUIT_VERSION);
             let recipient = ShieldedKeys::from_seed([2u8; 32]).expect("valid seed");
-            let wire =
-                build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
+            let wire = build_output_only_bundle(&pk, recipient.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build");
             let compact: Vec<CompactActionRecord> = wire.actions.iter().map(CompactActionRecord::from_wire).collect();
 
             let ivk = crate::wallet::ivk_from_seed([2u8; 32]).unwrap();
@@ -2065,8 +2065,8 @@ pub mod build {
             assert_eq!(via_filter[0].value(), 4242, "verdict path: the note we planted");
 
             // A stranger finds nothing down the verdict path either.
-            let s_filter = crate::wallet::scan_compact_gpu_filter(&stranger.prepare(), &compact, &prep, host_mask(s_scalar))
-                .expect("ran");
+            let s_filter =
+                crate::wallet::scan_compact_gpu_filter(&stranger.prepare(), &compact, &prep, host_mask(s_scalar)).expect("ran");
             assert!(s_filter.is_empty(), "a stranger recovers nothing from the verdict path");
 
             // A device that declines means the CPU runs -- NOT that the wallet owns
@@ -2075,13 +2075,11 @@ pub mod build {
             assert!(crate::wallet::scan_compact_gpu_filter(&prepared, &compact, &prep, |_, _, _| None).is_none());
 
             // A mask of the wrong length is refused rather than indexed into.
-            assert!(crate::wallet::scan_compact_gpu_filter(&prepared, &compact, &prep, |_, r, _| Some(vec![1u8; r + 1]))
-                .is_none());
+            assert!(crate::wallet::scan_compact_gpu_filter(&prepared, &compact, &prep, |_, r, _| Some(vec![1u8; r + 1])).is_none());
 
             // An all-ones mask still gives orchard's answer: the filter widens the
             // candidate set, it never decides. A device stuck at 1 costs time only.
-            let wide = crate::wallet::scan_compact_gpu_filter(&prepared, &compact, &prep, |_, r, _| Some(vec![1u8; r]))
-                .expect("ran");
+            let wide = crate::wallet::scan_compact_gpu_filter(&prepared, &compact, &prep, |_, r, _| Some(vec![1u8; r])).expect("ran");
             assert_eq!(wide.len(), via_cpu.len(), "a permissive mask changes nothing but speed");
             assert_eq!(wide[0].action_index, via_cpu[0].action_index);
         }
@@ -2189,7 +2187,14 @@ pub mod build {
             let mk = |owner: &ShieldedKeys, value: u64, a: u8, b: u8| {
                 let rho = Option::<Rho>::from(Rho::from_bytes(&canon(a))).unwrap();
                 let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(b), &rho)).unwrap();
-                Option::<Note>::from(Note::from_parts(owner.address(), NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2)).unwrap()
+                Option::<Note>::from(Note::from_parts(
+                    owner.address(),
+                    NoteValue::from_raw(value),
+                    rho,
+                    rseed,
+                    orchard::note::NoteVersion::V2,
+                ))
+                .unwrap()
             };
             let a_note = mk(&seller, 4_000, 5, 6);
             let b_note = mk(&buyer, 6_000, 7, 8);
@@ -2213,9 +2218,7 @@ pub mod build {
             )
             .expect("prepare");
 
-            let alpha_for = |action: usize| {
-                prepared.payment.spend_auth_requests.iter().find(|(i, _)| *i == action).expect("alpha").1
-            };
+            let alpha_for = |action: usize| prepared.payment.spend_auth_requests.iter().find(|(i, _)| *i == action).expect("alpha").1;
             // Deliberately sign each action with the WRONG party's key.
             let mut sigs = Vec::new();
             for (action, owner) in prepared.spend_owners.iter().copied() {
@@ -2231,10 +2234,9 @@ pub mod build {
                 Ok(_) => panic!("a bundle signed by the wrong party must not assemble"),
             };
             match err {
-                BuildError::Proof(m) => assert!(
-                    m.contains("InvalidExternalSignature"),
-                    "expected the signature to be refused against rk, got: {m}"
-                ),
+                BuildError::Proof(m) => {
+                    assert!(m.contains("InvalidExternalSignature"), "expected the signature to be refused against rk, got: {m}")
+                }
                 other => panic!("expected a signature rejection, got {other:?}"),
             }
         }
@@ -2251,7 +2253,14 @@ pub mod build {
             let mk = |owner: &ShieldedKeys, value: u64, x: u8, y: u8| {
                 let rho = Option::<Rho>::from(Rho::from_bytes(&canon(x))).unwrap();
                 let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(y), &rho)).unwrap();
-                Option::<Note>::from(Note::from_parts(owner.address(), NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2)).unwrap()
+                Option::<Note>::from(Note::from_parts(
+                    owner.address(),
+                    NoteValue::from_raw(value),
+                    rho,
+                    rseed,
+                    orchard::note::NoteVersion::V2,
+                ))
+                .unwrap()
             };
             let n1 = mk(&a, 5_000, 9, 10);
             let n2 = mk(&b, 5_000, 11, 12);
@@ -2262,10 +2271,7 @@ pub mod build {
             let p2 = MerklePath::from_parts(0, solo);
 
             let res = prepare_multiparty(
-                vec![
-                    MultiSpend { fvk: a.fvk.clone(), note: n1, path: p1 },
-                    MultiSpend { fvk: b.fvk.clone(), note: n2, path: p2 },
-                ],
+                vec![MultiSpend { fvk: a.fvk.clone(), note: n1, path: p1 }, MultiSpend { fvk: b.fvk.clone(), note: n2, path: p2 }],
                 vec![MultiOutput { ovk: None, recipient: b.address().to_raw_address_bytes(), value: 9_000, memo: [0u8; 512] }],
                 1_000,
                 &[0x79u8; 32],
@@ -2290,7 +2296,14 @@ pub mod build {
             let a = ShieldedKeys::from_seed([41u8; 32]).expect("valid seed");
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(13))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(14), &rho)).unwrap();
-            let note = Option::<Note>::from(Note::from_parts(a.address(), NoteValue::from_raw(1_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+            let note = Option::<Note>::from(Note::from_parts(
+                a.address(),
+                NoteValue::from_raw(1_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let solo: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
 
@@ -2322,7 +2335,13 @@ pub mod build {
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(15))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(16), &rho)).unwrap();
             let note = Option::<Note>::from(Note::from_parts(
-                owner.address(), NoteValue::from_raw(4_242), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+                owner.address(),
+                NoteValue::from_raw(4_242),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let auth: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
             let path = MerklePath::from_parts(9, auth);
@@ -2365,7 +2384,6 @@ pub mod build {
             );
         }
 
-
         /// The wire cap is enforced before any proving happens, so an over-large
         /// bundle costs a comparison rather than a Halo 2 proof.
         #[test]
@@ -2376,7 +2394,13 @@ pub mod build {
             let rho = Option::<Rho>::from(Rho::from_bytes(&canon(17))).unwrap();
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(canon(18), &rho)).unwrap();
             let note = Option::<Note>::from(Note::from_parts(
-                a.address(), NoteValue::from_raw(1_000), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+                a.address(),
+                NoteValue::from_raw(1_000),
+                rho,
+                rseed,
+                orchard::note::NoteVersion::V2,
+            ))
+            .unwrap();
             let solo: [MerkleHashOrchard; 32] =
                 core::array::from_fn(|i| <MerkleHashOrchard as Hashable>::empty_root(Level::from(i as u8)));
 
@@ -2401,7 +2425,6 @@ pub mod build {
                 other => panic!("expected a cap error, got {other:?}"),
             }
         }
-
     }
 }
 

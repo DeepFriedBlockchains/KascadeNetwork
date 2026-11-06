@@ -37,9 +37,8 @@ use crate::model::stores::shielded::DbAnchorGcQueueStore;
 use crate::model::stores::shielded::{
     AnchorBlockStoreReader, AnchorProducersStoreReader, BurnReceipts, DbAnchorBlockStore, DbAnchorProducersStore,
     DbNullifierDiffStore, DbNullifierSetStore, DbShieldedAnchorSourceScoreStore, DbShieldedBurnStore, DbShieldedDevAccruedStore,
-    DbShieldedNullifierMuHashStore,
-    DbShieldedScanBlockStore, DbShieldedSupplyStore, DbShieldedTreeStore, NullifierDiffStoreReader, NullifierSetStore,
-    NullifierSetStoreReader, ShieldedBurnStoreReader, ShieldedNullifierMuHashStoreReader, ShieldedScanBlockData,
+    DbShieldedNullifierMuHashStore, DbShieldedScanBlockStore, DbShieldedSupplyStore, DbShieldedTreeStore, NullifierDiffStoreReader,
+    NullifierSetStore, NullifierSetStoreReader, ShieldedBurnStoreReader, ShieldedNullifierMuHashStoreReader, ShieldedScanBlockData,
     ShieldedScanBlockStoreReader, ShieldedSupplyStoreReader, ShieldedTreeStoreReader, SupplyTotals,
 };
 
@@ -370,8 +369,7 @@ impl From<StoreError> for ShieldedManagerError {
 /// Mixing the block hash in makes the root unique per block. There is no circularity:
 /// a block's coinbase commits its parent's shielded state, never its own notes.
 pub fn build_coinbase_mint(coinbase_tx: &Transaction, block_hash: Option<Hash>) -> Result<CoinbaseMint, ShieldedManagerError> {
-    let outputs: Vec<(&[u8], u64)> =
-        coinbase_tx.outputs.iter().map(|out| (out.script_public_key.script(), out.value)).collect();
+    let outputs: Vec<(&[u8], u64)> = coinbase_tx.outputs.iter().map(|out| (out.script_public_key.script(), out.value)).collect();
     Ok(CoinbaseMint::new(coinbase_notes_from_outputs(coinbase_tx.id(), &outputs, block_hash)?))
 }
 
@@ -1267,10 +1265,9 @@ impl ShieldedStateManager {
     /// attacker-controlled and a malicious syncer can permanently fork the syncee.
     pub fn verify_import_binding(md: &PruningPointShieldedMetadata, committed_state_root: [u8; 32]) -> Result<(), String> {
         if md.state_root != committed_state_root {
-            return Err(format!(
-                "imported shielded state root does not match the PoW-committed coinbase binding \
+            return Err("imported shielded state root does not match the PoW-committed coinbase binding \
                  (import is not anchored to the proof-verified header chain — refusing to seed)"
-            ));
+                .to_string());
         }
         Ok(())
     }
@@ -1340,8 +1337,7 @@ mod tests {
         let tx = Transaction::new(0, vec![], outputs, 0, SUBNETWORK_ID_COINBASE, 0, vec![]);
 
         // The archive keeps only what the scan record keeps: the script bytes and the value.
-        let record_outputs: Vec<(&[u8], u64)> =
-            tx.outputs.iter().map(|o| (o.script_public_key.script(), o.value)).collect();
+        let record_outputs: Vec<(&[u8], u64)> = tx.outputs.iter().map(|o| (o.script_public_key.script(), o.value)).collect();
 
         for seed_block in [None, Some(Hash::from_bytes([0xab; 32]))] {
             let from_tx = build_coinbase_mint(&tx, seed_block).expect("validation builds the mint");
@@ -1557,7 +1553,11 @@ mod tests {
         assert_eq!(processed, 1, "only the aged entry is drained");
 
         // The mapping survives - it points at the younger producer, not the aged one.
-        assert_eq!(mgr.anchor_block.get(&root).unwrap(), Some(young_block), "last-write-wins mapping owned by a younger block survives");
+        assert_eq!(
+            mgr.anchor_block.get(&root).unwrap(),
+            Some(young_block),
+            "last-write-wins mapping owned by a younger block survives"
+        );
         assert_eq!(mgr.anchor_producer_blocks(&root).unwrap(), vec![young_block], "only the aged producer row is removed");
         assert_eq!(mgr.anchor_gc.peek_upto(u64::MAX, 100).len(), 1, "the young queue entry stays");
 
@@ -2209,7 +2209,6 @@ mod tests {
     /// The backfill verifier must reproduce the exact frontier an honest range builds, and must
     /// reject any tampering. Without this the whole history-backfill path would be "trust the
     /// peer", which is precisely what it exists to avoid.
-    #[test]
     /// The capturing replay must emit a frontier for every labelled block, and each captured
     /// frontier must equal what a replay TRUNCATED at that block produces. That equality is the
     /// entire reason a checkpoint is trustworthy once the full replay verifies: a checkpoint is a
@@ -2217,9 +2216,8 @@ mod tests {
     #[test]
     fn captured_checkpoints_equal_truncated_replays() {
         // Three blocks, each contributing distinct leaves; label every one.
-        let blocks: Vec<(Vec<[u8; 32]>, Vec<Vec<u8>>)> = (0u32..3)
-            .map(|b| (vec![cmx(b * 10 + 1).to_bytes(), cmx(b * 10 + 2).to_bytes()], Vec::new()))
-            .collect();
+        type Blocks = Vec<(Vec<[u8; 32]>, Vec<Vec<u8>>)>;
+        let blocks: Blocks = (0u32..3).map(|b| (vec![cmx(b * 10 + 1).to_bytes(), cmx(b * 10 + 2).to_bytes()], Vec::new())).collect();
 
         let mut captured: Vec<(usize, FrontierState)> = Vec::new();
         let (final_frontier, leaves) = ShieldedStateManager::replay_frontier_streaming_capturing(
@@ -2245,8 +2243,8 @@ mod tests {
     /// Unlabelled blocks must produce NO checkpoint, so the caller controls spacing entirely.
     #[test]
     fn unlabelled_blocks_capture_nothing() {
-        let blocks: Vec<(Vec<[u8; 32]>, Vec<Vec<u8>>)> =
-            (0u32..4).map(|b| (vec![cmx(b + 1).to_bytes()], Vec::new())).collect();
+        type Blocks = Vec<(Vec<[u8; 32]>, Vec<Vec<u8>>)>;
+        let blocks: Blocks = (0u32..4).map(|b| (vec![cmx(b + 1).to_bytes()], Vec::new())).collect();
         let mut captured = 0usize;
         // Label only every 2nd block, mirroring how the verifier spaces checkpoints by index.
         ShieldedStateManager::replay_frontier_streaming_capturing(
@@ -2271,7 +2269,7 @@ mod tests {
         let bad = vec![[0xffu8; 32]];
         let mut captured = 0usize;
         let res = ShieldedStateManager::replay_frontier_streaming_capturing(
-            vec![Ok((Some(0usize), good, Vec::new())), Ok((Some(1usize), bad, Vec::new()))].into_iter(),
+            vec![Ok((Some(0usize), good, Vec::new())), Ok((Some(1usize), bad, Vec::new()))],
             |_, _| captured += 1,
         );
         assert!(matches!(res, Err(ReplayError::Data(_))), "tampered leaves must fail the replay, got {res:?}");
@@ -2280,6 +2278,7 @@ mod tests {
         assert!(captured <= 1, "must not capture past the failure point");
     }
 
+    #[test]
     fn history_replay_reproduces_frontier_and_detects_tampering() {
         use kaspa_consensus_core::api::ShieldedChainBlockData;
 

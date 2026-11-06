@@ -28,6 +28,13 @@ use crate::{
 };
 use kaspa_hashes::Hash;
 
+/// Raw shielded note-commitment tree frontier parts: `(size, last_leaf, ommers)`.
+/// Kept as a plain tuple so `kaspa-shielded-core` stays off this API boundary.
+type ShieldedTreeFrontierParts = (u64, Option<[u8; 32]>, Vec<[u8; 32]>);
+
+/// A page of indexed shielded history: `(records, has_more, next_index)`.
+type ShieldedHistoryPage = (Vec<(u64, ShieldedChainBlockData)>, bool, u64);
+
 pub use self::stats::{BlockCount, ConsensusStats};
 
 pub mod args;
@@ -543,7 +550,7 @@ pub trait ConsensusApi: Send + Sync {
     /// starts from: it reconstructs the frontier, then scans only blocks after
     /// `block`, yet still witnesses its notes against the live tip. Raw parts (rather
     /// than a `kaspa-shielded-core` type) keep that crate off this API boundary.
-    fn get_shielded_tree_frontier(&self, _block: Hash) -> ConsensusResult<(u64, Option<[u8; 32]>, Vec<[u8; 32]>)> {
+    fn get_shielded_tree_frontier(&self, _block: Hash) -> ConsensusResult<ShieldedTreeFrontierParts> {
         unimplemented!()
     }
 
@@ -661,11 +668,7 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    fn get_shielded_history_indexed_below(
-        &self,
-        _anchor: Hash,
-        _max_blocks: usize,
-    ) -> ConsensusResult<(Vec<(u64, ShieldedChainBlockData)>, bool, u64)> {
+    fn get_shielded_history_indexed_below(&self, _anchor: Hash, _max_blocks: usize) -> ConsensusResult<ShieldedHistoryPage> {
         unimplemented!()
     }
 

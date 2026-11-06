@@ -74,12 +74,10 @@ pub fn check_pow_gated(header: &Header, aux: Option<&AuxPow>, merged_mining_acti
     if native_ok {
         return (true, native_pow);
     }
-    if merged_mining_active {
-        if let Some(a) = aux {
-            let target = Uint256::from_compact_target_bits(header.bits);
-            if verify_aux_pow(a, header.hash, target) {
-                return (true, parent_pow(a));
-            }
+    if merged_mining_active && let Some(a) = aux {
+        let target = Uint256::from_compact_target_bits(header.bits);
+        if verify_aux_pow(a, header.hash, target) {
+            return (true, parent_pow(a));
         }
     }
     (false, native_pow)
@@ -146,10 +144,7 @@ mod tests {
             let mut next = Vec::with_capacity(level.len() / 2);
             let mut t = 0;
             while t < level.len() {
-                let node = match level[t] {
-                    None => None, // Kaspa keeps a node None when its left child is None
-                    Some(l) => Some(merkle_hash(l, level[t + 1].unwrap_or(ZERO_HASH))),
-                };
+                let node = level[t].map(|l| merkle_hash(l, level[t + 1].unwrap_or(ZERO_HASH)));
                 next.push(node);
                 t += 2;
             }
@@ -206,7 +201,7 @@ mod tests {
         let fc = zkas_header(2, EASY_BITS);
         let hfc = fc.hash;
         let cb = coinbase_committing(hfc);
-        let (parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
 
         assert!(verify_aux_pow(&aux, hfc, target(EASY_BITS)), "real mined parent, correct commitment → valid");
@@ -230,7 +225,7 @@ mod tests {
     fn aux_pow_rejects_wrong_commitment() {
         let fc = zkas_header(4, EASY_BITS);
         let cb = coinbase_committing(fc.hash);
-        let (parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
         // A different ZKas block cannot claim this parent's work.
         let other = zkas_header(999, EASY_BITS).hash;
@@ -243,7 +238,7 @@ mod tests {
         let fc = zkas_header(5, EASY_BITS);
         let hfc = fc.hash;
         let cb = coinbase_committing(hfc);
-        let (parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
         assert!(!verify_aux_pow(&aux, hfc, target(0)), "parent PoW does not clear an impossible target");
     }
@@ -256,7 +251,7 @@ mod tests {
         let fc = zkas_header(6, EASY_BITS);
         let hfc = fc.hash;
         let cb = coinbase_committing(hfc);
-        let (mut parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (mut parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         parent.hash_merkle_root = Hash::from_bytes([0x77u8; 32]); // not the real root
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
         assert!(!aux.verify_coinbase_inclusion(), "coinbase no longer folds to the (tampered) root");
@@ -268,7 +263,7 @@ mod tests {
         // A valid aux block: correct commitment + mined parent.
         let fc = zkas_header(42, EASY_BITS);
         let cb = coinbase_committing(fc.hash);
-        let (parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
 
         // Before activation the aux witness must have *no effect* — the gate is exactly
@@ -308,7 +303,7 @@ mod tests {
         let fc_a = zkas_header(10, EASY_BITS);
         let fc_b = zkas_header(11, EASY_BITS);
         let cb = coinbase_committing(fc_a.hash);
-        let (parent, branch) = mine_parent(&[cb.clone()], EASY_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), EASY_BITS);
         let aux = AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch };
         assert!(verify_aux_pow(&aux, fc_a.hash, target(EASY_BITS)), "legit for fc_a");
         assert!(!verify_aux_pow(&aux, fc_b.hash, target(EASY_BITS)), "same PoW cannot be stolen for fc_b");
@@ -341,7 +336,7 @@ mod tests {
         fc.nonce = nonce;
         fc.finalize();
         let cb = coinbase_committing(fc.hash);
-        let (parent, branch) = mine_parent(&[cb.clone()], HARD_BITS);
+        let (parent, branch) = mine_parent(std::slice::from_ref(&cb), HARD_BITS);
 
         let mut header = fc.clone();
         header.aux_pow = Some(Box::new(AuxPow { parent_header: parent, parent_coinbase: cb, coinbase_merkle_branch: branch }));

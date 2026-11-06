@@ -781,18 +781,29 @@ async fn json_test(file_path: &str, concurrency: bool) {
             None
         };
 
+        // These goref DAGs are upstream KIP-0004 difficulty vectors: every block's bits
+        // were produced by the pure sampled DAA. The devnet launch schedule deliberately
+        // pins difficulty to the genesis target for the first `low_difficulty_start_blocks`
+        // and then ramps a ceiling for another `difficulty_ramp_blocks`, overriding the DAA
+        // and making these historical vectors invalid. Disable it for this test so the
+        // vectors keep validating the DAA itself; the launch schedule is covered by its
+        // own tests in `consensus::processes::difficulty`.
         if let Some(mut params) = parsed_params {
             if !proof_exists {
                 let second_line = lines.next().unwrap();
                 let genesis_block = json_line_to_block(second_line);
                 params.genesis = (genesis_block.header.as_ref(), DEVNET_PARAMS.genesis.coinbase_payload).into();
             }
+            params.low_difficulty_start_blocks = 0;
+            params.difficulty_ramp_blocks = 0;
             params
         } else {
             let genesis_block = json_line_to_block(first_line);
             let mut params = DEVNET_PARAMS;
             params.genesis = (genesis_block.header.as_ref(), params.genesis.coinbase_payload).into();
             params.min_difficulty_window_size = params.difficulty_window_size;
+            params.low_difficulty_start_blocks = 0;
+            params.difficulty_ramp_blocks = 0;
             params
         }
     };

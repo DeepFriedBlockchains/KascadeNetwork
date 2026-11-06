@@ -20,8 +20,7 @@ use kaspa_core::{debug, info, time::unix_now, warn};
 use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
 use kaspa_p2p_lib::{
-    PeerKey,
-    IncomingRoute, Router,
+    IncomingRoute, PeerKey, Router,
     common::ProtocolError,
     convert::{
         header::{HeaderFormat, Versioned},
@@ -361,13 +360,11 @@ impl IbdFlow {
         // Ask this peer only if it is one we have not already asked, and only while under the
         // peer budget. Both conditions are evaluated once, under the lock, so a concurrent IBD
         // cannot slip a second ask to the same peer through.
-        let should_ask = self.ctx.config.wants_shielded_history()
-            && !SHIELDED_HISTORY_BACKFILL_DONE.load(Ordering::SeqCst)
-            && {
-                let mut guard = SHIELDED_HISTORY_ASKED_PEERS.lock().unwrap();
-                let asked = guard.get_or_insert_with(HashSet::new);
-                asked.len() < SHIELDED_HISTORY_MAX_PEERS && asked.insert(self.router.key())
-            };
+        let should_ask = self.ctx.config.wants_shielded_history() && !SHIELDED_HISTORY_BACKFILL_DONE.load(Ordering::SeqCst) && {
+            let mut guard = SHIELDED_HISTORY_ASKED_PEERS.lock().unwrap();
+            let asked = guard.get_or_insert_with(HashSet::new);
+            asked.len() < SHIELDED_HISTORY_MAX_PEERS && asked.insert(self.router.key())
+        };
         if should_ask {
             match self.backfill_shielded_history(&session).await {
                 Ok(()) => {

@@ -129,7 +129,9 @@ impl Gpu {
                     // not no GPU at all, and certainly not a filter nobody has checked.
                     // The self-test poisons on a canary mismatch; clear that, because
                     // what is being disqualified here is the filter, not the device.
-                    log::error!("GPU filter self-test FAILED ({why}); falling back to the point ABI. Results are unaffected, only speed.");
+                    log::error!(
+                        "GPU filter self-test FAILED ({why}); falling back to the point ABI. Results are unaffected, only speed."
+                    );
                     gpu.filter = None;
                     gpu.poisoned.store(false, Ordering::Relaxed);
                 } else {
@@ -152,7 +154,9 @@ impl Gpu {
 
     fn poison(&self, why: &str) {
         if !self.poisoned.swap(true, Ordering::Relaxed) {
-            log::error!("GPU disabled for the rest of this process: {why}. Falling back to the CPU — results are unaffected, only speed.");
+            log::error!(
+                "GPU disabled for the rest of this process: {why}. Falling back to the CPU — results are unaffected, only speed."
+            );
         }
     }
 
@@ -187,18 +191,14 @@ impl Gpu {
 
         let mut input = vec![0u32; idx.len() * 2 * LIMBS];
         for (k, a) in affine.iter().enumerate() {
-            let c = match Option::<pasta_curves::arithmetic::Coordinates<pallas::Affine>>::from(
+            let c = Option::<pasta_curves::arithmetic::Coordinates<pallas::Affine>>::from(
                 <pallas::Affine as pasta_curves::arithmetic::CurveAffine>::coordinates(a),
-            ) {
-                Some(c) => c,
-                None => return None, // the identity has no affine coordinates
-            };
+            )?;
             let xb = <pallas::Base as group::ff::PrimeField>::to_repr(c.x());
             let yb = <pallas::Base as group::ff::PrimeField>::to_repr(c.y());
             for l in 0..LIMBS {
                 input[k * 2 * LIMBS + l] = u32::from_le_bytes([xb[l * 4], xb[l * 4 + 1], xb[l * 4 + 2], xb[l * 4 + 3]]);
-                input[k * 2 * LIMBS + LIMBS + l] =
-                    u32::from_le_bytes([yb[l * 4], yb[l * 4 + 1], yb[l * 4 + 2], yb[l * 4 + 3]]);
+                input[k * 2 * LIMBS + LIMBS + l] = u32::from_le_bytes([yb[l * 4], yb[l * 4 + 1], yb[l * 4 + 2], yb[l * 4 + 3]]);
             }
         }
 
@@ -506,11 +506,7 @@ impl Gpu {
 impl Gpu {
     /// The shape `shielded-core`'s hook expects: scalar and points in, affine shared
     /// secrets out, `None` meaning "use the CPU".
-    pub fn batch_agree_points(
-        &self,
-        ivk: &pallas::Scalar,
-        epks: &[Option<pallas::Point>],
-    ) -> Option<Vec<Option<pallas::Affine>>> {
+    pub fn batch_agree_points(&self, ivk: &pallas::Scalar, epks: &[Option<pallas::Point>]) -> Option<Vec<Option<pallas::Affine>>> {
         self.batch_agree(ivk, epks)
     }
 }

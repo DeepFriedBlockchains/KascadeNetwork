@@ -114,7 +114,7 @@ pub fn create_merkle_witness<H: Hasher>(leaf_hashes: &[Hash], index: usize) -> a
     while level.len() > 1 {
         // The sibling is the pair-partner (padding a missing right child with ZERO_HASH), exactly as
         // the reduction below pairs (i, i+1).
-        let sib = if idx % 2 == 0 { if idx + 1 < level.len() { level[idx + 1] } else { ZERO_HASH } } else { level[idx - 1] };
+        let sib = if idx.is_multiple_of(2) { if idx + 1 < level.len() { level[idx + 1] } else { ZERO_HASH } } else { level[idx - 1] };
         branch.push(sib);
         let mut next = alloc::vec::Vec::with_capacity(level.len().div_ceil(2));
         let mut i = 0;
@@ -152,7 +152,7 @@ pub fn verify_merkle_witness<H: Hasher>(leaf: Hash, index: usize, branch: &[Hash
     let mut acc = leaf;
     let mut idx = index;
     for sibling in branch {
-        acc = if idx % 2 == 0 {
+        acc = if idx.is_multiple_of(2) {
             merkle_hash_with_hasher(acc, *sibling, H::default())
         } else {
             merkle_hash_with_hasher(*sibling, acc, H::default())

@@ -41,6 +41,7 @@ use kaspa_utils_tower::{
     middleware::{CountBytesBody, MapRequestBodyLayer, MapResponseBodyLayer, ServiceBuilder},
 };
 use regex::Regex;
+use std::sync::RwLock;
 use std::{
     sync::{
         Arc,
@@ -51,7 +52,6 @@ use std::{
 use tokio::sync::Mutex;
 use tonic::Streaming;
 use tonic::codec::CompressionEncoding;
-use std::sync::RwLock;
 
 /// A SOCKS5 proxy (host:port) to reach the gRPC server through. The on-device wallet
 /// engine sets this to Orbot for Tor mode; the node and hosted daemon leave it None,
@@ -86,7 +86,7 @@ async fn connect_channel(url: &str, request_timeout: u64) -> Result<tonic::trans
                     async move {
                         let stream = tokio_socks::tcp::Socks5Stream::connect(proxy.as_str(), (host.as_str(), port))
                             .await
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                            .map_err(|e| std::io::Error::other(e.to_string()))?;
                         Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(stream.into_inner()))
                     }
                 }))

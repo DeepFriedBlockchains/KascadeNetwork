@@ -113,6 +113,8 @@ fn main() {
     );
     println!(
         "{:<7} END-TO-END {:.3} us/action (min) / {:.3} (med)   [shared per page: decompress {dec_ms:.1} ms, pack {prep_ms:.1} ms]",
-        "", lo * 1e3 / actions, med * 1e3 / actions
+        "",
+        lo * 1e3 / actions,
+        med * 1e3 / actions
     );
 }

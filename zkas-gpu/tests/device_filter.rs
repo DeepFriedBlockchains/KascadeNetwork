@@ -20,7 +20,7 @@
 //! it reports that and passes: "no GPU" is a valid configuration and the CPU path is
 //! the same answer.
 
-use group::{Curve, Group, GroupEncoding, ff::Field};
+use group::{ff::Field, Curve, Group, GroupEncoding};
 use kaspa_shielded_core::wallet::{self, CompactActionRecord};
 use pasta_curves::pallas;
 use zkas_gpu::Gpu;
@@ -86,10 +86,8 @@ fn device_filter_finds_exactly_what_orchard_finds() {
     let bob_seed = [5u8; 32];
     let alice = wallet::ShieldedKeys::from_seed(alice_seed).expect("seed");
     let bob = wallet::ShieldedKeys::from_seed(bob_seed).expect("seed");
-    let wire_a = wallet::build_output_only_bundle(pk, alice.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng())
-        .expect("build alice");
-    let wire_b =
-        wallet::build_output_only_bundle(pk, bob.address(), 777, &[0x33u8; 32], b"ctx", rand::rng()).expect("build bob");
+    let wire_a = wallet::build_output_only_bundle(pk, alice.address(), 4242, &[0x33u8; 32], b"ctx", rand::rng()).expect("build alice");
+    let wire_b = wallet::build_output_only_bundle(pk, bob.address(), 777, &[0x33u8; 32], b"ctx", rand::rng()).expect("build bob");
     let rec_a: Vec<CompactActionRecord> = wire_a.actions.iter().map(CompactActionRecord::from_wire).collect();
     let rec_b: Vec<CompactActionRecord> = wire_b.actions.iter().map(CompactActionRecord::from_wire).collect();
 
@@ -130,10 +128,8 @@ fn device_filter_finds_exactly_what_orchard_finds() {
         assert_eq!(want.len(), expect_n, "{who}: orchard's own count");
 
         // The device's answer, through the production entry point.
-        let got = wallet::scan_compact_gpu_filter(&prepared, &page, &prep, |xy, rows, ct0| {
-            gpu.batch_filter(&sc, xy, rows, ct0)
-        })
-        .unwrap_or_else(|| panic!("{who}: the device declined; a decline is legal but then nothing is tested"));
+        let got = wallet::scan_compact_gpu_filter(&prepared, &page, &prep, |xy, rows, ct0| gpu.batch_filter(&sc, xy, rows, ct0))
+            .unwrap_or_else(|| panic!("{who}: the device declined; a decline is legal but then nothing is tested"));
 
         assert_eq!(got.len(), want.len(), "{who}: same number of notes as orchard");
         for (g, w) in got.iter().zip(want.iter()) {
@@ -188,12 +184,7 @@ fn a_declining_device_is_not_an_empty_answer() {
     let ivk = wallet::ivk_from_seed([2u8; 32]).unwrap();
     let prepared = ivk.prepare();
     let mut rng = rand::rng();
-    let mut rec = CompactActionRecord {
-        nullifier: [0u8; 32],
-        cmx: [0u8; 32],
-        ephemeral_key: [0u8; 32],
-        enc_ciphertext: [0u8; 52],
-    };
+    let mut rec = CompactActionRecord { nullifier: [0u8; 32], cmx: [0u8; 32], ephemeral_key: [0u8; 32], enc_ciphertext: [0u8; 52] };
     rec.ephemeral_key = pallas::Point::random(&mut rng).to_affine().to_bytes();
     let page = vec![rec; 1000];
     let prep = wallet::prepare_epks(&epks_of(&page));
@@ -215,8 +206,7 @@ fn an_unsendable_ephemeral_key_is_forced_through_not_dropped() {
 
     let ivk = wallet::ivk_from_seed([2u8; 32]).unwrap();
     let prepared = ivk.prepare();
-    let mut rec =
-        CompactActionRecord { nullifier: [0u8; 32], cmx: [0u8; 32], ephemeral_key: [0u8; 32], enc_ciphertext: [0u8; 52] };
+    let mut rec = CompactActionRecord { nullifier: [0u8; 32], cmx: [0u8; 32], ephemeral_key: [0u8; 32], enc_ciphertext: [0u8; 52] };
     rec.ephemeral_key = pallas::Point::generator().to_affine().to_bytes();
     let page = vec![rec; 3];
 
@@ -269,8 +259,7 @@ fn device_intermediates_match_the_host_stage_by_stage() {
     for i in 0..N {
         let secret = (pallas::Point::from(pts[i]) * ivk).to_affine();
         let want_sec = secret.to_bytes();
-        let got_sec: Vec<u8> =
-            (0..8).flat_map(|k| dbg[i * 17 + k].to_le_bytes()).collect();
+        let got_sec: Vec<u8> = (0..8).flat_map(|k| dbg[i * 17 + k].to_le_bytes()).collect();
         assert_eq!(&got_sec[..], &want_sec[..], "shared secret differs at {i}: the ladder or the inversion");
 
         let want_key = Params::new()
