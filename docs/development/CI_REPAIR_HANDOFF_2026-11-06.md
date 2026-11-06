@@ -2,9 +2,9 @@
 
 Branch: `fix/public-ci-validation-20261106`
 Base: `feature/public-development-20261106`
-Head commit: `4b493c0d15d87e2efc2da87b9089cbc5ed133357`
+Head commit: `aa00ff1` (see §6 for follow-up commits)
 Pull request: <https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/2>
-Validation run: <https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42206485413>
+Latest validation run: <https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42215101257>
 
 This document records the public-repository CI repair work performed while ChatGPT
 Work was unavailable. It is intended to let Work resume without re-deriving any of
@@ -124,7 +124,68 @@ commands were run with `nohup ... &` plus polling. This is why a full
 `cargo nextest run --workspace` was not completed locally; GitHub's `Test Suite`
 job is the authoritative full run.
 
-## 6. GitHub Actions status — run 42206485413
+## 6. Follow-up `Test Suite` failures and fixes
+
+The first `Test Suite` run (42206485413, head `4b493c0`) failed at
+`goref_custom_pruning_depth_test`. Two further causes were found and fixed on
+the same branch; the remaining one is a genuine blocker.
+
+### 6.1 Stale goref `blockrate` schema — fixed (`55a3436`)
+
+`BlockrateParams` gained required `shielded_anchor_depth` and
+`max_shielded_anchor_age` fields. The three goref fixtures still carried the old
+`blockrate` object, so `OverrideParams` deserialization failed and `json_test`
+fell back to parsing the params line as a block, panicking with
+`missing field 'header'`. The fixtures now include the two fields with values
+that satisfy `shielded_anchor_depth < max_shielded_anchor_age <
+pruning_depth - finality_depth` for each fixture's depth.
+
+### 6.2 DEVNET launch schedule vs upstream DAA vectors — fixed (`aa00ff1`)
+
+With parsing fixed, the goref tests failed with a difficulty mismatch
+(`505505215` computed vs `505527324` expected). `DEVNET_PARAMS` enables the
+KASCADE launch schedule (`low_difficulty_start_blocks = 50_000`,
+`difficulty_ramp_blocks = 200_000`), which pins difficulty to the genesis target
+and then ramps a ceiling, intentionally overriding the pure DAA. The goref DAGs
+are upstream KIP-0004 vectors whose bits were produced by the pure DAA. The
+launch schedule is now disabled **only inside `json_test`'s synthetic-DAG
+config**; no production parameter or consensus rule is changed, and the launch
+schedule keeps its own dedicated tests.
+
+### 6.3 GENUINE BLOCKER: coinbase payload format vs upstream goref data
+
+After 6.2, the goref tests fail with:
+
+```
+bad coinbase payload: coinbase payload length is 53 bytes but it needs to be
+at least 129 bytes long in order to accommodate the script public key
+```
+
+KASCADE's coinbase payload unconditionally includes a 32-byte shielded state
+commitment (`LENGTH_OF_SHIELDED_COMMITMENT` in
+`consensus/src/processes/coinbase.rs`). `MIN_PAYLOAD_LENGTH` is therefore 51
+bytes, and the parser reads the script-public-key length from offset 50. The
+upstream goref blocks carry 53-byte pre-shielded payloads, so the parser reads a
+script-key byte as the length and rejects the block. There is no legacy or
+fork-gated payload path (`serialize_coinbase_payload` / `deserialize_coinbase_payload`
+always include the commitment; `shielded_coinbase: false` on simnet does not
+change the layout).
+
+This cannot be fixed without either (a) changing consensus rules to accept the
+legacy payload (explicitly forbidden, and unsafe), or (b) regenerating the goref
+DAG fixtures under KASCADE rules — which changes every block hash and parent
+reference and requires running a KASCADE node to produce a valid DAG. Neither is
+in scope for a CI-repair change, and the sandbox lost its Rust toolchain before
+this could be attempted. **The three goref tests therefore remain red and
+`Test Suite` cannot go green until the fixtures are regenerated or the tests are
+retired by the owners.**
+
+Affected tests: `goref_custom_pruning_depth_test`, `goref_notx_test`,
+`goref_notx_concurrent_test` (and the other `goref_*` tests share the same
+fixtures). The secondary `DB is expected to have no strong references` panic is
+just teardown noise after the primary failure.
+
+## 7. GitHub Actions status — run 42215101257 (head `aa00ff1`)
 
 | Job | Status |
 | --- | --- |
@@ -135,20 +196,15 @@ job is the authoritative full run.
 | Build WASM32 SDK | success |
 | Lints | success |
 | Build Linux Release | success |
-| Test Suite | in progress at handoff time |
+| Test Suite | failure — 1129 passed, 3 failed (goref coinbase blocker) |
 
-`Test Suite` is the only check not yet confirmed green. If it fails, pull the
-logs with:
+## 8. Remaining work for ChatGPT Work
 
-```bash
-gh run view 42206485413 --repo DeepFriedBlockchains/KascadeNetwork --log-failed
-```
-
-## 7. Remaining work for ChatGPT Work
-
-1. Confirm `Test Suite` on run `42206485413`; if it fails, diagnose from
-   `--log-failed` and fix on the same branch (normal commit + push, no force).
-2. Run a full `cargo nextest run --workspace` on a machine with adequate disk.
+1. Resolve the coinbase-payload blocker (§6.3): regenerate the goref DAG
+   fixtures under KASCADE rules, or retire the upstream goref tests with owner
+   sign-off. Do not weaken the coinbase parser to accept legacy payloads.
+2. Run a full `cargo nextest run --workspace` on a machine with adequate disk
+   (the sandbox lost its Rust toolchain mid-task, so later validation is CI-only).
 3. Run `wasm-pack test --node` end-to-end for the five wasm crates.
 4. After PR #2 merges into `feature/public-development-20261106`, rerun PR #1.
 5. Consider distinguishing `push` from `pull_request` in the concurrency group
