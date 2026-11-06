@@ -264,7 +264,31 @@ Because regeneration changes every block hash and parent reference, verify:
 
 ---
 
-## 9. Remaining work / handoff
+## 9. Verified CI results (PR #3, run 42221177157, head `277790e`)
+
+`Tests` workflow — **7 of 8 jobs success**, `Test Suite` failure (expected):
+
+| Job | Result |
+|---|---|
+| Check | success |
+| Check no_std | success |
+| Check WASM32 | success |
+| Test WASM32 | success |
+| Build WASM32 SDK | success |
+| Lints (`-D warnings`) | success |
+| Build Linux Release | success |
+| Test Suite | failure — same 3 goref tests, same coinbase error |
+
+Importantly, `Lints` and `Build Linux Release` both compile `simpa`, so the new
+`--disable-launch-schedule` flag is valid and warning-clean. `Test Suite` fails on
+exactly `goref_notx_test`, `goref_notx_concurrent_test`, and
+`goref_custom_pruning_depth_test` with the unchanged coinbase-payload error — i.e.
+**no new regressions**. The fixtures are intentionally unchanged in this PR; the
+failure disappears once §8 is run on a build-capable machine.
+
+---
+
+## 10. Remaining work / handoff
 
 - **Blocked here:** actual regeneration (needs a build-capable runner; see §6).
 - **Next owner:** run §8 on a machine with ≥12 GB disk and the full toolchain,
