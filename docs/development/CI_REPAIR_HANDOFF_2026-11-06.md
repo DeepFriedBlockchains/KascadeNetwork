@@ -185,6 +185,18 @@ Affected tests: `goref_custom_pruning_depth_test`, `goref_notx_test`,
 fixtures). The secondary `DB is expected to have no strong references` panic is
 just teardown noise after the primary failure.
 
+**Update (2026-11-06, Option A investigation).** Feasibility of regeneration was
+investigated on branch `feature/goref-fixture-regeneration-20261106`. The
+first-party generator `simpa` builds blocks through KASCADE's own consensus path
+and *can* produce valid replacement vectors without touching production consensus
+rules. However, executing it is blocked by the sandbox: no Rust toolchain, no C/C++
+toolchain, and only 2.6 GB free disk (a release build filled the 8.8 GB root to
+100% after 181 crates). No vectors were fabricated. Full evidence, an independent
+Rust-free verifier (`scripts/verify-goref-fixtures.py`), a hardened runbook
+(`simpa/regenerate-goref-fixtures.sh`), an opt-in `simpa --disable-launch-schedule`
+flag, and the preserved pristine originals are documented in
+`docs/development/GOREF_FIXTURE_REGENERATION_2026-11-06.md`.
+
 ## 7. GitHub Actions status — run 42215101257 (head `aa00ff1`)
 
 | Job | Status |
@@ -200,9 +212,12 @@ just teardown noise after the primary failure.
 
 ## 8. Remaining work for ChatGPT Work
 
-1. Resolve the coinbase-payload blocker (§6.3): regenerate the goref DAG
-   fixtures under KASCADE rules, or retire the upstream goref tests with owner
-   sign-off. Do not weaken the coinbase parser to accept legacy payloads.
+1. Resolve the coinbase-payload blocker (§6.3): run
+   `simpa/regenerate-goref-fixtures.sh` on a build-capable machine (≥12 GB disk,
+   Rust 1.91.0, C/C++ toolchain) to regenerate the goref DAG fixtures under
+   KASCADE rules — see `docs/development/GOREF_FIXTURE_REGENERATION_2026-11-06.md`.
+   Alternatively retire the upstream goref tests with owner sign-off. Do not
+   weaken the coinbase parser to accept legacy payloads.
 2. Run a full `cargo nextest run --workspace` on a machine with adequate disk
    (the sandbox lost its Rust toolchain mid-task, so later validation is CI-only).
 3. Run `wasm-pack test --node` end-to-end for the five wasm crates.
@@ -211,7 +226,7 @@ just teardown noise after the primary failure.
    so same-SHA runs do not cancel each other.
 6. Do not duplicate this repair work; it is already committed and pushed.
 
-## 8. Reproduction commands
+## 9. Reproduction commands
 
 ```bash
 git fetch origin
