@@ -130,6 +130,15 @@ struct Args {
     #[arg(long)]
     override_params_output: Option<String>,
 
+    /// Zero the KASCADE launch difficulty schedule (`low_difficulty_start_blocks` and
+    /// `difficulty_ramp_blocks`) so the generated vectors exercise the sampled DAA
+    /// directly. This mirrors the `json_test` configuration in
+    /// `testing/integration/src/consensus_integration_tests.rs`; without it, a DAG
+    /// shorter than the low-difficulty window has a constant difficulty and cannot
+    /// validate the DAA. Test tooling only — production consensus params are untouched.
+    #[arg(long, default_value_t = false)]
+    disable_launch_schedule: bool,
+
     #[arg(long)]
     blocks_json_gz_output_path: Option<String>,
 }
@@ -353,6 +362,13 @@ fn apply_args_to_consensus_params(args: &Args, params: &mut Params) {
     // We have no actual PoW in the simulation, so the true max is most reflective,
     // however we avoid the actual max since it is reserved for the DB prefix scheme
     params.max_block_level = BlockLevel::MAX - 1;
+    // Optional: disable the KASCADE launch difficulty schedule so generated vectors
+    // exercise the sampled DAA (see `--disable-launch-schedule`). `difficulty_ramp_blocks
+    // == 0` is the documented "schedule disabled" sentinel.
+    if args.disable_launch_schedule {
+        params.low_difficulty_start_blocks = 0;
+        params.difficulty_ramp_blocks = 0;
+    }
     // params.genesis.timestamp = 0;
     if args.testnet11 {
         info!(
