@@ -1095,9 +1095,7 @@ impl ConsensusApi for Consensus {
             .thread_name(|i| format!("shielded-replay-{i}"))
             .build()
             .map_err(|e| ConsensusError::GeneralOwned(format!("cannot build shielded replay pool: {e}")))?;
-        kaspa_core::info!(
-            "shielded history: verifying with {replay_threads} thread(s), leaving a core for p2p"
-        );
+        kaspa_core::info!("shielded history: verifying with {replay_threads} thread(s), leaving a core for p2p");
         let indices: Vec<u64> = (0..=base_index).collect();
         let total_blocks = indices.len() as u64;
         let started = std::time::Instant::now();
@@ -1130,7 +1128,8 @@ impl ConsensusApi for Consensus {
             }
             // Reads stay sequential: RocksDB point lookups are a small fraction of the cost, and
             // keeping them on one thread avoids contending with the derivation workers.
-            let raw: Vec<Result<Option<(u64, Hash, ShieldedScanBlockData)>, String>> = chunk
+            type ScanRead = Result<Option<(u64, Hash, ShieldedScanBlockData)>, String>;
+            let raw: Vec<ScanRead> = chunk
                 .iter()
                 .map(|&index| {
                     let hash = sc.get_by_index(index).map_err(|e| format!("chain index gap at {index}: {e}"))?;
@@ -1145,31 +1144,31 @@ impl ConsensusApi for Consensus {
                 })
                 .collect();
             replay_pool.install(|| {
-            raw.into_par_iter()
-                .map(|entry| {
-                    let Some((index, hash, d)) = entry? else { return Ok((None, Vec::new(), Vec::new())) };
-                    // Label only the blocks that become checkpoints. The interval is in CHAIN
-                    // INDEX, not DAA score: DAA advances by a block's whole mergeset, so spacing
-                    // on it leaves uneven and occasionally huge gaps between anchors.
-                    let label = (index % SHIELDED_REPLAY_CHECKPOINT_INTERVAL == 0).then_some(hash);
-                    // Prefer the commitments consensus computed and stored. Deriving is the
-                    // fallback for records written before that field existed; it uses the SAME
-                    // function validation uses, gated on the same fork activation, so a replay
-                    // cannot drift from the chain.
-                    let coinbase = if !d.coinbase_commitments.is_empty() {
-                        d.coinbase_commitments.clone()
-                    } else {
-                        let outputs: Vec<(&[u8], u64)> = d.coinbase_outputs.iter().map(|(s, v)| (s.as_slice(), *v)).collect();
-                        let seed_block = seed_activation.is_active(d.daa_score).then_some(hash);
-                        coinbase_notes_from_outputs(d.coinbase_txid, &outputs, seed_block)
-                            .map_err(|e| format!("cannot derive coinbase commitments for {hash}: {e:?}"))?
-                            .iter()
-                            .map(|n| n.commitment.to_bytes())
-                            .collect()
-                    };
-                    Ok((label, coinbase, d.accepted.iter().map(|t| t.action_bytes.clone()).collect()))
-                })
-                .collect::<Vec<_>>()
+                raw.into_par_iter()
+                    .map(|entry| {
+                        let Some((index, hash, d)) = entry? else { return Ok((None, Vec::new(), Vec::new())) };
+                        // Label only the blocks that become checkpoints. The interval is in CHAIN
+                        // INDEX, not DAA score: DAA advances by a block's whole mergeset, so spacing
+                        // on it leaves uneven and occasionally huge gaps between anchors.
+                        let label = (index % SHIELDED_REPLAY_CHECKPOINT_INTERVAL == 0).then_some(hash);
+                        // Prefer the commitments consensus computed and stored. Deriving is the
+                        // fallback for records written before that field existed; it uses the SAME
+                        // function validation uses, gated on the same fork activation, so a replay
+                        // cannot drift from the chain.
+                        let coinbase = if !d.coinbase_commitments.is_empty() {
+                            d.coinbase_commitments.clone()
+                        } else {
+                            let outputs: Vec<(&[u8], u64)> = d.coinbase_outputs.iter().map(|(s, v)| (s.as_slice(), *v)).collect();
+                            let seed_block = seed_activation.is_active(d.daa_score).then_some(hash);
+                            coinbase_notes_from_outputs(d.coinbase_txid, &outputs, seed_block)
+                                .map_err(|e| format!("cannot derive coinbase commitments for {hash}: {e:?}"))?
+                                .iter()
+                                .map(|n| n.commitment.to_bytes())
+                                .collect()
+                        };
+                        Ok((label, coinbase, d.accepted.iter().map(|t| t.action_bytes.clone()).collect()))
+                    })
+                    .collect::<Vec<_>>()
             })
         });
 
@@ -2544,7 +2543,6 @@ mod tests {
     /// The index reaching genesis is NOT enough once any of it came from a peer: between the
     /// backfill writing the entries and the replay verifying them, `complete` must be false —
     /// that window was reported live as `history_complete: true` at 20% of the replay.
-    #[test]
     /// A malicious backfill peer must not be able to re-number our chain index with an
     /// absurd claimed anchor index: the wedge is that verification and the purge both walk
     /// 0..anchor_index densely. The bound is trustless - a chain index can never exceed
@@ -2578,6 +2576,7 @@ mod tests {
         assert!(msg.contains("can never exceed the DAA score"), "rejected for the right reason: {msg}");
     }
 
+    #[test]
     fn history_status_is_incomplete_after_a_backfill_until_verified() {
         let config = Config::new(MAINNET_PARAMS);
         let tc = TestConsensus::new(&config);

@@ -98,6 +98,18 @@ fn _difficulty_desc(target: Uint320) -> String {
 /// floor is hit, the moment the ceiling drops below real network difficulty.
 const RAMP_TARGET_FLOOR_BITS: u32 = 32;
 
+/// The ZKas launch difficulty schedule bounds, in blue-score units.
+///
+/// Bundled so the manager constructor keeps a manageable argument list; the two
+/// values are always supplied together from `Params`.
+#[derive(Clone, Copy, Debug)]
+pub struct DifficultyLaunchSchedule {
+    /// While `blue_score <= this`, difficulty is pinned to the genesis target.
+    pub low_difficulty_end_blue_score: u64,
+    /// At/after this blue score the launch ceiling is removed. `0` disables the schedule.
+    pub ramp_end_blue_score: u64,
+}
+
 /// A difficulty manager based on sampled block windows, implementing [KIP-0004](https://github.com/kaspanet/kips/blob/master/kip-0004.md)
 #[derive(Clone)]
 pub struct SampledDifficultyManager<T: HeaderStoreReader, U: GhostdagStoreReader> {
@@ -135,8 +147,7 @@ impl<T: HeaderStoreReader, U: GhostdagStoreReader> SampledDifficultyManager<T, U
         min_difficulty_window_size: usize,
         difficulty_sample_rate: u64,
         target_time_per_block: u64,
-        low_difficulty_end_blue_score: u64,
-        ramp_end_blue_score: u64,
+        launch_schedule: DifficultyLaunchSchedule,
     ) -> Self {
         Self::check_min_difficulty_window_size(difficulty_window_size, min_difficulty_window_size);
         Self {
@@ -150,8 +161,8 @@ impl<T: HeaderStoreReader, U: GhostdagStoreReader> SampledDifficultyManager<T, U
             min_difficulty_window_size,
             difficulty_sample_rate,
             target_time_per_block,
-            low_difficulty_end_blue_score,
-            ramp_end_blue_score,
+            low_difficulty_end_blue_score: launch_schedule.low_difficulty_end_blue_score,
+            ramp_end_blue_score: launch_schedule.ramp_end_blue_score,
         }
     }
 

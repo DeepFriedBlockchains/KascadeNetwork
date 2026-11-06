@@ -574,7 +574,10 @@ pub struct DbAnchorGcQueueStore {
 
 impl DbAnchorGcQueueStore {
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
-        Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchorGcQueue.into()) }
+        Self {
+            db: Arc::clone(&db),
+            access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchorGcQueue.into()),
+        }
     }
 
     pub fn clone_with_new_cache(&self, cache_policy: CachePolicy) -> Self {
@@ -834,6 +837,7 @@ pub struct ShieldedScanBlockData {
     ///      with EOF tolerance (the `UtxoEntry` pattern). Handles pre-field records; requires
     ///      rewriting records already written WITH the field in its current position.
     ///   2. Prefix future records with an explicit version byte and decode by version.
+    ///
     /// Do NOT assume serde papers over the layout change — it does not.
     #[serde(default)]
     pub coinbase_commitments: Vec<[u8; 32]>,
@@ -934,10 +938,7 @@ impl ShieldedScanBlockStoreReader for DbShieldedScanBlockStore {
             // up — the two are distinguished by which one decodes, since a wrong guess
             // overruns the buffer.
             Err(_) => {
-                let db_key = kaspa_database::prelude::DbKey::new(
-                    &[DatabaseStorePrefixes::ShieldedScanBlock.into()][..],
-                    block,
-                );
+                let db_key = kaspa_database::prelude::DbKey::new(&[DatabaseStorePrefixes::ShieldedScanBlock.into()][..], block);
                 match self.db.get_pinned(&db_key)? {
                     Some(slice) => match bincode::deserialize::<LegacyShieldedScanBlockData>(&slice) {
                         Ok(legacy) => Ok(Some(legacy.into())),
@@ -959,7 +960,6 @@ mod tests {
     use kaspa_database::create_temp_db;
     use kaspa_database::prelude::ConnBuilder;
 
-    #[test]
     /// `#[serde(default)]` does NOT give bincode forward/backward compatibility.
     ///
     /// bincode is non-self-describing: fields are read POSITIONALLY with no names, so a record
@@ -971,7 +971,6 @@ mod tests {
     /// Consequence if ignored: a node upgraded to a binary carrying this field can no longer read
     /// the scan records IT ITSELF wrote earlier, so `GetShieldedBlocks` starts failing and wallet
     /// history serving breaks on upgrade.
-    #[test]
     /// The repair for that incompatibility: one reader, both layouts.
     ///
     /// A node upgraded across the `coinbase_commitments` addition, wrote records at the
@@ -1018,8 +1017,7 @@ mod tests {
         );
 
         // ...and decodes correctly as legacy, carrying no commitments.
-        let recovered: ShieldedScanBlockData =
-            bincode::deserialize::<LegacyShieldedScanBlockData>(&legacy_bytes).unwrap().into();
+        let recovered: ShieldedScanBlockData = bincode::deserialize::<LegacyShieldedScanBlockData>(&legacy_bytes).unwrap().into();
         assert_eq!(recovered.blue_score, 7);
         assert_eq!(recovered.daa_score, 8);
         assert_eq!(recovered.coinbase_txid, Hash::from_bytes([3u8; 32]));
@@ -1029,6 +1027,7 @@ mod tests {
         assert_eq!(recovered.accepted[0].action_bytes, vec![9, 9]);
     }
 
+    #[test]
     fn serde_default_does_not_make_bincode_records_forward_compatible() {
         // Exactly `ShieldedScanBlockData` as it was BEFORE `coinbase_commitments` was added.
         #[derive(Serialize)]
@@ -1066,6 +1065,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn scan_block_store_roundtrip() {
         let (_lt, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let store = DbShieldedScanBlockStore::new(db.clone(), CachePolicy::Count(16));

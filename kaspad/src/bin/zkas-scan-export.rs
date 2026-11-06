@@ -52,10 +52,10 @@ use kaspa_consensus::model::stores::selected_chain::{DbSelectedChainStore, Selec
 use kaspa_consensus::model::stores::shielded::{
     DbShieldedScanBlockStore, DbShieldedTreeStore, ShieldedScanBlockStoreReader, ShieldedTreeStoreReader,
 };
+use kaspa_consensus::processes::shielded::coinbase_notes_from_outputs;
 use kaspa_database::prelude::{CachePolicy, ConnBuilder};
 use kaspa_shielded_core::ExtractedNoteCommitment;
 use kaspa_shielded_core::tree::{GlobalTree, NoteCommitmentTree};
-use kaspa_consensus::processes::shielded::coinbase_notes_from_outputs;
 use kaspa_shielded_core::wallet::CompactActionRecord;
 use std::io::{BufWriter, Write};
 

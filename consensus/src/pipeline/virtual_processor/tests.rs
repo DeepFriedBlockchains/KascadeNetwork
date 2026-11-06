@@ -851,7 +851,7 @@ async fn reorg_nullifier_revert_is_visible_to_rejoining_spend() {
     assert_eq!(cb.outputs.len(), 1, "block 1 coinbase is a single note at position 0");
     let cb_txid = cb.id();
     let note_value = cb.outputs[0].value;
-    let anchor1 = ctx.consensus.virtual_processor().shielded_anchor_at(block1.header.hash).unwrap();
+    let _anchor1 = ctx.consensus.virtual_processor().shielded_anchor_at(block1.header.hash).unwrap();
 
     // Extend the common chain until block 1's anchor matures (depth = 3); the last
     // common block is the reorg split point.

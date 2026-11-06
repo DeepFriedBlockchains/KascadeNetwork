@@ -11,12 +11,7 @@ use kaspa_addresses::{Address as KAddr, Prefix, Version};
 use orchard::Address;
 
 fn blake2b_prefix(domain: &[u8], counter: u64, n: usize) -> Vec<u8> {
-    let h = Params::new()
-        .hash_length(32)
-        .to_state()
-        .update(domain)
-        .update(&counter.to_le_bytes())
-        .finalize();
+    let h = Params::new().hash_length(32).to_state().update(domain).update(&counter.to_le_bytes()).finalize();
     h.as_bytes()[..n].to_vec()
 }
 

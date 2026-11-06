@@ -108,7 +108,7 @@ pub fn lookup(ip: IpAddr) -> Option<&'static Country> {
             if let Some(mapped) = v6.to_ipv4_mapped() {
                 return lookup(IpAddr::V4(mapped));
             }
-            let key = (u128::from(v6) >> 64) as u128;
+            let key = u128::from(v6) >> 64;
             search(V6_TABLE, V6_REC, key, |i| {
                 let o = i * V6_REC;
                 let s = u64::from_le_bytes(V6_TABLE[o..o + 8].try_into().unwrap()) as u128;

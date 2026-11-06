@@ -53,10 +53,8 @@ fn main() {
         let t = Instant::now();
         for _ in 0..reps {
             let ivk_prep: WnafScalar<pallas::Scalar, W> = WnafScalar::new(&ivk);
-            let out: Vec<Option<pallas::Point>> = epks
-                .par_iter()
-                .map(|e| e.map(|p| &WnafBase::<pallas::Point, W>::new(p) * &ivk_prep))
-                .collect();
+            let out: Vec<Option<pallas::Point>> =
+                epks.par_iter().map(|e| e.map(|p| &WnafBase::<pallas::Point, W>::new(p) * &ivk_prep)).collect();
             std::hint::black_box(out);
         }
         let c = t.elapsed().as_secs_f64() * 1e6 / (n * reps) as f64;

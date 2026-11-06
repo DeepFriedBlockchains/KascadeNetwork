@@ -36,7 +36,7 @@ use incrementalmerkletree::witness::IncrementalWitness;
 use incrementalmerkletree::{Hashable, Level};
 use orchard::{
     Address,
-    keys::{FullViewingKey, IncomingViewingKey, OutgoingViewingKey, PreparedIncomingViewingKey, Scope, SpendingKey},
+    keys::{FullViewingKey, OutgoingViewingKey, PreparedIncomingViewingKey, Scope, SpendingKey},
     note::{ExtractedNoteCommitment, Note, RandomSeed, Rho},
     note_encryption::OrchardDomain,
     tree::{MerkleHashOrchard, MerklePath},
@@ -51,7 +51,7 @@ use crate::bundle::ShieldedBundle;
 use crate::coinbase::{CoinbaseNoteDesc, coinbase_note_commitment};
 use crate::tree::{FrontierState, GlobalTree, TREE_DEPTH};
 use crate::wallet::scan::{
-    CompactActionRecord, ReceivedNote, reconstruct_action, scan_bundle_prepared, scan_compact_auto, scan_compact_auto_cached, scan_compact_prepared, trim_memo,
+    CompactActionRecord, ReceivedNote, reconstruct_action, scan_bundle_prepared, scan_compact_auto, scan_compact_prepared, trim_memo,
 };
 
 /// A note the wallet owns and can spend. The membership witness is **not** held
@@ -267,8 +267,6 @@ impl ScanCost {
 /// canonical commitment stream, recognises its own notes, and keeps a spendable
 /// witness for each.
 pub struct WalletDb {
-    /// Incoming viewing key — recovers shielded-tx outputs sent to this wallet.
-    ivk: IncomingViewingKey,
     /// The `ivk` precomputed for trial decryption, built once at construction and
     /// reused for every bundle in every scan pass (see [`scan_bundle_prepared`]).
     /// `IncomingViewingKey::prepare` is not free, so doing it per bundle — as the
@@ -791,12 +789,10 @@ impl WalletDb {
         let prepared_ivk = ivk.prepare();
         let agree_scalar = crate::wallet::ivk_agreement_scalar(&ivk);
         let my_address = fvk.address_at(0u32, Scope::External).to_raw_address_bytes();
-        let known_addresses = (0..COINBASE_DIVERSIFIER_SCAN)
-            .map(|i| fvk.address_at(i, Scope::External).to_raw_address_bytes())
-            .collect();
+        let known_addresses =
+            (0..COINBASE_DIVERSIFIER_SCAN).map(|i| fvk.address_at(i, Scope::External).to_raw_address_bytes()).collect();
         let ovk = fvk.to_ovk(Scope::External);
         Some(Self {
-            ivk,
             prepared_ivk,
             fvk,
             my_address,
@@ -843,12 +839,10 @@ impl WalletDb {
         let prepared_ivk = ivk.prepare();
         let agree_scalar = crate::wallet::ivk_agreement_scalar(&ivk);
         let my_address = fvk.address_at(0u32, Scope::External).to_raw_address_bytes();
-        let known_addresses = (0..COINBASE_DIVERSIFIER_SCAN)
-            .map(|i| fvk.address_at(i, Scope::External).to_raw_address_bytes())
-            .collect();
+        let known_addresses =
+            (0..COINBASE_DIVERSIFIER_SCAN).map(|i| fvk.address_at(i, Scope::External).to_raw_address_bytes()).collect();
         let ovk = fvk.to_ovk(Scope::External);
         Some(Self {
-            ivk,
             prepared_ivk,
             fvk,
             my_address,
@@ -1039,10 +1033,10 @@ impl WalletDb {
             // Key-independent: the commit-or-skip decision above is what shapes the
             // stream, and it has already been made. See `set_leaves_only`.
             let owned = if self.leaves_only { None } else { self.recover_coinbase_note(desc, *value) };
-            if owned.is_some() {
-                if let Some(m) = meta {
-                    self.record_coinbase_history(*value, m);
-                }
+            if owned.is_some()
+                && let Some(m) = meta
+            {
+                self.record_coinbase_history(*value, m);
             }
             self.append_leaf(cmx, owned);
         }
@@ -1079,10 +1073,10 @@ impl WalletDb {
         }
         for (desc, value, cmx) in coinbase {
             let owned = self.recover_coinbase_note(desc, *value);
-            if owned.is_some() {
-                if let Some(m) = meta {
-                    self.record_coinbase_history(*value, m);
-                }
+            if owned.is_some()
+                && let Some(m) = meta
+            {
+                self.record_coinbase_history(*value, m);
             }
             self.append_leaf(*cmx, owned);
         }
@@ -1119,13 +1113,13 @@ impl WalletDb {
                 let Some(cmx) = Option::<ExtractedNoteCommitment>::from(ExtractedNoteCommitment::from_bytes(&action.cmx)) else {
                     continue;
                 };
-                let owned = received.iter().find(|r| r.action_index == i).map(|r| r.note.clone());
+                let owned = received.iter().find(|r| r.action_index == i).map(|r| r.note);
                 self.append_leaf(cmx, owned);
             }
-            if let Some(m) = meta {
-                if let Some(txid) = m.txids.get(bi).copied() {
-                    self.record_bundle_history(bundle, spent, &received, txid, m);
-                }
+            if let Some(m) = meta
+                && let Some(txid) = m.txids.get(bi).copied()
+            {
+                self.record_bundle_history(bundle, spent, &received, txid, m);
             }
         }
     }
@@ -1154,10 +1148,10 @@ impl WalletDb {
             // Key-independent: the commit-or-skip decision above is what shapes the
             // stream, and it has already been made. See `set_leaves_only`.
             let owned = if self.leaves_only { None } else { self.recover_coinbase_note(desc, *value) };
-            if owned.is_some() {
-                if let Some(m) = meta {
-                    self.record_coinbase_history(*value, m);
-                }
+            if owned.is_some()
+                && let Some(m) = meta
+            {
+                self.record_coinbase_history(*value, m);
             }
             self.append_leaf(cmx, owned);
         }
@@ -1182,10 +1176,10 @@ impl WalletDb {
             // The commit-or-skip rule that decides whether this leaf exists at all was
             // applied by the caller when it built `coinbase`, so the stream is unchanged.
             let owned = if self.leaves_only { None } else { self.recover_coinbase_note(desc, *value) };
-            if owned.is_some() {
-                if let Some(m) = meta {
-                    self.record_coinbase_history(*value, m);
-                }
+            if owned.is_some()
+                && let Some(m) = meta
+            {
+                self.record_coinbase_history(*value, m);
             }
             self.append_leaf(*cmx, owned);
         }
@@ -1237,13 +1231,13 @@ impl WalletDb {
                 let Some(cmx) = Option::<ExtractedNoteCommitment>::from(ExtractedNoteCommitment::from_bytes(&rec.cmx)) else {
                     continue;
                 };
-                let owned = received.iter().find(|r| r.action_index == i).map(|r| r.note.clone());
+                let owned = received.iter().find(|r| r.action_index == i).map(|r| r.note);
                 self.append_leaf(cmx, owned);
             }
-            if let Some(m) = meta {
-                if let Some(txid) = m.txids.get(bi).copied() {
-                    self.record_history_compact(spent, &received, txid, m);
-                }
+            if let Some(m) = meta
+                && let Some(txid) = m.txids.get(bi).copied()
+            {
+                self.record_history_compact(spent, &received, txid, m);
             }
         }
     }
@@ -1444,8 +1438,7 @@ impl WalletDb {
         for a in &bundle.actions {
             let Some(action) = reconstruct_action(a) else { continue };
             let domain = OrchardDomain::for_action(&action);
-            let Some((note, addr, m)) =
-                try_output_recovery_with_ovk(&domain, &self.ovk, &action, action.cv_net(), &a.out_ciphertext)
+            let Some((note, addr, m)) = try_output_recovery_with_ovk(&domain, &self.ovk, &action, action.cv_net(), &a.out_ciphertext)
             else {
                 continue;
             };
@@ -1596,9 +1589,7 @@ impl WalletDb {
         if self.pending_change.is_empty() {
             return false;
         }
-        nullifiers.any(|nf| {
-            self.pending_spends.iter().any(|p| p.note.nullifier == nf && self.pending_change.contains_key(&p.txid))
-        })
+        nullifiers.any(|nf| self.pending_spends.iter().any(|p| p.note.nullifier == nf && self.pending_change.contains_key(&p.txid)))
     }
 
     /// What an **unsettled** block would do to this wallet's balance, without touching
@@ -1786,10 +1777,11 @@ impl WalletDb {
             // ...and the lagging tree, which is what a newly matured note's witness is
             // snapshotted from (it then witnesses exactly the leaf just appended).
             let _ = self.lag_tree.append(leaf);
-            if eligible.contains(&abs) && self.witnesses.len() < self.witness_budget {
-                if let Some(w) = IncrementalWitness::from_tree(self.lag_tree.clone()) {
-                    self.witnesses.push((abs, w));
-                }
+            if eligible.contains(&abs)
+                && self.witnesses.len() < self.witness_budget
+                && let Some(w) = IncrementalWitness::from_tree(self.lag_tree.clone())
+            {
+                self.witnesses.push((abs, w));
             }
         }
         self.witnessed_upto = target;
@@ -2181,11 +2173,7 @@ impl WalletDb {
     /// As [`Self::predecrypt_page`], reusing the ephemeral keys the decoded page already
     /// decompressed for the whole cohort. Decompression is key-independent, so without
     /// this every wallet on a page repeats the identical modular square roots.
-    pub fn predecrypt_page_cached(
-        &mut self,
-        all: &[CompactActionRecord],
-        epks: Option<&[Option<pasta_curves::pallas::Point>]>,
-    ) {
+    pub fn predecrypt_page_cached(&mut self, all: &[CompactActionRecord], epks: Option<&[Option<pasta_curves::pallas::Point>]>) {
         self.predecrypt_page_prepared(all, epks, None)
     }
 
@@ -2727,10 +2715,10 @@ impl WalletDb {
         // lookup (see `SubtreeCache`). Serve only if it covers EVERY requested note —
         // a partial answer would send the caller down the O(chain) replay anyway, and
         // paying both is worse than paying one.
-        if let Some(cached) = self.subtree_paths(positions, matured_leaves) {
-            if cached.iter().all(|p| p.is_some()) {
-                return cached;
-            }
+        if let Some(cached) = self.subtree_paths(positions, matured_leaves)
+            && cached.iter().all(|p| p.is_some())
+        {
+            return cached;
         }
         let mut out: Vec<Option<MerklePath>> = vec![None; n];
         let base = self.base_size;
@@ -3064,11 +3052,7 @@ impl WalletDb {
     ///
     /// The nullifiers are recomputed here from `fvk_bytes`. Taking the sender's would let
     /// a bad receipt mark a note unspendable, or hide that one was already spent.
-    pub fn from_scan_receipt_fvk(
-        fvk_bytes: &[u8; 96],
-        genesis: [u8; 32],
-        bytes: &[u8],
-    ) -> Option<(Self, ScanReceiptMeta)> {
+    pub fn from_scan_receipt_fvk(fvk_bytes: &[u8; 96], genesis: [u8; 32], bytes: &[u8]) -> Option<(Self, ScanReceiptMeta)> {
         let mut r = Cursor { buf: bytes, pos: 0 };
         if r.take(4)? != RECEIPT_MAGIC.as_slice() || r.u8()? != RECEIPT_VERSION || r.arr::<32>()? != genesis {
             return None;
@@ -3108,13 +3092,8 @@ impl WalletDb {
             let rho = Option::<Rho>::from(Rho::from_bytes(&r.arr()?))?;
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(r.arr()?, &rho))?;
             let addr = Option::<Address>::from(Address::from_raw_address_bytes(&recipient))?;
-            let note = Option::<Note>::from(Note::from_parts(
-                addr,
-                NoteValue::from_raw(value),
-                rho,
-                rseed,
-                orchard::note::NoteVersion::V2,
-            ))?;
+            let note =
+                Option::<Note>::from(Note::from_parts(addr, NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2))?;
             // Ours to derive, never the sender's to assert.
             let nullifier = note.nullifier(&db.fvk).to_bytes();
             notes.push(OwnedNote { note, position, nullifier });
@@ -3159,11 +3138,7 @@ impl WalletDb {
     }
 
     /// [`Self::from_scan_receipt_fvk`] for a wallet that holds its seed.
-    pub fn from_scan_receipt(
-        seed: [u8; 32],
-        genesis: [u8; 32],
-        bytes: &[u8],
-    ) -> Option<(Self, ScanReceiptMeta)> {
+    pub fn from_scan_receipt(seed: [u8; 32], genesis: [u8; 32], bytes: &[u8]) -> Option<(Self, ScanReceiptMeta)> {
         let sk = Option::<SpendingKey>::from(SpendingKey::from_bytes(seed))?;
         Self::from_scan_receipt_fvk(&FullViewingKey::from(&sk).to_bytes(), genesis, bytes)
     }
@@ -3393,7 +3368,8 @@ impl WalletDb {
             let rho = Option::<Rho>::from(Rho::from_bytes(&r.arr()?))?;
             let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(r.arr()?, &rho))?;
             let addr = Option::<Address>::from(Address::from_raw_address_bytes(&recipient))?;
-            let note = Option::<Note>::from(Note::from_parts(addr, NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2))?;
+            let note =
+                Option::<Note>::from(Note::from_parts(addr, NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2))?;
             db.notes.push(OwnedNote { note, position, nullifier });
         }
         let n_nfs = r.u64()? as usize;
@@ -3433,43 +3409,34 @@ impl WalletDb {
         // section on a sub-cursor so any trouble inside it degrades to "no witnesses,
         // rebuild on demand" without corrupting the outer read position — witnesses are a
         // pure optimisation, never load-bearing for correctness or balance.
-        if version >= CHECKPOINT_VERSION_V5 {
-            if let Some(wlen) = r.u64() {
-                if let Some(wbuf) = r.take(wlen as usize) {
-                    Self::read_witness_section(&mut db, wbuf);
-                }
-            }
+        if version >= CHECKPOINT_VERSION_V5
+            && let Some(wlen) = r.u64()
+            && let Some(wbuf) = r.take(wlen as usize)
+        {
+            Self::read_witness_section(&mut db, wbuf);
         }
         // v6: the history section — same length-prefixed best-effort contract.
-        if version >= CHECKPOINT_VERSION_V6 {
-            if let Some(hlen) = r.u64() {
-                if let Some(hbuf) = r.take(hlen as usize) {
-                    Self::read_history_section(
-                        &mut db,
-                        hbuf,
-                        version >= CHECKPOINT_VERSION_V9,
-                        version >= CHECKPOINT_VERSION_V10,
-                    );
-                }
-            }
+        if version >= CHECKPOINT_VERSION_V6
+            && let Some(hlen) = r.u64()
+            && let Some(hbuf) = r.take(hlen as usize)
+        {
+            Self::read_history_section(&mut db, hbuf, version >= CHECKPOINT_VERSION_V9, version >= CHECKPOINT_VERSION_V10);
         }
         // v7: pending spends + DAA clock — same length-prefixed best-effort contract.
-        if version >= CHECKPOINT_VERSION_V7 {
-            if let Some(plen) = r.u64() {
-                if let Some(pbuf) = r.take(plen as usize) {
-                    Self::read_pending_section(&mut db, pbuf);
-                }
-            }
+        if version >= CHECKPOINT_VERSION_V7
+            && let Some(plen) = r.u64()
+            && let Some(pbuf) = r.take(plen as usize)
+        {
+            Self::read_pending_section(&mut db, pbuf);
         }
         // v8: persisted complete-subtree index. It is an optimisation only and is
         // accepted solely when it covers this exact tip and reproduces the independent
         // commitment-tree root; malformed/stale data degrades to an empty cache.
-        if version >= CHECKPOINT_VERSION_V8 {
-            if let Some(slen) = r.u64() {
-                if let Some(sbuf) = r.take(slen as usize) {
-                    Self::read_subtree_section(&mut db, sbuf);
-                }
-            }
+        if version >= CHECKPOINT_VERSION_V8
+            && let Some(slen) = r.u64()
+            && let Some(sbuf) = r.take(slen as usize)
+        {
+            Self::read_subtree_section(&mut db, sbuf);
         }
         if !r.done() {
             return None;
@@ -3555,7 +3522,13 @@ impl WalletDb {
                 let rho = Option::<Rho>::from(Rho::from_bytes(&r.arr()?))?;
                 let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(r.arr()?, &rho))?;
                 let addr = Option::<Address>::from(Address::from_raw_address_bytes(&recipient))?;
-                let note = Option::<Note>::from(Note::from_parts(addr, NoteValue::from_raw(value), rho, rseed, orchard::note::NoteVersion::V2))?;
+                let note = Option::<Note>::from(Note::from_parts(
+                    addr,
+                    NoteValue::from_raw(value),
+                    rho,
+                    rseed,
+                    orchard::note::NoteVersion::V2,
+                ))?;
                 let txid = r.arr::<32>()?;
                 let submitted_daa = r.u64()?;
                 out.push(PendingSpend { note: OwnedNote { note, position, nullifier }, txid, submitted_daa });
@@ -3650,11 +3623,9 @@ impl WalletDb {
     fn read_witness_section(db: &mut Self, buf: &[u8]) {
         let owned: HashSet<u64> = db.notes.iter().map(|n| n.position).collect();
         let mut r = Cursor { buf, pos: 0 };
-        let parse = |r: &mut Cursor<'_>| -> Option<(
-            u64,
-            CommitmentTree<MerkleHashOrchard, TREE_DEPTH>,
-            Vec<(u64, IncrementalWitness<MerkleHashOrchard, TREE_DEPTH>)>,
-        )> {
+        type WitnessSection =
+            (u64, CommitmentTree<MerkleHashOrchard, TREE_DEPTH>, Vec<(u64, IncrementalWitness<MerkleHashOrchard, TREE_DEPTH>)>);
+        let parse = |r: &mut Cursor<'_>| -> Option<WitnessSection> {
             let witnessed_upto = r.u64()?;
             let lag_tree = read_tree(r)?;
             let n = r.u64()? as usize;
@@ -3871,11 +3842,7 @@ fn credits_from_received(received: &[ReceivedNote]) -> Vec<Credit> {
     received
         .iter()
         .take(CREDITS_CAP)
-        .map(|r| Credit {
-            recipient: r.note.recipient().to_raw_address_bytes(),
-            value: r.value(),
-            memo: r.memo.clone(),
-        })
+        .map(|r| Credit { recipient: r.note.recipient().to_raw_address_bytes(), value: r.value(), memo: r.memo.clone() })
         .collect()
 }
 
@@ -4804,7 +4771,7 @@ mod tests {
         let mut warm: Vec<u64> = db.witnesses.iter().map(|(p, _)| *p).collect();
         warm.sort();
         let mut want: Vec<&OwnedNote> = db.notes().iter().collect();
-        want.sort_by(|a, b| b.value().cmp(&a.value()));
+        want.sort_by_key(|n| std::cmp::Reverse(n.value()));
         let mut want: Vec<u64> = want.iter().take(3).map(|n| n.position).collect();
         want.sort();
         assert_eq!(warm, want, "the warm set is the top notes by value");
@@ -4903,7 +4870,7 @@ mod tests {
         let mut db = WalletDb::from_checkpoint(mine, &pristine.to_checkpoint()).unwrap();
         for b in 0..10u8 {
             let theirs = coinbase_for(address_of([b.wrapping_add(160); 32]), &[b, 6, 6, 6], 77);
-            db.ingest_block(&[theirs.clone()], &[]);
+            db.ingest_block(std::slice::from_ref(&theirs), &[]);
             pristine.ingest_block(&[theirs], &[]);
         }
         db.strand_notes_for_test(pos + 3);
@@ -5508,12 +5475,7 @@ mod circuit_tests {
 
         // N independent bundles, each spending its own disjoint slice of notes.
         let batches: Vec<Vec<(Note, MerklePath)>> = (0..N)
-            .map(|b| {
-                db.notes()[b * SPENDS..(b + 1) * SPENDS]
-                    .iter()
-                    .map(|o| (o.note.clone(), db.witness_path(o.position).unwrap()))
-                    .collect()
-            })
+            .map(|b| db.notes()[b * SPENDS..(b + 1) * SPENDS].iter().map(|o| (o.note, db.witness_path(o.position).unwrap())).collect())
             .collect();
         let sum: u64 = db.notes()[..SPENDS].iter().map(|o| o.note.value().inner()).sum();
         let fee = 3_000_000u64 * SPENDS as u64;
@@ -5583,7 +5545,7 @@ mod circuit_tests {
         let payee = address_bytes_from_seed([92u8; 32]).unwrap();
         println!("spends |  wall  |   cpu  | cores | s/spend");
         for n in [1usize, 4, 12, 38] {
-            let sel: Vec<_> = db.notes()[..n].iter().map(|o| (o.note.clone(), db.witness_path(o.position).unwrap())).collect();
+            let sel: Vec<_> = db.notes()[..n].iter().map(|o| (o.note, db.witness_path(o.position).unwrap())).collect();
             let sum: u64 = db.notes()[..n].iter().map(|o| o.note.value().inner()).sum();
             let fee = 3_000_000u64 * n as u64;
             let c0 = cpu_secs();
@@ -5647,7 +5609,7 @@ mod circuit_tests {
 
         // The §2.4 transition applies it: nullifier inserted, fee collected.
         let stx = ShieldedTx::from_bundle(&wire).unwrap();
-        let out = state.apply_chain_block(None, &[stx.clone()]).unwrap();
+        let out = state.apply_chain_block(None, std::slice::from_ref(&stx)).unwrap();
         assert_eq!(out.accepted, vec![0], "the wallet's real spend is accepted");
 
         // The wallet parks the submitted note; its tracked balance drops to zero.
@@ -5686,7 +5648,7 @@ mod circuit_tests {
         assert_eq!(db.balance(), 8_000);
 
         // Pay 5_000 (fee 1_000) — needs BOTH notes; 2_000 change returns to us.
-        let sel: Vec<_> = db.notes().iter().map(|o| (o.note.clone(), o.position)).collect();
+        let sel: Vec<_> = db.notes().iter().map(|o| (o.note, o.position)).collect();
         let inputs: Vec<_> = sel.into_iter().map(|(note, pos)| (note, db.witness_path(pos).unwrap())).collect();
         let recipient = address_bytes_from_seed([42u8; 32]).unwrap();
         let payload = build_wallet_payment(miner, inputs, recipient, 5_000, 1_000, &net, ctx, true, [0u8; 512])
@@ -5745,7 +5707,7 @@ mod circuit_tests {
         let paid_total: u64 = amounts.iter().sum(); // 6_000
         let fee = 1_000u64;
 
-        let sel: Vec<_> = db.notes().iter().map(|o| (o.note.clone(), o.position)).collect();
+        let sel: Vec<_> = db.notes().iter().map(|o| (o.note, o.position)).collect();
         let inputs: Vec<_> = sel.into_iter().map(|(note, pos)| (note, db.witness_path(pos).unwrap())).collect();
         let payload = crate::wallet::build::build_wallet_payment_multi(miner, inputs, &payees, fee, &net, ctx, true)
             .expect("batched payout builds");
@@ -5795,12 +5757,7 @@ mod circuit_tests {
         // Pure tree growth to somebody else, so our note ends up well below the tip.
         for i in 0..5u8 {
             let o = cb(address_bytes_from_seed(other).unwrap(), &[b'x', i], 5_000);
-            let meta = BlockMeta {
-                coinbase_txid: [0x22; 32],
-                txids: vec![],
-                timestamp_ms: 2_000,
-                daa_score: 101 + i as u64,
-            };
+            let meta = BlockMeta { coinbase_txid: [0x22; 32], txids: vec![], timestamp_ms: 2_000, daa_score: 101 + i as u64 };
             hosted.ingest_block_with_meta(&[o], &[], Some(&meta));
         }
         hosted.advance_witnesses(hosted.size());
@@ -5815,10 +5772,7 @@ mod circuit_tests {
         assert_eq!(meta.scanned_daa, 105, "the importer resumes where the exporter stopped");
         assert_eq!(meta.anchor_leaves, hosted.size());
         assert_eq!(phone.balance(), hosted.balance(), "the imported wallet sees the same money");
-        assert!(
-            phone.to_checkpoint().len() < hosted.to_checkpoint().len(),
-            "the public leaf stream did NOT travel"
-        );
+        assert!(phone.to_checkpoint().len() < hosted.to_checkpoint().len(), "the public leaf stream did NOT travel");
 
         // A receipt from another chain is refused outright.
         assert!(
@@ -5830,7 +5784,7 @@ mod circuit_tests {
         let n = bad.len();
         bad[n - 1] ^= 0xff;
         assert!(
-            WalletDb::from_scan_receipt(mine, genesis, &bad).map_or(true, |(w, _)| w.balance() == 0),
+            WalletDb::from_scan_receipt(mine, genesis, &bad).is_none_or(|(w, _)| w.balance() == 0),
             "a note whose witness does not root to the anchor is dropped, never trusted"
         );
 
@@ -5838,7 +5792,7 @@ mod circuit_tests {
         // reproduces the same anchor as the wallet that scanned the whole chain.
         let o = cb(address_bytes_from_seed(other).unwrap(), b"after", 5_000);
         let meta7 = BlockMeta { coinbase_txid: [0x33; 32], txids: vec![], timestamp_ms: 3_000, daa_score: 106 };
-        hosted.ingest_block_with_meta(&[o.clone()], &[], Some(&meta7));
+        hosted.ingest_block_with_meta(std::slice::from_ref(&o), &[], Some(&meta7));
         phone.ingest_block_with_meta(&[o], &[], Some(&meta7));
         hosted.advance_witnesses(hosted.size());
         phone.advance_witnesses(phone.size());
@@ -5876,11 +5830,11 @@ mod circuit_tests {
 
         let mine = cb(address_bytes_from_seed(payer).unwrap(), b"credits||0", 20_000);
         let meta1 = BlockMeta { coinbase_txid: [0xa1; 32], txids: vec![], timestamp_ms: 1_000, daa_score: 10 };
-        p.ingest_block_with_meta(&[mine.clone()], &[], Some(&meta1));
+        p.ingest_block_with_meta(std::slice::from_ref(&mine), &[], Some(&meta1));
         x.ingest_block_with_meta(&[mine], &[], Some(&meta1));
 
         // One transaction, both invoices.
-        let inputs = vec![(p.notes()[0].note.clone(), p.witness_path(p.notes()[0].position).unwrap())];
+        let inputs = vec![(p.notes()[0].note, p.witness_path(p.notes()[0].position).unwrap())];
         let payload = crate::wallet::build::build_wallet_payment_multi(
             payer,
             inputs,
@@ -5905,11 +5859,7 @@ mod circuit_tests {
         // What was lost before: which address got what.
         let mut got: Vec<([u8; 43], u64)> = row.credits.iter().map(|c| (c.recipient, c.value)).collect();
         got.sort_by_key(|&(_, v)| v);
-        assert_eq!(
-            got,
-            vec![(alice, 3_000), (bob, 7_000)],
-            "each diversified address is credited with its own deposit, not the sum"
-        );
+        assert_eq!(got, vec![(alice, 3_000), (bob, 7_000)], "each diversified address is credited with its own deposit, not the sum");
         assert_eq!(row.credits.iter().map(|c| c.value).sum::<u64>(), row.amount, "credits account for the whole row");
 
         // v10 round-trip: a restart must not throw the breakdown away again.
@@ -5938,7 +5888,7 @@ mod circuit_tests {
         // Block 1: coinbase mints one 8_000 note to A.
         let mine = cb(address_bytes_from_seed(miner).unwrap(), b"blk1||0", 8_000);
         let meta1 = BlockMeta { coinbase_txid: [0xaa; 32], txids: vec![], timestamp_ms: 1_000, daa_score: 10 };
-        a.ingest_block_with_meta(&[mine.clone()], &[], Some(&meta1));
+        a.ingest_block_with_meta(std::slice::from_ref(&mine), &[], Some(&meta1));
         b.ingest_block_with_meta(&[mine], &[], Some(&meta1));
         assert_eq!(a.history().len(), 1, "A recorded its mint");
         assert!(b.history().is_empty(), "B saw nothing of its own");
@@ -5949,7 +5899,7 @@ mod circuit_tests {
         // A pays B 5_000 (fee 1_000, change 2_000) — recoverable, with a memo.
         let mut memo = [0u8; 512];
         memo[..7].copy_from_slice(b"thanks!");
-        let inputs = vec![(a.notes()[0].note.clone(), a.witness_path(a.notes()[0].position).unwrap())];
+        let inputs = vec![(a.notes()[0].note, a.witness_path(a.notes()[0].position).unwrap())];
         let payload = crate::wallet::build::build_wallet_payment(
             miner,
             inputs,
@@ -6017,7 +5967,7 @@ mod circuit_tests {
 
         // A NON-recoverable send (ovk withheld): B pays A back 3_000 (fee 500).
         let mut b2 = b;
-        let inputs = vec![(b2.notes()[0].note.clone(), b2.witness_path(b2.notes()[0].position).unwrap())];
+        let inputs = vec![(b2.notes()[0].note, b2.witness_path(b2.notes()[0].position).unwrap())];
         let payload = crate::wallet::build::build_wallet_payment(
             friend,
             inputs,
@@ -6047,7 +5997,7 @@ mod circuit_tests {
             &[],
             Some(&meta1),
         );
-        let inputs = vec![(compact.notes()[0].note.clone(), compact.witness_path(compact.notes()[0].position).unwrap())];
+        let inputs = vec![(compact.notes()[0].note, compact.witness_path(compact.notes()[0].position).unwrap())];
         let payload = crate::wallet::build::build_wallet_payment(
             miner,
             inputs,

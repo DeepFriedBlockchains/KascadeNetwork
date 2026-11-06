@@ -23,7 +23,10 @@ use std::{
     sync::Arc,
 };
 
-use super::{difficulty::SampledDifficultyManager, past_median_time::SampledPastMedianTimeManager};
+use super::{
+    difficulty::{DifficultyLaunchSchedule, SampledDifficultyManager},
+    past_median_time::SampledPastMedianTimeManager,
+};
 
 #[derive(Clone, Copy)]
 pub enum WindowType {
@@ -118,8 +121,7 @@ impl<T: GhostdagStoreReader, U: BlockWindowCacheReader + BlockWindowCacheWriter,
             min_difficulty_window_size,
             difficulty_sample_rate,
             target_time_per_block,
-            low_difficulty_end_blue_score,
-            ramp_end_blue_score,
+            DifficultyLaunchSchedule { low_difficulty_end_blue_score, ramp_end_blue_score },
         );
         let past_median_time_manager = SampledPastMedianTimeManager::new(headers_store.clone(), genesis.timestamp);
         Self {

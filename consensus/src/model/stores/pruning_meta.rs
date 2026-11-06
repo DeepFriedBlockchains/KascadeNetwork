@@ -33,7 +33,10 @@ impl PruningMetaStores {
             shielded_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedSyncFlag.into()),
             body_missing_anticone_blocks: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::BodyMissingAnticone.into()),
             shielded_history_backfilled_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedHistoryBackfilled.into()),
-            shielded_history_verified_base_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedHistoryVerifiedBase.into()),
+            shielded_history_verified_base_access: CachedDbItem::new(
+                db.clone(),
+                DatabaseStorePrefixes::ShieldedHistoryVerifiedBase.into(),
+            ),
         }
     }
 

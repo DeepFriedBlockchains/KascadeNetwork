@@ -56,8 +56,13 @@ async fn main() {
             eprintln!("node returned no verbose data (needs --utxoindex? older build?)");
             break;
         };
-        let merged: Vec<_> =
-            v.merge_set_blues_hashes.iter().chain(v.merge_set_reds_hashes.iter()).filter(|h| **h != v.selected_parent_hash).cloned().collect();
+        let merged: Vec<_> = v
+            .merge_set_blues_hashes
+            .iter()
+            .chain(v.merge_set_reds_hashes.iter())
+            .filter(|h| **h != v.selected_parent_hash)
+            .cloned()
+            .collect();
         *mergeset_hist.entry(1 + merged.len()).or_default() += 1;
         for m in merged {
             if let Ok(mb) = client.get_block(m, true).await {

@@ -29,7 +29,6 @@ use kaspa_consensus::model::stores::shielded::{
     AnchorBlockStoreReader, DbAnchorBlockStore, DbShieldedTreeStore, ShieldedTreeStoreReader,
 };
 use kaspa_database::prelude::{CachePolicy, ConnBuilder};
-use kaspa_hashes::Hash;
 use kaspa_shielded_core::tree::{GlobalTree, NoteCommitmentTree};
 use std::io::{BufWriter, Write};
 

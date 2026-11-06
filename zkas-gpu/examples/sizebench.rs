@@ -2,7 +2,7 @@
 // The integration calls it per TRANSACTION — a handful of actions — so the answer
 // decides whether it can be used there at all, or whether the ingest must batch first.
 use group::ff::Field;
-use group::{Curve, Group};
+use group::Group;
 use pasta_curves::pallas;
 use std::time::Instant;
 
@@ -15,12 +15,22 @@ fn main() {
         let epks: Vec<Option<pallas::Point>> = (0..n).map(|_| Some(pallas::Point::random(&mut rng))).collect();
         // warm
         let _ = gpu.batch_agree(&ivk, &epks);
-        let reps = if n <= 200 { 200 } else if n <= 5000 { 20 } else { 3 };
+        let reps = if n <= 200 {
+            200
+        } else if n <= 5000 {
+            20
+        } else {
+            3
+        };
         let t = Instant::now();
-        for _ in 0..reps { std::hint::black_box(gpu.batch_agree(&ivk, &epks)); }
+        for _ in 0..reps {
+            std::hint::black_box(gpu.batch_agree(&ivk, &epks));
+        }
         let g = t.elapsed().as_secs_f64() * 1e6 / (n * reps) as f64;
         let t = Instant::now();
-        for _ in 0..reps { std::hint::black_box(zkas_gpu::cpu_batch_agree(&ivk, &epks)); }
+        for _ in 0..reps {
+            std::hint::black_box(zkas_gpu::cpu_batch_agree(&ivk, &epks));
+        }
         let c = t.elapsed().as_secs_f64() * 1e6 / (n * reps) as f64;
         println!("{:>8}  {:>12.2}  {:>12.2}  {:>7.2}x", n, g, c, c / g);
     }

@@ -144,25 +144,25 @@ async fn main() {
             }
             seen_set.insert(h.clone());
             seen.push_back(h.clone());
-            if seen.len() > 300_000 {
-                if let Some(old) = seen.pop_front() {
-                    seen_set.remove(&old);
-                }
+            if seen.len() > 300_000
+                && let Some(old) = seen.pop_front()
+            {
+                seen_set.remove(&old);
             }
             let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
             rows.push_str(&format!("{h}\t{addr}\t{t}\n"));
             hits += 1;
         }
-        if !rows.is_empty() {
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&out) {
-                let _ = f.write_all(rows.as_bytes());
-            }
+        if !rows.is_empty()
+            && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&out)
+        {
+            let _ = f.write_all(rows.as_bytes());
         }
         // Advance the cursor to the last block we saw.
-        if let Some(last) = resp.block_hashes.last() {
-            if *last != RpcHash::default() {
-                low = *last;
-            }
+        if let Some(last) = resp.block_hashes.last()
+            && *last != RpcHash::default()
+        {
+            low = *last;
         }
         if hits > 0 {
             eprintln!("zkmm_indexer: +{hits} ZKMM blocks (cursor {})", &low.to_string()[..12]);

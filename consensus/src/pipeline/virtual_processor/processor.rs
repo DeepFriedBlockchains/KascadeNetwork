@@ -120,6 +120,9 @@ pub(super) struct AnchorVerdict {
     pub reject_reason: Option<&'static str>,
 }
 
+/// Cached pruning-point-time nullifier set for shielded IBD export: `(pp_hash, nullifiers)`.
+type PpNullifierExportCache = Mutex<Option<(Hash, Arc<Vec<[u8; 32]>>)>>;
+
 pub struct VirtualStateProcessor {
     // Channels
     receiver: CrossbeamReceiver<VirtualStateProcessingMessage>,
@@ -226,7 +229,7 @@ pub struct VirtualStateProcessor {
     /// `nullifier_count`) and the streaming call so one request serves a single
     /// captured view. Keyed by pruning-point hash; the PP-time set is immutable per
     /// pruning point, so the cached value never goes stale.
-    pub(super) pp_nullifier_export_cache: Mutex<Option<(Hash, Arc<Vec<[u8; 32]>>)>>,
+    pub(super) pp_nullifier_export_cache: PpNullifierExportCache,
 
     // zkas: when true, the coinbase reward enters the shielded pool as
     // coinbase notes (no transparent outputs) — see `build_coinbase_mint`.
@@ -462,10 +465,10 @@ impl VirtualStateProcessor {
     /// tolerated by the serving flow, which aborts the transfer cleanly on drift
     /// instead of panicking.
     fn pruning_point_nullifier_set(&self, pp: kaspa_hashes::Hash) -> Result<Arc<Vec<[u8; 32]>>, kaspa_database::prelude::StoreError> {
-        if let Some((cached_pp, set)) = self.pp_nullifier_export_cache.lock().as_ref() {
-            if *cached_pp == pp {
-                return Ok(Arc::clone(set));
-            }
+        if let Some((cached_pp, set)) = self.pp_nullifier_export_cache.lock().as_ref()
+            && *cached_pp == pp
+        {
+            return Ok(Arc::clone(set));
         }
         let snapshot = self.shielded_state_manager.nullifier_set_snapshot()?;
         let tip = self.lkg_virtual_state.load().ghostdag_data.selected_parent;

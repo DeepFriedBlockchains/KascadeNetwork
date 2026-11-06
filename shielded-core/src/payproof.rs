@@ -126,8 +126,7 @@ pub fn disclose(
     for (i, a) in bundle.actions.iter().enumerate() {
         let Some(action) = reconstruct_action(a) else { continue };
         let domain = OrchardDomain::for_action(&action);
-        let Some((note, addr, memo)) = try_output_recovery_with_ovk(&domain, ovk, &action, action.cv_net(), &a.out_ciphertext)
-        else {
+        let Some((note, addr, memo)) = try_output_recovery_with_ovk(&domain, ovk, &action, action.cv_net(), &a.out_ciphertext) else {
             continue;
         };
         let recipient = addr.to_raw_address_bytes();
@@ -168,11 +167,7 @@ pub enum ProofError {
 pub fn verify(d: &PaymentDisclosure, actions: &[ActionWire]) -> Result<(), ProofError> {
     let a = actions.get(d.action_index as usize).ok_or(ProofError::NoSuchAction)?;
     let cmx = commitment_of(d, &a.nullifier).ok_or(ProofError::Malformed)?;
-    if cmx.to_bytes() == a.cmx {
-        Ok(())
-    } else {
-        Err(ProofError::CommitmentMismatch)
-    }
+    if cmx.to_bytes() == a.cmx { Ok(()) } else { Err(ProofError::CommitmentMismatch) }
 }
 
 #[cfg(test)]
@@ -197,14 +192,9 @@ mod tests {
         };
         let rho: Rho = Option::from(Rho::from_bytes(&rho_bytes)).expect("canonical rho");
         let rseed: RandomSeed = Option::from(RandomSeed::from_bytes([5u8; 32], &rho)).expect("valid rseed");
-        let note: Note = Option::from(Note::from_parts(
-            recipient,
-            NoteValue::from_raw(5_000),
-            rho,
-            rseed,
-            orchard::note::NoteVersion::V2,
-        ))
-        .expect("valid note");
+        let note: Note =
+            Option::from(Note::from_parts(recipient, NoteValue::from_raw(5_000), rho, rseed, orchard::note::NoteVersion::V2))
+                .expect("valid note");
         let cmx = ExtractedNoteCommitment::from(note.commitment()).to_bytes();
 
         let good = PaymentDisclosure {

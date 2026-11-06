@@ -6,8 +6,8 @@
 //!   rpc_probe <grpc://host:port> concurrent <low_hash> [n]     (n parallel tree-state calls, checks routing)
 
 use kaspa_grpc_client::GrpcClient;
-use kaspa_rpc_core::api::rpc::RpcApi;
 use kaspa_rpc_core::RpcHash;
+use kaspa_rpc_core::api::rpc::RpcApi;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -18,7 +18,12 @@ async fn main() {
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("tree");
     let client = Arc::new(GrpcClient::connect(url.clone()).await.expect("connect"));
     let info = client.get_block_dag_info().await.expect("dag info");
-    println!("node {url}: sink {} pruning point {} daa {}", &info.sink.to_string()[..12], &info.pruning_point_hash.to_string()[..12], info.virtual_daa_score);
+    println!(
+        "node {url}: sink {} pruning point {} daa {}",
+        &info.sink.to_string()[..12],
+        &info.pruning_point_hash.to_string()[..12],
+        info.virtual_daa_score
+    );
     match mode {
         "tree" => {
             for h in &args[2..] {
@@ -38,7 +43,9 @@ async fn main() {
                 }
             }
             match client.get_shielded_tree_state(None).await {
-                Ok(ts) => println!("  finality checkpoint: block {} daa {} size {}", &ts.block_hash.to_string()[..12], ts.daa_score, ts.size),
+                Ok(ts) => {
+                    println!("  finality checkpoint: block {} daa {} size {}", &ts.block_hash.to_string()[..12], ts.daa_score, ts.size)
+                }
                 Err(e) => println!("  finality checkpoint: ERROR {e}"),
             }
         }
@@ -87,7 +94,14 @@ async fn main() {
                     Ok(ts) => {
                         if ts.block_hash != h || ts.daa_score != daa {
                             bad += 1;
-                            println!("  MISMATCH asked {} daa {} got {} daa {} size {}", &h.to_string()[..12], daa, &ts.block_hash.to_string()[..12], ts.daa_score, ts.size);
+                            println!(
+                                "  MISMATCH asked {} daa {} got {} daa {} size {}",
+                                &h.to_string()[..12],
+                                daa,
+                                &ts.block_hash.to_string()[..12],
+                                ts.daa_score,
+                                ts.size
+                            );
                         }
                         sizes.push((daa, ts.size));
                     }
@@ -123,10 +137,31 @@ async fn main() {
                 let (h, daa, exact, r) = t.await.unwrap();
                 match r {
                     Ok(ts) => {
-                        let fine = if exact { ts.block_hash == h && ts.daa_score == daa } else { ts.daa_score >= daa && ts.daa_score - daa < 3000 };
-                        if fine { ok += 1 } else { bad += 1; println!("  BAD exact={exact} asked {} daa {} got {} daa {} size {}", &h.to_string()[..12], daa, &ts.block_hash.to_string()[..12], ts.daa_score, ts.size); }
+                        let fine = if exact {
+                            ts.block_hash == h && ts.daa_score == daa
+                        } else {
+                            ts.daa_score >= daa && ts.daa_score - daa < 3000
+                        };
+                        if fine {
+                            ok += 1
+                        } else {
+                            bad += 1;
+                            println!(
+                                "  BAD exact={exact} asked {} daa {} got {} daa {} size {}",
+                                &h.to_string()[..12],
+                                daa,
+                                &ts.block_hash.to_string()[..12],
+                                ts.daa_score,
+                                ts.size
+                            );
+                        }
                     }
-                    Err(e) => { errs += 1; if errs <= 3 { println!("  ERROR {}: {e}", &h.to_string()[..12]); } }
+                    Err(e) => {
+                        errs += 1;
+                        if errs <= 3 {
+                            println!("  ERROR {}: {e}", &h.to_string()[..12]);
+                        }
+                    }
                 }
             }
             println!("  ok {ok} bad {bad} errors {errs}");

@@ -34,19 +34,18 @@ async fn main() {
     let mut lags_ms = Vec::<u128>::new();
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(watch) {
-        if let Ok(info) = client.get_block_dag_info().await {
-            if info.sink != last_sink {
-                last_sink = info.sink;
-                sink_seen_at = Some((info.sink, Instant::now()));
-            }
+        if let Ok(info) = client.get_block_dag_info().await
+            && info.sink != last_sink
+        {
+            last_sink = info.sink;
+            sink_seen_at = Some((info.sink, Instant::now()));
         }
-        if let Some((sink, t0)) = sink_seen_at {
-            if let Ok(tpl) = client.get_block_template(pay_addr.clone(), Vec::new()).await {
-                if tpl.block.header.parents_by_level.first().is_some_and(|p| p.contains(&sink)) {
-                    lags_ms.push(t0.elapsed().as_millis());
-                    sink_seen_at = None;
-                }
-            }
+        if let Some((sink, t0)) = sink_seen_at
+            && let Ok(tpl) = client.get_block_template(pay_addr.clone(), Vec::new()).await
+            && tpl.block.header.parents_by_level.first().is_some_and(|p| p.contains(&sink))
+        {
+            lags_ms.push(t0.elapsed().as_millis());
+            sink_seen_at = None;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -56,6 +55,11 @@ async fn main() {
         println!("no sink→template transitions observed in {watch}s");
         return;
     }
-    println!("sink→template lag over {n} blocks: median {} ms, p90 {} ms, max {} ms", lags_ms[n / 2], lags_ms[(n * 9 / 10).min(n - 1)], lags_ms[n - 1]);
+    println!(
+        "sink→template lag over {n} blocks: median {} ms, p90 {} ms, max {} ms",
+        lags_ms[n / 2],
+        lags_ms[(n * 9 / 10).min(n - 1)],
+        lags_ms[n - 1]
+    );
     println!("(measured with a 50 ms poll, so subtract up to ~100 ms of probe noise)");
 }

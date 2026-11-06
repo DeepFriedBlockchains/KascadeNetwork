@@ -35,7 +35,7 @@ use orchard::{
     primitives::redpallas::{Signature, SpendAuth, VerificationKey},
 };
 use pasta_curves::pallas;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::CryptoRng;
 
 /// BLAKE2b personalization for the message-signing digest. The trailing `1` is a
 /// scheme version, so a future change gets a distinct domain.
@@ -78,7 +78,7 @@ fn message_digest(network_tag: &[u8], address: &[u8; ADDRESS_LEN], message: &[u8
 /// Sign `message` with the wallet identified by `seed`, asserting ownership of the
 /// wallet's default external address, scoped to `network_tag`. Returns `None` only
 /// if `seed` is not a valid Orchard spending key (negligibly rare).
-pub fn sign_message(seed: [u8; 32], network_tag: &[u8], message: &[u8], mut rng: impl RngCore + CryptoRng) -> Option<SignedMessage> {
+pub fn sign_message(seed: [u8; 32], network_tag: &[u8], message: &[u8], mut rng: impl CryptoRng) -> Option<SignedMessage> {
     let sk = Option::<SpendingKey>::from(SpendingKey::from_bytes(seed))?;
     let fvk = FullViewingKey::from(&sk);
     let address = fvk.address_at(0u32, Scope::External).to_raw_address_bytes();
@@ -161,7 +161,6 @@ pub fn sign_spend_auth_from_seed(seed: [u8; 32], alpha: [u8; 32], sighash: [u8; 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::SysRng;
 
     fn seed(b: u8) -> [u8; 32] {
         [b; 32]

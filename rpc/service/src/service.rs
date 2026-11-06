@@ -500,12 +500,12 @@ NOTE: This error usually indicates an RPC conversion error between the node and 
             let dev_spk =
                 self.config.params.dev_fee_recipient.map(|recipient| RpcScriptPublicKey::new(0, ScriptVec::from_slice(&recipient)));
             let red_reward_index = queried_ghostdag.mergeset_blues.len();
-            if let Some(own_red_reward_output) = queried_coinbase.outputs.get(red_reward_index) {
-                if dev_spk.as_ref() != Some(&own_red_reward_output.script_public_key) {
-                    reward_amount = reward_amount.checked_add(own_red_reward_output.value).ok_or_else(|| {
-                        RpcError::General("total reward amount overflowed u64 while adding own red reward".to_string())
-                    })?;
-                }
+            if let Some(own_red_reward_output) = queried_coinbase.outputs.get(red_reward_index)
+                && dev_spk.as_ref() != Some(&own_red_reward_output.script_public_key)
+            {
+                reward_amount = reward_amount
+                    .checked_add(own_red_reward_output.value)
+                    .ok_or_else(|| RpcError::General("total reward amount overflowed u64 while adding own red reward".to_string()))?;
             }
         }
 
