@@ -87,7 +87,10 @@ async fn test_concurrent_pipeline_random() {
     let poi = Poisson::new((bps * delay) as f64).unwrap();
     let mut thread_rng = rand::thread_rng();
 
-    let config = ConfigBuilder::new(MAINNET_PARAMS).skip_proof_of_work().edit_consensus_params(|p| p.genesis.hash = genesis).build();
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(MAINNET_PARAMS))
+        .skip_proof_of_work()
+        .edit_consensus_params(|p| p.genesis.hash = genesis)
+        .build();
     let consensus = TestConsensus::new(&config);
     let wait_handles = consensus.init();
 

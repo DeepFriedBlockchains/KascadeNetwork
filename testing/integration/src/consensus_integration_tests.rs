@@ -427,7 +427,10 @@ async fn block_window_test() {
 #[tokio::test]
 async fn header_in_isolation_validation_test() {
     init_allocator_with_default_settings();
-    let config = ConfigBuilder::new(MAINNET_PARAMS).edit_consensus_params(|p| p.skip_proof_of_work = true).build();
+    let config = ConfigBuilder::new(MAINNET_PARAMS)
+        .skip_proof_of_work()
+        .edit_consensus_params(|p| p.toccata_activation = ForkActivation::never())
+        .build();
     let consensus = TestConsensus::new(&config);
     let wait_handles = consensus.init();
     let block = consensus.build_header_only_block_with_parents(1.into(), vec![config.genesis.hash]);
@@ -731,6 +734,8 @@ async fn mergeset_size_limit_test() {
     consensus.shutdown(wait_handles);
 }
 
+mod goref_fixtures;
+
 #[tokio::test]
 async fn goref_custom_pruning_depth_test() {
     init_allocator_with_default_settings();
@@ -776,7 +781,12 @@ async fn json_test(file_path: &str, concurrency: bool) {
     let params = {
         let first_line = lines.next().unwrap();
         let parsed_params = if let Ok(override_params) = serde_json::from_str::<OverrideParams>(&first_line) {
-            Some(DEVNET_PARAMS.override_params(override_params))
+            let mut base = DEVNET_PARAMS;
+            if override_params.shielded_coinbase == Some(false) {
+                base.dev_fee_permille = 0;
+                base.dev_fee_recipient = None;
+            }
+            Some(base.override_params(override_params))
         } else {
             None
         };
@@ -792,6 +802,11 @@ async fn json_test(file_path: &str, concurrency: bool) {
             if !proof_exists {
                 let second_line = lines.next().unwrap();
                 let genesis_block = json_line_to_block(second_line);
+                if params.skip_proof_of_work && !params.shielded_coinbase {
+                    assert_eq!(hashing::header::hash(&genesis_block.header), genesis_block.hash());
+                    assert_eq!(genesis_block.hash(), DEVNET_PARAMS.genesis.hash);
+                    assert_eq!(genesis_block.transactions[0].payload, DEVNET_PARAMS.genesis.coinbase_payload);
+                }
                 params.genesis = (genesis_block.header.as_ref(), DEVNET_PARAMS.genesis.coinbase_payload).into();
             }
             params.low_difficulty_start_blocks = 0;
@@ -947,6 +962,9 @@ async fn json_test(file_path: &str, concurrency: bool) {
 
     // Assert that at least one body tip was resolved with valid UTXO
     assert!(tc.body_tips().iter().copied().any(|h| tc.block_status(h) == BlockStatus::StatusUTXOValid));
+    if file_path.ends_with("/goref_custom_pruning_depth") {
+        assert_ne!(tc.pruning_point(), config.genesis.hash, "fixture must advance the pruning point");
+    }
     // Assert that the indexed selected chain store matches the virtual chain obtained
     // through the reachability iterator
     assert_selected_chain_store_matches_virtual_chain(&tc);
@@ -966,6 +984,7 @@ fn submit_header_chunk(
     let mut futures = Vec::new();
     for line in chunk {
         let block = json_line_to_block(line);
+        assert_eq!(hashing::header::hash(&block.header), block.hash());
         external_block_store.insert(block.hash(), block.transactions).unwrap();
         let block = Block::from_header_arc(block.header);
         let f = tc.validate_and_insert_block(block).virtual_state_task;
@@ -1385,7 +1404,7 @@ async fn selected_chain_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("info");
 
-    let config = ConfigBuilder::new(MAINNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(MAINNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.min_difficulty_window_size = p.difficulty_window_size;
@@ -1590,7 +1609,7 @@ async fn seqcommit_sp_context_threshold_edge_test() {
     );
     let initial_utxo_collection = [initial_utxo.clone()];
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -1764,7 +1783,7 @@ async fn kip10_test() {
     )];
 
     // Initialize consensus with KIP-10 activation point
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -1820,7 +1839,7 @@ async fn kip10_test() {
 #[tokio::test]
 async fn toccata_activation_test() {
     const ACTIVATION_DAA_SCORE: u64 = 3;
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -1943,7 +1962,7 @@ async fn push_limit_activation_test() {
     kaspa_core::log::try_init_logger("info");
 
     const ACTIVATION_DAA_SCORE: u64 = 4;
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -2110,7 +2129,7 @@ async fn push_limit_activation_test() {
 
 #[tokio::test]
 async fn payload_test() {
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -2180,7 +2199,7 @@ async fn payload_for_native_tx_test() {
     )];
 
     // Initialize consensus with payload activation point
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2258,7 +2277,7 @@ fn build_p2pk_block(
         })
         .collect::<Vec<_>>();
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2383,7 +2402,7 @@ fn init_toccata_stark_fixture() -> (TestConsensus, Vec<std::thread::JoinHandle<(
         })
         .collect::<Vec<_>>();
 
-    let mut params = TESTNET_PARAMS;
+    let mut params = crate::common::transparent_test_params(TESTNET_PARAMS);
     params.crescendo_activation = ForkActivation::always();
     params.toccata_activation = ForkActivation::always();
 
@@ -2551,7 +2570,7 @@ async fn runtime_sig_op_counting_test() {
         },
     )];
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2671,7 +2690,7 @@ async fn sighash_type_commitment_test() {
         ));
     }
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2842,7 +2861,7 @@ async fn sighash_type_commitment_test() {
 #[tokio::test]
 async fn pruning_test() {
     init_allocator_with_default_settings();
-    let config = ConfigBuilder::new(MAINNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(MAINNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.finality_depth = 2;

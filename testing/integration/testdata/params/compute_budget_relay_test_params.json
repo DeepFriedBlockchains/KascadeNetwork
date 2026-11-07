@@ -10,6 +10,8 @@
     "merge_depth": 36000,
     "finality_depth": 432000,
     "pruning_depth": 1080000,
-    "coinbase_maturity": 0
+    "coinbase_maturity": 0,
+    "shielded_anchor_depth": 6000,
+    "max_shielded_anchor_age": 270000
   }
 }
