@@ -8,6 +8,8 @@ mod import_operation;
 #[cfg(test)]
 mod import_readiness;
 #[cfg(test)]
+mod import_smt_readiness;
+#[cfg(test)]
 mod persistent_branch_authority;
 mod processor;
 mod utxo_inquirer;

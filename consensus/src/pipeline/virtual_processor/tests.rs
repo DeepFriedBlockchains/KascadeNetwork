@@ -1,4 +1,8 @@
-use crate::{consensus::test_consensus::TestConsensus, model::services::reachability::ReachabilityService};
+use crate::{
+    consensus::test_consensus::TestConsensus,
+    model::{services::reachability::ReachabilityService, stores::shielded::NullifierSetStore},
+    processes::shielded::ShieldedStateManager,
+};
 use kaspa_consensus_core::{
     BlockHashSet,
     api::ConsensusApi,
@@ -346,6 +350,30 @@ async fn shielded_coinbase_mints_into_the_pool_live() {
     assert!(advanced, "shielded coinbase must have appended notes and advanced the anchor past empty");
 }
 
+// The hash comes from the validated selected chain, independently of the imported state.
+fn authenticated_shielded_child_root(child: &Block, trusted_child: Hash) -> Result<[u8; 32], &'static str> {
+    use kaspa_consensus_core::{hashing, merkle::calc_hash_merkle_root, zkas_state_binding::extract_state_root};
+
+    if child.hash() != trusted_child || hashing::header::hash(&child.header) != trusted_child {
+        return Err("unexpected shielded commitment child");
+    }
+    let coinbase = child.transactions.first().filter(|tx| tx.is_coinbase()).ok_or("missing shielded commitment coinbase")?;
+    if calc_hash_merkle_root(child.transactions.iter()) != child.header.hash_merkle_root {
+        return Err("shielded commitment child body does not match the trusted header");
+    }
+    extract_state_root(&coinbase.payload).ok_or("missing shielded commitment")
+}
+
+// This receiver has imported exactly the point and has not applied descendants.
+// Its global nullifier rows must therefore match the point's committed accumulator.
+fn verify_seeded_shielded_state(store: &ShieldedStateManager, point: Hash, expected: [u8; 32]) -> Result<(), String> {
+    let metadata = store.export_pruning_point_shielded(point).map_err(|error| error.to_string())?.ok_or("missing shielded frontier")?;
+    ShieldedStateManager::verify_import_binding(&metadata, expected)?;
+    let nullifiers = store.nullifier_set_snapshot().map_err(|error| error.to_string())?;
+    ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter())?;
+    Ok(())
+}
+
 /// THE end-to-end milestone (PLAN §2): under REAL FishHashPlus PoW, mine a
 /// shielded-coinbase chain, then have the "wallet" build a REAL Orchard spend of
 /// a mined coinbase note and push it through a mined block. The consensus layer
@@ -358,6 +386,11 @@ async fn shielded_coinbase_mints_into_the_pool_live() {
 async fn real_shielded_spend_through_mined_block() {
     use kaspa_consensus_core::subnets::SUBNETWORK_ID_NATIVE;
     use kaspa_consensus_core::tx::TX_VERSION_SHIELDED;
+    use kaspa_database::{
+        create_temp_db,
+        prelude::{CachePolicy, ConnBuilder},
+    };
+    use rocksdb::WriteBatch;
 
     let mut params = MAINNET_PARAMS.clone();
     params.shielded_coinbase = true;
@@ -438,6 +471,49 @@ async fn real_shielded_spend_through_mined_block() {
     assert_eq!(ctx.consensus.block_status(spend_block_hash), BlockStatus::StatusUTXOValid);
     let spend_anchor = ctx.consensus.virtual_processor().shielded_anchor_at(spend_block_hash).unwrap();
     assert_ne!(spend_anchor, anchor1, "spend block's shielded state advanced");
+
+    // The next block applies the spend from its selected parent. Its own
+    // selected child then commits that post-spend state in the coinbase.
+    let state_block = ctx.mine_real_pow_block();
+    let point = state_block.hash();
+    let status = ctx.consensus.validate_and_insert_block(state_block).virtual_state_task.await.unwrap();
+    assert_eq!(status, BlockStatus::StatusUTXOValid);
+    let child = ctx.mine_real_pow_block();
+    let status = ctx.consensus.validate_and_insert_block(child.clone()).virtual_state_task.await.unwrap();
+    assert_eq!(status, BlockStatus::StatusUTXOValid);
+    let trusted_child = ctx.consensus.get_headers_selected_tip();
+    assert_eq!(ctx.consensus.get_ghostdag_data(trusted_child).unwrap().selected_parent, point);
+    let committed = authenticated_shielded_child_root(&child, trusted_child).unwrap();
+
+    let mut forged_body = child.transactions.as_ref().clone();
+    forged_body[0].payload[kaspa_consensus_core::zkas_state_binding::SHIELDED_COMMITMENT_OFFSET] ^= 1;
+    forged_body[0].finalize();
+    let forged = Block::from_arcs(child.header.clone(), std::sync::Arc::new(forged_body));
+    assert_eq!(forged.hash(), trusted_child);
+    assert_eq!(
+        authenticated_shielded_child_root(&forged, trusted_child),
+        Err("shielded commitment child body does not match the trusted header")
+    );
+
+    let source = &ctx.consensus.virtual_processor().shielded_state_manager;
+    let metadata = source.export_pruning_point_shielded(point).unwrap().unwrap();
+    let nullifiers = source.nullifier_set_snapshot().unwrap();
+    assert_eq!(nullifiers.len(), 1, "the accepted Orchard spend must contribute a nullifier");
+    ShieldedStateManager::verify_import_binding(&metadata, committed).unwrap();
+    ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).unwrap();
+
+    let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+    let receiver = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
+    let mut batch = WriteBatch::default();
+    receiver.seed_pruning_point_shielded(&mut batch, point, &metadata, nullifiers.iter()).unwrap();
+    db.write(batch).unwrap();
+    verify_seeded_shielded_state(&receiver, point, committed).unwrap();
+
+    let mut batch = WriteBatch::default();
+    receiver.nullifiers().delete_batch(&mut batch, nullifiers[0]).unwrap();
+    db.write(batch).unwrap();
+    assert_eq!(receiver.state_root_at(point).unwrap(), committed, "the snapshot still claims the trusted root");
+    assert!(verify_seeded_shielded_state(&receiver, point, committed).is_err(), "the verifier must detect the missing membership row");
 }
 
 /// NEGATIVE / soundness + LIVENESS (PLAN §2.5, task #31): a **cryptographically

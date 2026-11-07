@@ -2426,6 +2426,17 @@ impl VirtualStateProcessor {
         retention: super::branch_readiness::ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        self.with_authority_point(authority, |point| authority.complete_verified_import(token, point, retention, verify_remaining))
+        self.with_authority_point(authority, |point| {
+            authority.complete_verified_import(token, point, retention, |db, point| {
+                super::import_smt_readiness::verify_pruning_smt(
+                    db,
+                    point,
+                    self.genesis.hash,
+                    self.toccata_activation,
+                    self.finality_depth,
+                )?;
+                verify_remaining(db, point)
+            })
+        })
     }
 }

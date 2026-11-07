@@ -108,7 +108,7 @@ fn inconsistent(reason: &str) -> StoreError {
 mod tests {
     use super::{super::persistent_branch_authority::PersistentBranchAuthority, *};
     use crate::{
-        config::Config,
+        config::ConfigBuilder,
         consensus::test_consensus::TestConsensus,
         model::stores::{
             headers::HeaderStore,
@@ -120,7 +120,7 @@ mod tests {
         params::DEVNET_PARAMS,
     };
     use kaspa_consensus_core::{
-        config::genesis::DEVNET_GENESIS,
+        config::{genesis::DEVNET_GENESIS, params::ForkActivation},
         header::Header,
         tx::{ScriptPublicKey, TransactionOutpoint, UtxoEntry},
     };
@@ -218,7 +218,8 @@ mod tests {
     fn guarded_completion_checks_actual_utxo_rows_and_pins_metadata() {
         let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let (sender, _receiver) = async_channel::unbounded();
-        let consensus = TestConsensus::with_db(db.clone(), &Config::new(DEVNET_PARAMS), sender);
+        let config = ConfigBuilder::new(DEVNET_PARAMS).edit_consensus_params(|p| p.toccata_activation = ForkActivation::never()).build();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender);
         let processor = consensus.virtual_processor();
         let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
         let mut utxos = DbUtxoSetStore::new(db.clone(), CachePolicy::Empty, DatabaseStorePrefixes::PruningUtxoset.into());

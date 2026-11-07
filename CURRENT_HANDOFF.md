@@ -22,3 +22,7 @@ The guarded import continuation adds worker permits, committed metadata
 corroboration, and UTXO commitment verification under processor pruning
 guards. See [the continuation report](docs/development/PHASE6_IMPORT_VERIFICATION_2026-11-07.md). Full proof, SMT and
 shielded verification, and live import caller wiring remain pending.
+
+The import commitment branch adds guarded SMT corroboration and an isolated
+shielded-state regression. See [the commitment report](docs/development/PHASE6_IMPORT_COMMITMENTS_2026-11-07.md).
+CI and live integration are pending.
