@@ -70,10 +70,8 @@ impl PersistentBranchAuthority {
         registry.retain(|_, authority| authority.strong_count() != 0);
         let key = Arc::as_ptr(&db) as usize;
         let inner = registry.get(&key).and_then(Weak::upgrade).unwrap_or_else(|| {
-            let inner = Arc::new(AuthorityInner {
-                _database_identity: Arc::downgrade(&db),
-                state: Mutex::new(AuthorityState::default()),
-            });
+            let inner =
+                Arc::new(AuthorityInner { _database_identity: Arc::downgrade(&db), state: Mutex::new(AuthorityState::default()) });
             registry.insert(key, Arc::downgrade(&inner));
             inner
         });
