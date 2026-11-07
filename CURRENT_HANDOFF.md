@@ -22,3 +22,9 @@ The guarded import continuation adds worker permits, committed metadata
 corroboration, and UTXO commitment verification under processor pruning
 guards. See [the continuation report](docs/development/PHASE6_IMPORT_VERIFICATION_2026-11-07.md). Full proof, SMT and
 shielded verification, and live import caller wiring remain pending.
+
+The guarded import code at `23fe1993616231da6099d6e8bd6fdec88bb8aa35` passed all eight jobs in
+[run 42402654584](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42402654584).
+Native nextest passed 1,545 tests with 25 skipped, including all 27
+new database and import regressions. The commitment branch is the
+next candidate. Live caller wiring and proof authentication remain gated.
