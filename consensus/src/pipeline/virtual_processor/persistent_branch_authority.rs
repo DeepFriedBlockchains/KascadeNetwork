@@ -22,14 +22,15 @@ use std::{
 };
 
 pub(super) struct PersistentBranchAuthority {
+    db: Arc<DB>,
+    readiness: DbBranchReadiness,
     inner: Arc<AuthorityInner>,
     owner: Arc<()>,
 }
 
 struct AuthorityInner {
-    // Pin exact DB identity while wrappers, leases or tokens remain alive.
-    db: Arc<DB>,
-    readiness: DbBranchReadiness,
+    // Reserve the Arc allocation identity without keeping RocksDB open.
+    _database_identity: Weak<DB>,
     state: Mutex<AuthorityState>,
 }
 
@@ -70,14 +71,13 @@ impl PersistentBranchAuthority {
         let key = Arc::as_ptr(&db) as usize;
         let inner = registry.get(&key).and_then(Weak::upgrade).unwrap_or_else(|| {
             let inner = Arc::new(AuthorityInner {
-                readiness: DbBranchReadiness::new(db.clone()),
-                db,
+                _database_identity: Arc::downgrade(&db),
                 state: Mutex::new(AuthorityState::default()),
             });
             registry.insert(key, Arc::downgrade(&inner));
             inner
         });
-        Self { inner, owner: Arc::new(()) }
+        Self { readiness: DbBranchReadiness::new(db.clone()), db, inner, owner: Arc::new(()) }
     }
 
     /// Enter before ANY import mutation. Failed marker persistence blocks this
@@ -90,14 +90,14 @@ impl PersistentBranchAuthority {
         }
         state.failed = true;
         state.generation = Arc::new(());
-        let closed_revision = self.inner.readiness.close_revision_sync()?;
+        let closed_revision = self.readiness.close_revision_sync()?;
         let session = Arc::new(());
         state.import = Arc::downgrade(&session);
         Ok(PersistentImportToken { inner: self.inner.clone(), closed_revision, owner: self.owner.clone(), session })
     }
 
     pub(super) fn owns_database(&self, db: &Arc<DB>) -> bool {
-        Arc::ptr_eq(&self.inner.db, db)
+        Arc::ptr_eq(&self.db, db)
     }
 
     fn check_import(&self, state: &AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
@@ -105,7 +105,7 @@ impl PersistentBranchAuthority {
         if !Arc::ptr_eq(&self.inner, &token.inner)
             || !Arc::ptr_eq(&self.owner, &token.owner)
             || !Arc::ptr_eq(&active, &token.session)
-            || self.inner.readiness.closed_revision()? != Some(token.closed_revision)
+            || self.readiness.closed_revision()? != Some(token.closed_revision)
         {
             return Err(rejected());
         }
@@ -113,8 +113,8 @@ impl PersistentBranchAuthority {
     }
 
     fn verify_point(&self, point: ReadinessPoint) -> StoreResult<()> {
-        let pruning = DbPruningStore::new(self.inner.db.clone());
-        let past = DbPastPruningPointsStore::new(self.inner.db.clone(), CachePolicy::Empty);
+        let pruning = DbPruningStore::new(self.db.clone());
+        let past = DbPastPruningPointsStore::new(self.db.clone(), CachePolicy::Empty);
         if pruning.pruning_point_and_index()? != (point.hash, point.index) || past.get(point.index)? != point.hash {
             return Err(rejected());
         }
@@ -125,8 +125,8 @@ impl PersistentBranchAuthority {
     pub(super) fn apply_import(&self, token: &PersistentImportToken, mut batch: DeferredDbBatch<'_>) -> StoreResult<()> {
         let mut state = self.inner.state.lock();
         self.check_import(&state, token)?;
-        batch.ensure_database(&self.inner.db)?;
-        self.inner.readiness.stage_closed(&mut batch, token.closed_revision)?;
+        batch.ensure_database(&self.db)?;
+        self.readiness.stage_closed(&mut batch, token.closed_revision)?;
         if let Err(error) = batch.commit() {
             state.import = Weak::new();
             return Err(error);
@@ -166,10 +166,10 @@ impl PersistentBranchAuthority {
         let mut state = self.inner.state.lock();
         self.check_import(&state, &token)?;
         self.verify_point(point)?;
-        verify(&self.inner.db, point)?;
+        verify(&self.db, point)?;
         self.check_import(&state, &token)?;
         self.verify_point(point)?;
-        self.inner.readiness.complete_sync(point)?;
+        self.readiness.complete_sync(point)?;
         state.generation = Arc::new(());
         state.failed = false;
         state.import = Weak::new();
@@ -181,7 +181,7 @@ impl PersistentBranchAuthority {
         if state.failed || state.import.upgrade().is_some() {
             return Err(rejected());
         }
-        let revision = self.inner.readiness.ready_revision(point)?.ok_or_else(rejected)?;
+        let revision = self.readiness.ready_revision(point)?.ok_or_else(rejected)?;
         self.verify_point(point)?;
         Ok(PersistentBranchLease {
             inner: self.inner.clone(),
@@ -206,16 +206,16 @@ impl PersistentBranchAuthority {
             || state.failed
             || state.import.upgrade().is_some()
             || lease.point != point
-            || self.inner.readiness.ready_revision(point)? != Some(lease.revision)
+            || self.readiness.ready_revision(point)? != Some(lease.revision)
         {
             return Err(rejected());
         }
         self.verify_point(point)?;
-        batch.ensure_database(&self.inner.db)?;
+        batch.ensure_database(&self.db)?;
         state.generation = Arc::new(());
         state.failed = true;
-        self.inner.readiness.close_revision_sync()?;
-        self.inner.readiness.stage_ready(&mut batch, point)?;
+        self.readiness.close_revision_sync()?;
+        self.readiness.stage_ready(&mut batch, point)?;
         batch.commit()?;
         state.failed = false;
         Ok(())
@@ -428,5 +428,30 @@ mod tests {
             })
             .unwrap();
         assert!(owner.lease(point()).is_ok());
+    }
+
+    #[test]
+    fn abandoned_capabilities_do_not_pin_staging_database_handles() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(32).with_db_path(temp.path().to_owned()).build().unwrap();
+        let db = connect();
+        install_point(&db);
+        let old_db = Arc::downgrade(&db);
+        let owner = PersistentBranchAuthority::new(db.clone());
+        complete(&owner);
+        let old_lease = owner.lease(point()).unwrap();
+        let old_token = owner.begin_import().unwrap();
+        drop(owner);
+        drop(db);
+        assert!(old_db.upgrade().is_none(), "opaque capabilities must not keep RocksDB open");
+
+        let db = connect();
+        let restarted = PersistentBranchAuthority::new(db.clone());
+        assert!(restarted.lease(point()).is_err());
+        let recovery = restarted.begin_import().unwrap();
+        assert!(restarted.apply_import(&old_token, data_batch(&db)).is_err());
+        restarted.complete_import(recovery, point(), |_, _| Ok(())).unwrap();
+        assert!(restarted.commit(point(), old_lease, data_batch(&db)).is_err());
+        assert!(db.get(DATA_KEY).unwrap().is_none());
     }
 }

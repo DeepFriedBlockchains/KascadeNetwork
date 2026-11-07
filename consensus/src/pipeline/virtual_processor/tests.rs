@@ -367,7 +367,8 @@ fn authenticated_shielded_child_root(child: &Block, trusted_child: Hash) -> Resu
 // This receiver has imported exactly the point and has not applied descendants.
 // Its global nullifier rows must therefore match the point's committed accumulator.
 fn verify_seeded_shielded_state(store: &ShieldedStateManager, point: Hash, expected: [u8; 32]) -> Result<(), String> {
-    let metadata = store.export_pruning_point_shielded(point).map_err(|error| error.to_string())?.ok_or("missing shielded frontier")?;
+    let metadata =
+        store.export_pruning_point_shielded(point).map_err(|error| error.to_string())?.ok_or("missing shielded frontier")?;
     ShieldedStateManager::verify_import_binding(&metadata, expected)?;
     let nullifiers = store.nullifier_set_snapshot().map_err(|error| error.to_string())?;
     ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter())?;

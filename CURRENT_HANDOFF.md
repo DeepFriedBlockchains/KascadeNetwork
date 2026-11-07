@@ -26,3 +26,6 @@ shielded verification, and live import caller wiring remain pending.
 The import commitment branch adds guarded SMT corroboration and an isolated
 shielded-state regression. See [the commitment report](docs/development/PHASE6_IMPORT_COMMITMENTS_2026-11-07.md).
 CI and live integration are pending.
+The commitment branch also verifies that abandoned capabilities do not
+keep a staging database open. Worker lifetime and database handle lifetime
+are separate: the operation must finish before its active owner is dropped.

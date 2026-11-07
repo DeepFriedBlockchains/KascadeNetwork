@@ -68,7 +68,8 @@ pub(super) fn verify_pruning_smt(
     // authenticated chain window. Both scans read persisted rows directly.
     let is_canonical = |hash| hash == ZERO_HASH || canonical.contains(&hash);
     let stores = SmtStores::new(db.clone(), 1, 1);
-    let (lanes_root, lane_count) = stores.recompute_lanes_root_from_leaf_stream(bounds, metadata.active_lanes_count(), is_canonical)?;
+    let (lanes_root, lane_count) =
+        stores.recompute_lanes_root_from_leaf_stream(bounds, metadata.active_lanes_count(), is_canonical)?;
     if lane_count != metadata.active_lanes_count() {
         return Err(inconsistent("committed SMT lane count does not match metadata"));
     }
@@ -108,11 +109,8 @@ fn read_header(headers: &DbHeadersStore, hash: Hash) -> StoreResult<Arc<Header>>
 }
 
 fn read_parent(headers: &DbHeadersStore, child: &Header) -> StoreResult<Arc<Header>> {
-    let hash = child
-        .direct_parents()
-        .first()
-        .copied()
-        .ok_or_else(|| inconsistent("active SMT header is missing its selected parent"))?;
+    let hash =
+        child.direct_parents().first().copied().ok_or_else(|| inconsistent("active SMT header is missing its selected parent"))?;
     let parent = read_header(headers, hash)?;
     if parent.blue_score >= child.blue_score {
         return Err(inconsistent("SMT parent blue score does not precede its child"));
@@ -145,9 +143,7 @@ mod tests {
         if let Some(parent) = parent {
             parents.push(vec![parent]);
         }
-        Arc::new(Header::new_finalized(
-            0, parents, ZERO_HASH, seq_commit, ZERO_HASH, 0, 0, 0, score, 0.into(), score, ZERO_HASH,
-        ))
+        Arc::new(Header::new_finalized(0, parents, ZERO_HASH, seq_commit, ZERO_HASH, 0, 0, 0, score, 0.into(), score, ZERO_HASH))
     }
 
     #[test]
@@ -186,9 +182,7 @@ mod tests {
 
         let metadata = DbSmtMetadataStore::new(db.clone(), CachePolicy::Count(1));
         let mut staged = WriteBatch::default();
-        metadata
-            .insert_batch(&mut staged, point.hash, SmtBlockMetadata::new(payload_and_ctx_digest, genesis.hash, 1))
-            .unwrap();
+        metadata.insert_batch(&mut staged, point.hash, SmtBlockMetadata::new(payload_and_ctx_digest, genesis.hash, 1)).unwrap();
         assert!(verify().is_err());
         db.write(staged).unwrap();
         assert!(verify().is_err()); // The legacy genesis row cannot replace the active anchor.
@@ -225,10 +219,7 @@ mod tests {
         let legacy = header(None, 0, Hash::from_bytes([8; 32]));
         headers.insert(legacy.hash, legacy.clone(), 0).unwrap();
         let point = ReadinessPoint { hash: legacy.hash, index: 0 };
-        assert_eq!(
-            verify_pruning_smt(&db, point, legacy.hash, ForkActivation::new(2), 1).unwrap(),
-            CommittedPruningSmt::PreToccata
-        );
+        assert_eq!(verify_pruning_smt(&db, point, legacy.hash, ForkActivation::new(2), 1).unwrap(), CommittedPruningSmt::PreToccata);
         assert!(verify_pruning_smt(&db, point, legacy.hash, ForkActivation::always(), 1).is_err());
     }
 }

@@ -218,7 +218,8 @@ mod tests {
     fn guarded_completion_checks_actual_utxo_rows_and_pins_metadata() {
         let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let (sender, _receiver) = async_channel::unbounded();
-        let config = ConfigBuilder::new(DEVNET_PARAMS).edit_consensus_params(|p| p.toccata_activation = ForkActivation::never()).build();
+        let config =
+            ConfigBuilder::new(DEVNET_PARAMS).edit_consensus_params(|p| p.toccata_activation = ForkActivation::never()).build();
         let consensus = TestConsensus::with_db(db.clone(), &config, sender);
         let processor = consensus.virtual_processor();
         let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);

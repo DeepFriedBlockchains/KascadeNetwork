@@ -19,3 +19,16 @@ processor path, bind shielded verification to that path, and thread the
 authority token through every direct and staged import caller. Cancellation
 and staging cleanup must preserve worker exclusion and release database
 handles before deletion. Consensus activation remains gated.
+
+## Database handle lifetime
+
+Opaque leases and tokens retain their authority identity without keeping
+a RocksDB handle open. An operation worker still holds the actual owner
+while it writes. A regression closes and reopens the staging database
+with old capabilities outstanding, then verifies that they cannot
+authorize writes on the reopened database.
+
+[Run 42403266175](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42403266175)
+compiled the original commitment candidate and reported formatter changes.
+This revision applies those changes and adds the handle-lifetime regression.
+Full validation is pending on the revised branch head.
