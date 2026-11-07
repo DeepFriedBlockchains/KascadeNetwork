@@ -16,10 +16,8 @@ invariants that can be checked from the serialized JSON alone:
   * DAA `bits` values are present and non-zero for non-genesis blocks;
   * the observed blue-score span is consistent with the configured pruning depth.
 
-Block-hash recomputation (kHeavyHash / blake2b header hashing) is deliberately
-out of scope here: it requires `kaspa-hashes` and is performed by the Rust
-integration tests and by `simpa` itself. See
-docs/development/GOREF_FIXTURE_REGENERATION_2026-11-06.md for the full runbook.
+Header hashes are independently recomputed with Python's keyed BLAKE2b-256.
+Rust replay additionally checks expected DAA scores, bits and pruning advancement.
 
 Exit codes:
   0  all structural invariants hold and payloads are KASCADE-compatible
@@ -31,8 +29,10 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import sys
+import struct
 from collections import Counter
 
 KASCADE_COMMITMENT_LEN = 32
@@ -91,10 +91,34 @@ def coinbase_payload(block: dict) -> bytes:
         return b""
 
 
+def header_hash(header: dict) -> str:
+    hasher = hashlib.blake2b(digest_size=32, key=b"BlockHash")
+    levels = header["parentsByLevel"]
+    hasher.update(struct.pack("<HQ", header["version"], len(levels)))
+    for level in levels:
+        hasher.update(struct.pack("<Q", len(level)))
+        for parent in level:
+            hasher.update(bytes.fromhex(parent))
+    for field in ("hashMerkleRoot", "acceptedIdMerkleRoot", "utxoCommitment"):
+        hasher.update(bytes.fromhex(header[field]))
+    hasher.update(
+        struct.pack("<QIQQQ", header["timestamp"], header["bits"], header["nonce"], header["daaScore"], header["blueScore"])
+    )
+    work = int(header["blueWork"] or "0", 16)
+    work_bytes = work.to_bytes((work.bit_length() + 7) // 8, "big")
+    hasher.update(struct.pack("<Q", len(work_bytes)))
+    hasher.update(work_bytes)
+    hasher.update(bytes.fromhex(header["pruningPoint"]))
+    return hasher.hexdigest()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("fixture", help="path to blocks.json.gz")
     ap.add_argument("--quiet", action="store_true", help="only print the final verdict")
+    ap.add_argument("--expect", type=int, nargs=3, metavar=("BLOCKS", "SPENDS", "MERGES"))
+    ap.add_argument("--require-daa-change", action="store_true")
+    ap.add_argument("--require-pruning-span", action="store_true")
     args = ap.parse_args()
 
     params, blocks = load(args.fixture)
@@ -118,6 +142,12 @@ def main() -> int:
         if not h:
             problems.append(f"block #{idx} has no header.hash")
             h = f"<missing-{idx}>"
+        try:
+            actual_hash = header_hash(hdr)
+            if actual_hash != h:
+                problems.append(f"block #{idx}: header hash mismatch ({actual_hash} != {h})")
+        except (KeyError, TypeError, ValueError, struct.error) as exc:
+            problems.append(f"block #{idx}: cannot hash header: {exc}")
         hashes.append(h)
     dupes = [h for h, n in Counter(hashes).items() if n > 1]
     if dupes:
@@ -208,6 +238,19 @@ def main() -> int:
         pruning_note = f"span {span} vs pruning_depth {pruning_depth} " + (
             "within" if span <= pruning_depth else "spans-more (expected for pruning fixtures)"
         )
+
+    if args.expect:
+        non_genesis = [block for i, block in enumerate(blocks) if i not in genesis]
+        spends = sum(len(block.get("transactions") or []) - 1 for block in non_genesis)
+        merges = sum(len(block["header"]["parentsByLevel"][0]) > 1 for block in non_genesis)
+        counts = (len(non_genesis), spends, merges)
+        if counts != tuple(args.expect):
+            problems.append(f"expected {tuple(args.expect)} blocks/spends/merges, found {counts}")
+        print(f"blocks/spends/merges: {counts}")
+    if args.require_daa_change and len(bits) < 2:
+        problems.append("expected the fixture to span a difficulty adjustment")
+    if args.require_pruning_span and not (isinstance(pruning_depth, int) and 0 < pruning_depth < span):
+        problems.append("expected the fixture blue-score span to exceed pruning depth")
 
     # --- report ---------------------------------------------------------
     if not args.quiet:

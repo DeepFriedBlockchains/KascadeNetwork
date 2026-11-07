@@ -2,28 +2,17 @@
 
 Updated November 6, 2026.
 
-## Published checkpoint
+The published root is `62248169f0920277b3ee60cf275080c221a21786`.
+The current validation stack is PR #1, then PR #2, then PR #3 at
+`ed4abfe3a105b45145e7449b91149b52544f6262` before fixture regeneration.
 
-Public main begins at reviewed root `62248169f0920277b3ee60cf275080c221a21786`.
-Its tree is `50165604d2f1d7ead1efe0b1e9a4d869ebe60753`, with 1,494 files
-and no parent commits. Anonymous Git access was verified.
+Run [42225379635](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42225379635)
+passed seven of eight jobs. Native testing recorded 1,129 passes and
+stopped on three legacy goref coinbase payload failures. The isolated
+`ci/goref-regeneration-20261106` candidate runs the regeneration script,
+independent verifier and targeted release tests. Generated fixtures remain
+pending. See [the dated continuation report](docs/development/PHASE6_CONTINUATION_2026-11-06.md).
 
-## Current work
-
-This feature branch updates contribution and build instructions for public
-development and preserves the existing GitHub Actions checks. It adds manual
-workflow dispatch, cancellation of superseded branch runs and the tested
-native test resource limits. Runtime source is unchanged by this increment.
-
-The inactive monetary authority and database-readiness work is being prepared
-as a separate source migration with its associated regression tests.
-Public CI must validate that resulting source before integration.
-
-## Validation and next action
-
-The publication root's Actions run is in progress. This branch requires its
-own Actions validation. Documentation paths and repository URLs have been
-checked against the current source. No new Rust test result is claimed here.
-
-Review this pull request, establish required checks on main, and continue
-the reviewed source migration. Consensus functionality remains inactive.
+Next: verify hosted output and release replay, promote the validated changes
+and fixtures to PR #3, and run the complete workspace CI. The database-bound
+authority wrapper follows CI stabilization. Consensus activation remains gated.

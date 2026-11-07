@@ -1,0 +1,49 @@
+name: Regenerate goref fixtures
+
+on:
+  push:
+    branches: [ci/goref-regeneration-20261106]
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install native dependencies
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libclang-dev cmake
+          df -h
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.93.0
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check || cargo fmt --all
+      - name: Generate and independently validate fixtures
+        run: |
+          ./simpa/regenerate-goref-fixtures.sh
+          git diff --exit-code -- testing/integration/testdata/dags_for_json_tests/upstream-kaspa-originals
+      - name: Replay all goref fixtures in release mode
+        run: cargo test --locked -p kaspa-testing-integration --release goref -- --test-threads=1
+      - name: Record archive digests
+        run: sha256sum testing/integration/testdata/dags_for_json_tests/goref*/blocks.json.gz > goref-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goref-fixtures
+          path: |
+            goref-sha256.txt
+            testing/integration/testdata/dags_for_json_tests/goref*/blocks.json.gz
+          if-no-files-found: error
+          retention-days: 7
