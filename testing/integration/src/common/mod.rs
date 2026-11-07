@@ -13,6 +13,13 @@ pub mod json;
 pub mod listener;
 pub mod utils;
 
+/// Legacy DAG and script fixtures construct transparent coinbases.
+#[cfg(test)]
+pub fn transparent_test_params(mut params: kaspa_consensus::params::Params) -> kaspa_consensus::params::Params {
+    params.shielded_coinbase = false;
+    params
+}
+
 pub fn open_file(file_path: &Path) -> File {
     let file_res = File::open(file_path);
     match file_res {

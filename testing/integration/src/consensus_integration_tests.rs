@@ -1404,7 +1404,7 @@ async fn selected_chain_test() {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("info");
 
-    let config = ConfigBuilder::new(MAINNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(MAINNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.min_difficulty_window_size = p.difficulty_window_size;
@@ -1609,7 +1609,7 @@ async fn seqcommit_sp_context_threshold_edge_test() {
     );
     let initial_utxo_collection = [initial_utxo.clone()];
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -1783,7 +1783,7 @@ async fn kip10_test() {
     )];
 
     // Initialize consensus with KIP-10 activation point
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -1839,7 +1839,7 @@ async fn kip10_test() {
 #[tokio::test]
 async fn toccata_activation_test() {
     const ACTIVATION_DAA_SCORE: u64 = 3;
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -1962,7 +1962,7 @@ async fn push_limit_activation_test() {
     kaspa_core::log::try_init_logger("info");
 
     const ACTIVATION_DAA_SCORE: u64 = 4;
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -2129,7 +2129,7 @@ async fn push_limit_activation_test() {
 
 #[tokio::test]
 async fn payload_test() {
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.coinbase_maturity = 0;
@@ -2199,7 +2199,7 @@ async fn payload_for_native_tx_test() {
     )];
 
     // Initialize consensus with payload activation point
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2277,7 +2277,7 @@ fn build_p2pk_block(
         })
         .collect::<Vec<_>>();
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2402,7 +2402,7 @@ fn init_toccata_stark_fixture() -> (TestConsensus, Vec<std::thread::JoinHandle<(
         })
         .collect::<Vec<_>>();
 
-    let mut params = TESTNET_PARAMS;
+    let mut params = crate::common::transparent_test_params(TESTNET_PARAMS);
     params.crescendo_activation = ForkActivation::always();
     params.toccata_activation = ForkActivation::always();
 
@@ -2570,7 +2570,7 @@ async fn runtime_sig_op_counting_test() {
         },
     )];
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2690,7 +2690,7 @@ async fn sighash_type_commitment_test() {
         ));
     }
 
-    let config = ConfigBuilder::new(DEVNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(DEVNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             let mut genesis_multiset = MuHash::new();
@@ -2861,7 +2861,7 @@ async fn sighash_type_commitment_test() {
 #[tokio::test]
 async fn pruning_test() {
     init_allocator_with_default_settings();
-    let config = ConfigBuilder::new(MAINNET_PARAMS)
+    let config = ConfigBuilder::new(crate::common::transparent_test_params(MAINNET_PARAMS))
         .skip_proof_of_work()
         .edit_consensus_params(|p| {
             p.finality_depth = 2;

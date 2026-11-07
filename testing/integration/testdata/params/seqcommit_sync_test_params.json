@@ -13,7 +13,9 @@
         "merge_depth": 64,
         "finality_depth": 100,
         "pruning_depth": 200,
-        "coinbase_maturity": 10
+        "coinbase_maturity": 10,
+        "shielded_anchor_depth": 20,
+        "max_shielded_anchor_age": 50
     },
     "toccata_activation": 0
 }

@@ -17,7 +17,12 @@ The upstream archive is preserved. The generated blobs were verified at
 [Combined run 42343429452](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42343429452)
 passed all five goref tests and seven jobs. Its one native failure was a
 pre-Toccata header assertion using mainnet's active fork configuration.
-The test configuration is corrected and the workspace suite now reports all
-failures. Next: verify the complete workspace CI on the new PR #3 head. The next Phase 6 implementation is the inactive
-database-bound authority wrapper, with committed readiness checks and
-import-owner enforcement. Consensus activation remains gated.
+The corrected header test and all goref cases passed in
+[run 42345506966](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42345506966).
+That run completed all 1,518 selected tests, with 1,466 passes and 52
+failures in legacy test profiles, daemon/simulator fixtures, and address
+vectors. The next combined run validates those corrections.
+
+After the full workspace is green, continue the inactive database-bound
+authority wrapper with committed readiness checks and import-owner
+enforcement. Consensus activation remains gated.

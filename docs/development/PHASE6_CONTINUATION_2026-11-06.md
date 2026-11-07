@@ -58,3 +58,23 @@ fork configuration preserves the original version-rejection assertion;
 the separate activation test exercises the version transition. The workspace
 job now reports all test results even if a test fails. The corrected head
 requires a fresh combined run before the stack can be called green.
+
+## November 7 complete native failure inventory
+
+[Combined run 42345506966](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42345506966)
+at `a568b6d47ac7bbbab696d1393ec377d3e0d3d4e7` completed all 1,518 selected tests.
+1,466 passed, 52 failed, and 25 additional tests were skipped. The
+pre-Toccata header isolation test and all five goref tests passed. Check,
+formatting and Clippy, no-std, Linux release, and the WASM checks, tests, and
+SDK all passed.
+
+| Area | Failures | Follow-up |
+| --- | ---: | --- |
+| Consensus and pipeline test profiles | 13 | Set the transparent payout profile where the test spends transparent outputs. |
+| Daemon integration harness | 5 | Complete the small-network anchor settings and align test payout configuration. |
+| Simulator test profiles | 4 | Select a payout profile compatible with the simulator's test scripts. |
+| Wallet and script address vectors | 30 | Regenerate checksums for the current address prefixes while preserving payloads and assertions. |
+
+The corrections require another combined workspace run. Test failures and
+the exact checked branch heads remain visible in Actions. Phase 6 work on
+live authority is gated on this public CI baseline.
