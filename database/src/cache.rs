@@ -49,6 +49,7 @@ where
     // We use IndexMap and not HashMap because it makes it cheaper to remove a random element when the cache is full.
     map: IndexMap<TKey, TData, S>,
     tracked_size: usize,
+    generation: Arc<()>,
 }
 
 impl<TKey, TData, S> Inner<TKey, TData, S>
@@ -119,7 +120,7 @@ where
     S: BuildHasher + Default,
 {
     pub fn new(prealloc_size: usize) -> Self {
-        Self { map: IndexMap::with_capacity_and_hasher(prealloc_size, S::default()), tracked_size: 0 }
+        Self { map: IndexMap::with_capacity_and_hasher(prealloc_size, S::default()), tracked_size: 0, generation: Arc::new(()) }
     }
 }
 
@@ -147,6 +148,29 @@ where
 
     pub fn get(&self, key: &TKey) -> Option<TData> {
         self.inner.read().map.get(key).cloned()
+    }
+
+    pub(crate) fn generation(&self) -> Arc<()> {
+        Arc::clone(&self.inner.read().generation)
+    }
+
+    pub(crate) fn insert_if_generation(&self, key: TKey, data: TData, generation: &Arc<()>) {
+        if self.policy.max_size == 0 {
+            return;
+        }
+        let mut inner = self.inner.write();
+        if Arc::ptr_eq(&inner.generation, generation) {
+            inner.insert(&self.policy, key, data);
+        }
+    }
+
+    /// Fence read-through fills begun before this committed invalidation.
+    pub(crate) fn invalidate_committed(&self, key: &TKey) {
+        let mut inner = self.inner.write();
+        inner.generation = Arc::new(());
+        if self.policy.max_size != 0 {
+            inner.remove(&self.policy, key);
+        }
     }
 
     pub fn contains_key(&self, key: &TKey) -> bool {

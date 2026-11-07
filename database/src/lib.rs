@@ -1,6 +1,7 @@
 mod access;
 mod cache;
 mod db;
+mod deferred;
 mod errors;
 mod item;
 mod key;
@@ -15,6 +16,7 @@ pub mod prelude {
 
     pub use super::access::CachedDbAccess;
     pub use super::cache::{Cache, CachePolicy};
+    pub use super::deferred::DeferredDbBatch;
     pub use super::item::{CachedDbItem, CachedDbSetItem};
     pub use super::key::DbKey;
     pub use super::set_access::{CachedDbSetAccess, DbSetAccess, ReadLock};
