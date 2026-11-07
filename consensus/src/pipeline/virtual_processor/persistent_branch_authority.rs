@@ -6,7 +6,10 @@
 //! This module cannot independently corroborate imported consensus state.
 //! The verifier reads committed state and must not reenter the authority.
 
-use super::branch_readiness::{DbBranchReadiness, ReadinessPoint, ReadinessRevision};
+use super::{
+    branch_readiness::{DbBranchReadiness, ReadinessPoint, ReadinessRevision},
+    import_readiness::{CommittedImportMetadata, verify_pruning_utxos},
+};
 use crate::model::stores::{
     past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStoreReader},
     pruning::{DbPruningStore, PruningStoreReader},
@@ -93,6 +96,10 @@ impl PersistentBranchAuthority {
         Ok(PersistentImportToken { inner: self.inner.clone(), closed_revision, owner: self.owner.clone(), session })
     }
 
+    pub(super) fn owns_database(&self, db: &Arc<DB>) -> bool {
+        Arc::ptr_eq(&self.inner.db, db)
+    }
+
     fn check_import(&self, state: &AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
         let active = state.import.upgrade().ok_or_else(rejected)?;
         if !Arc::ptr_eq(&self.inner, &token.inner)
@@ -127,11 +134,30 @@ impl PersistentBranchAuthority {
         Ok(())
     }
 
+    /// Verify committed import metadata and UTXO contents before reopening.
+    /// The processor must provide proof and remaining root verification under
+    /// its pruning session, point and metadata guards.
+    pub(super) fn complete_verified_import(
+        &self,
+        token: PersistentImportToken,
+        point: ReadinessPoint,
+        retention: ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
+    ) -> StoreResult<()> {
+        self.complete_import(token, point, |db, point| {
+            CommittedImportMetadata::verify(db, point, retention)?;
+            verify_pruning_utxos(db, point)?;
+            verify_remaining(db, point)?;
+            CommittedImportMetadata::verify(db, point, retention)?;
+            Ok(())
+        })
+    }
+
     /// Only the owner may complete a session, after independent authoritative
     /// corroboration under the exact metadata guards retained through this call.
     /// A verifier failure, dropped token, or failed sync write leaves it closed.
     /// A nested subcall cannot obtain a second token or complete this token.
-    pub(super) fn complete_import(
+    fn complete_import(
         &self,
         token: PersistentImportToken,
         point: ReadinessPoint,

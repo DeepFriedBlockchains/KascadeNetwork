@@ -17,3 +17,8 @@ See the [dated report](docs/development/PHASE6_AUTHORITY_2026-11-07.md) for scop
 Next: validate this branch, then bind the processor's pruning guards and
 committed import verification to the wrapper. Live import callers, detached
 worker permits and staging cleanup remain open. Consensus activation stays gated.
+
+The guarded import continuation adds worker permits, committed metadata
+corroboration, and UTXO commitment verification under processor pruning
+guards. See [the continuation report](docs/development/PHASE6_IMPORT_VERIFICATION_2026-11-07.md). Full proof, SMT and
+shielded verification, and live import caller wiring remain pending.

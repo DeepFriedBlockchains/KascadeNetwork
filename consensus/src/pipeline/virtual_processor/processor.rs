@@ -2384,3 +2384,48 @@ enum MergesetIncreaseResult {
     Accepted { increase_size: u64 },
     Rejected { new_candidate: Hash },
 }
+
+#[cfg(test)]
+impl VirtualStateProcessor {
+    /// Enter from a caller without an existing pruning session guard.
+    fn with_authority_point<T>(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+        operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
+    ) -> kaspa_database::prelude::StoreResult<T> {
+        if !authority.owns_database(&self.db) {
+            return Err(StoreError::DataInconsistency("authority belongs to another processor database".into()));
+        }
+        let _session = self.pruning_lock.blocking_read();
+        let pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        let (hash, index) = pruning.pruning_point_and_index()?;
+        operation(super::branch_readiness::ReadinessPoint { hash, index })
+    }
+
+    pub(super) fn authority_lease(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(authority, |point| authority.lease(point))
+    }
+
+    pub(super) fn authority_commit(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.with_authority_point(authority, |point| authority.commit(point, lease, batch))
+    }
+
+    pub(super) fn finish_authority_import(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.with_authority_point(authority, |point| authority.complete_verified_import(token, point, retention, verify_remaining))
+    }
+}
