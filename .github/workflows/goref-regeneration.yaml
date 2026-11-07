@@ -4,6 +4,10 @@ on:
   push:
     branches: [ci/goref-regeneration-20261106]
 
+concurrency:
+  group: goref-regeneration
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -30,7 +34,7 @@ jobs:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
-        run: cargo fmt --all -- --check || cargo fmt --all
+        run: cargo fmt --all -- --check
       - name: Generate and independently validate fixtures
         run: |
           ./simpa/regenerate-goref-fixtures.sh
@@ -47,3 +51,24 @@ jobs:
             testing/integration/testdata/dags_for_json_tests/goref*/blocks.json.gz
           if-no-files-found: error
           retention-days: 7
+
+  store:
+    needs: regenerate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: goref-fixtures
+      - name: Store validated fixture blobs on a separate branch
+        env:
+          OUTPUT_BRANCH: ci/goref-generated-20261106
+        run: |
+          sha256sum -c goref-sha256.txt
+          git add -- testing/integration/testdata/dags_for_json_tests/goref*/blocks.json.gz
+          git diff --cached --stat
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Store validated goref fixture output for ${GITHUB_SHA}"
+          git push origin "HEAD:refs/heads/${OUTPUT_BRANCH}"
