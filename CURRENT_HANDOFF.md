@@ -2,28 +2,19 @@
 
 Updated November 6, 2026.
 
-## Published checkpoint
+Public main starts at the reviewed root `62248169f0920277b3ee60cf275080c221a21786`.
+The validation stack is [PR #1](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/1),
+then [PR #2](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/2), then
+[PR #3](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/3).
 
-Public main begins at reviewed root `62248169f0920277b3ee60cf275080c221a21786`.
-Its tree is `50165604d2f1d7ead1efe0b1e9a4d869ebe60753`, with 1,494 files
-and no parent commits. Anonymous Git access was verified.
+The regenerated goref fixtures are on PR #3. The
+[hosted regeneration run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42341317991)
+passed all five targeted release replay tests and the independent verifier.
+The upstream archive is preserved. The generated blobs were verified at
+`868a0db679755b93349567bce698d068a8c69de6`. See the
+[dated continuation report](docs/development/PHASE6_CONTINUATION_2026-11-06.md) for exact test and DAA counts.
 
-## Current work
-
-This feature branch updates contribution and build instructions for public
-development and preserves the existing GitHub Actions checks. It adds manual
-workflow dispatch, cancellation of superseded branch runs and the tested
-native test resource limits. Runtime source is unchanged by this increment.
-
-The inactive monetary authority and database-readiness work is being prepared
-as a separate source migration with its associated regression tests.
-Public CI must validate that resulting source before integration.
-
-## Validation and next action
-
-The publication root's Actions run is in progress. This branch requires its
-own Actions validation. Documentation paths and repository URLs have been
-checked against the current source. No new Rust test result is claimed here.
-
-Review this pull request, establish required checks on main, and continue
-the reviewed source migration. Consensus functionality remains inactive.
+Next: verify the complete workspace CI on the PR #3 head and review the
+stacked bases. The next Phase 6 implementation is the inactive
+database-bound authority wrapper, with committed readiness checks and
+import-owner enforcement. Consensus activation remains gated.

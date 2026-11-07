@@ -9,6 +9,27 @@ diff contains only the goref work). Pristine originals were extracted from
 
 ---
 
+## Current regeneration and validation
+
+The existing shell entry point uses the integration test's deterministic DAG
+recipe and the real KASCADE block-template builder. The isolated fixture
+profile emits current-format coinbase payloads and transparent test payouts.
+The original gzip fixtures are read-only inputs. The recipe keeps the
+historical paths and covers explicit spend and merge counts, DAA variation,
+and pruning advancement. See the [continuation report](PHASE6_CONTINUATION_2026-11-06.md)
+for exact results and hosted run links.
+
+```sh
+./simpa/regenerate-goref-fixtures.sh
+cargo test --locked -p kaspa-testing-integration --release goref -- --test-threads=1
+```
+
+Run `./simpa/regenerate-goref-fixtures.sh --verify` to check the active
+archives with Python and without rebuilding Rust.
+
+The sections below record the initial investigation and the first
+regeneration approach before hosted validation.
+
 ## 1. Objective
 
 Regenerate the three upstream goref DAG fixtures under KASCADE consensus rules so

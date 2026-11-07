@@ -731,6 +731,8 @@ async fn mergeset_size_limit_test() {
     consensus.shutdown(wait_handles);
 }
 
+mod goref_fixtures;
+
 #[tokio::test]
 async fn goref_custom_pruning_depth_test() {
     init_allocator_with_default_settings();
@@ -776,7 +778,12 @@ async fn json_test(file_path: &str, concurrency: bool) {
     let params = {
         let first_line = lines.next().unwrap();
         let parsed_params = if let Ok(override_params) = serde_json::from_str::<OverrideParams>(&first_line) {
-            Some(DEVNET_PARAMS.override_params(override_params))
+            let mut base = DEVNET_PARAMS;
+            if override_params.shielded_coinbase == Some(false) {
+                base.dev_fee_permille = 0;
+                base.dev_fee_recipient = None;
+            }
+            Some(base.override_params(override_params))
         } else {
             None
         };
@@ -792,6 +799,11 @@ async fn json_test(file_path: &str, concurrency: bool) {
             if !proof_exists {
                 let second_line = lines.next().unwrap();
                 let genesis_block = json_line_to_block(second_line);
+                if params.skip_proof_of_work && !params.shielded_coinbase {
+                    assert_eq!(hashing::header::hash(&genesis_block.header), genesis_block.hash());
+                    assert_eq!(genesis_block.hash(), DEVNET_PARAMS.genesis.hash);
+                    assert_eq!(genesis_block.transactions[0].payload, DEVNET_PARAMS.genesis.coinbase_payload);
+                }
                 params.genesis = (genesis_block.header.as_ref(), DEVNET_PARAMS.genesis.coinbase_payload).into();
             }
             params.low_difficulty_start_blocks = 0;
@@ -947,6 +959,9 @@ async fn json_test(file_path: &str, concurrency: bool) {
 
     // Assert that at least one body tip was resolved with valid UTXO
     assert!(tc.body_tips().iter().copied().any(|h| tc.block_status(h) == BlockStatus::StatusUTXOValid));
+    if file_path.ends_with("/goref_custom_pruning_depth") {
+        assert_ne!(tc.pruning_point(), config.genesis.hash, "fixture must advance the pruning point");
+    }
     // Assert that the indexed selected chain store matches the virtual chain obtained
     // through the reachability iterator
     assert_selected_chain_store_matches_virtual_chain(&tc);
@@ -966,6 +981,7 @@ fn submit_header_chunk(
     let mut futures = Vec::new();
     for line in chunk {
         let block = json_line_to_block(line);
+        assert_eq!(hashing::header::hash(&block.header), block.hash());
         external_block_store.insert(block.hash(), block.transactions).unwrap();
         let block = Block::from_header_arc(block.header);
         let f = tc.validate_and_insert_block(block).virtual_state_task;
