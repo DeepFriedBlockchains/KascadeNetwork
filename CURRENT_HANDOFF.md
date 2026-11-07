@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 6, 2026.
+Updated November 7, 2026.
 
 Public main starts at the reviewed root `62248169f0920277b3ee60cf275080c221a21786`.
 The validation stack is [PR #1](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/1),
@@ -14,7 +14,10 @@ The upstream archive is preserved. The generated blobs were verified at
 `868a0db679755b93349567bce698d068a8c69de6`. See the
 [dated continuation report](docs/development/PHASE6_CONTINUATION_2026-11-06.md) for exact test and DAA counts.
 
-Next: verify the complete workspace CI on the PR #3 head and review the
-stacked bases. The next Phase 6 implementation is the inactive
+[Combined run 42343429452](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42343429452)
+passed all five goref tests and seven jobs. Its one native failure was a
+pre-Toccata header assertion using mainnet's active fork configuration.
+The test configuration is corrected and the workspace suite now reports all
+failures. Next: verify the complete workspace CI on the new PR #3 head. The next Phase 6 implementation is the inactive
 database-bound authority wrapper, with committed readiness checks and
 import-owner enforcement. Consensus activation remains gated.

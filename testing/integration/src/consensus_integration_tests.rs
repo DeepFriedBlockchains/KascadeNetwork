@@ -427,7 +427,10 @@ async fn block_window_test() {
 #[tokio::test]
 async fn header_in_isolation_validation_test() {
     init_allocator_with_default_settings();
-    let config = ConfigBuilder::new(MAINNET_PARAMS).edit_consensus_params(|p| p.skip_proof_of_work = true).build();
+    let config = ConfigBuilder::new(MAINNET_PARAMS)
+        .skip_proof_of_work()
+        .edit_consensus_params(|p| p.toccata_activation = ForkActivation::never())
+        .build();
     let consensus = TestConsensus::new(&config);
     let wait_handles = consensus.init();
     let block = consensus.build_header_only_block_with_parents(1.into(), vec![config.genesis.hash]);

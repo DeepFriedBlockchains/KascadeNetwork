@@ -46,3 +46,15 @@ results. Review the stacked bases before requesting integration review.
 After CI stabilization, compile and test the isolated database-readiness and
 owner-token wrapper. Follow with processor-bound atomic database writes and
 verified restart recovery. Consensus activation remains gated.
+
+## November 7 workspace follow-up
+
+[Combined run 42343429452](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42343429452)
+at `cc4e800e8fae4ddf0997ba68961ca5ffbee202b5` passed all five goref tests and seven of eight workflow jobs.
+The native run reported 1,134 passed, one failed, 25 skipped and 383 unrun.
+The failing header-isolation test expected the pre-Toccata block version
+while using the active mainnet fork configuration. Pinning its test-only
+fork configuration preserves the original version-rejection assertion;
+the separate activation test exercises the version transition. The workspace
+job now reports all test results even if a test fails. The corrected head
+requires a fresh combined run before the stack can be called green.
