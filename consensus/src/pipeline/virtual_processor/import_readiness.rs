@@ -259,9 +259,7 @@ mod tests {
         assert!(verify_pruning_utxos(&db, point).is_err());
 
         let mut accumulated = MuHash::new();
-        processor
-            .append_authorized_pruning_utxos(&owner, &mut operation, &[(outpoint, entry.clone())], &mut accumulated)
-            .unwrap();
+        processor.append_authorized_pruning_utxos(&owner, &mut operation, &[(outpoint, entry.clone())], &mut accumulated).unwrap();
         assert_eq!(accumulated.finalize(), MuHash::from_utxo(&outpoint, &entry).finalize());
         drop(operation);
         let Ok(token) = session.try_finish() else {
