@@ -111,6 +111,18 @@ impl DbUtxoSetStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn stage_import_chunk<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        utxos: &[(TransactionOutpoint, UtxoEntry)],
+    ) -> Result<(), StoreError> {
+        for (outpoint, entry) in utxos {
+            self.access.write_deferred(batch, (*outpoint).into(), Arc::new(entry.clone()))?;
+        }
+        Ok(())
+    }
+
     pub fn iterator(&self) -> impl Iterator<Item = Result<(TransactionOutpoint, Arc<UtxoEntry>), Box<dyn Error>>> + '_ {
         self.access.iterator().map(|iter_result| match iter_result {
             Ok((key_bytes, utxo_entry)) => match UtxoKey::try_from(key_bytes.as_ref()) {

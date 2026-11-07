@@ -2419,6 +2419,31 @@ impl VirtualStateProcessor {
         self.with_authority_point(authority, |point| authority.commit(point, lease, batch))
     }
 
+    /// Apply a pruning UTXO import chunk through the session's worker permit.
+    pub(super) fn append_authorized_pruning_utxos(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+        operation: &mut super::import_operation::ImportOperation,
+        utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use kaspa_consensus_core::muhash::MuHashExtensions;
+
+        if !authority.owns_database(&self.db) {
+            return Err(StoreError::DataInconsistency("authority belongs to another processor database".into()));
+        }
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.utxo_set.stage_import_chunk(&mut batch, utxos)?;
+        operation.apply(authority, batch)?;
+        for (outpoint, entry) in utxos {
+            multiset.combine(&MuHash::from_utxo(outpoint, entry));
+        }
+        Ok(())
+    }
+
     pub(super) fn finish_authority_import(
         &self,
         authority: &super::persistent_branch_authority::PersistentBranchAuthority,

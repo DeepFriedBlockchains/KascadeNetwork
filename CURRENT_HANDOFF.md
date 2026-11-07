@@ -29,3 +29,9 @@ CI and live integration are pending.
 The commitment branch also verifies that abandoned capabilities do not
 keep a staging database open. Worker lifetime and database handle lifetime
 are separate: the operation must finish before its active owner is dropped.
+
+The guarded import milestone passed all eight jobs and 1,545 native tests
+in [run 42402654584](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42402654584).
+The next inactive adapter stages pruning UTXOs through the worker permit
+and updates the accumulator only after commit. See [the append report](docs/development/PHASE6_UTXO_IMPORT_2026-11-07.md).
+Live wiring, proof authentication and full branch validation remain pending.

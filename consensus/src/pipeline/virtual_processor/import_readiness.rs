@@ -106,7 +106,10 @@ fn inconsistent(reason: &str) -> StoreError {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::persistent_branch_authority::PersistentBranchAuthority, *};
+    use super::{
+        super::{import_operation::ImportWorkerSession, persistent_branch_authority::PersistentBranchAuthority},
+        *,
+    };
     use crate::{
         config::ConfigBuilder,
         consensus::test_consensus::TestConsensus,
@@ -115,7 +118,6 @@ mod tests {
             past_pruning_points::PastPruningPointsStore,
             pruning::{PruningProofDescriptor, PruningStore},
             pruning_meta::PruningMetaStores,
-            utxo_set::UtxoSetStore,
         },
         params::DEVNET_PARAMS,
     };
@@ -243,8 +245,28 @@ mod tests {
         assert!(processor.finish_authority_import(&owner, token, retention(), |_, _| panic!("missing UTXOs accepted")).is_err());
         assert!(owner.lease(point).is_err());
 
-        utxos.write_many(&[(outpoint, entry)]).unwrap();
         let token = owner.begin_import().unwrap();
+        let mut session = ImportWorkerSession::new(token);
+        let mut operation = session.try_start().unwrap();
+        let unrelated = PersistentBranchAuthority::new(db.clone());
+        let mut rejected_accumulator = MuHash::new();
+        assert!(
+            processor
+                .append_authorized_pruning_utxos(&unrelated, &mut operation, &[(outpoint, entry.clone())], &mut rejected_accumulator)
+                .is_err()
+        );
+        assert_eq!(rejected_accumulator.finalize(), MuHash::new().finalize());
+        assert!(verify_pruning_utxos(&db, point).is_err());
+
+        let mut accumulated = MuHash::new();
+        processor
+            .append_authorized_pruning_utxos(&owner, &mut operation, &[(outpoint, entry.clone())], &mut accumulated)
+            .unwrap();
+        assert_eq!(accumulated.finalize(), MuHash::from_utxo(&outpoint, &entry).finalize());
+        drop(operation);
+        let Ok(token) = session.try_finish() else {
+            panic!("completed UTXO worker retained its operation");
+        };
         processor
             .finish_authority_import(&owner, token, retention(), |_, actual| {
                 assert_eq!(actual, point);
