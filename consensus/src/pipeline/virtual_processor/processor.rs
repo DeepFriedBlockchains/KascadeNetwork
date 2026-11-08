@@ -134,6 +134,8 @@ pub struct VirtualStateProcessor {
 
     // DB
     db: Arc<DB>,
+    #[cfg(test)]
+    branch_authority: super::persistent_branch_authority::PersistentBranchAuthority,
 
     // Config
     pub(super) genesis: GenesisBlock,
@@ -289,6 +291,8 @@ impl VirtualStateProcessor {
             mempool_mass_cofactors: params.mempool_block_mass_cofactors(),
             block_version: params.block_version(),
 
+            #[cfg(test)]
+            branch_authority: super::persistent_branch_authority::PersistentBranchAuthority::new(db.clone()),
             db,
             statuses_store: storage.statuses_store.clone(),
             headers_store: storage.headers_store.clone(),
@@ -2390,12 +2394,8 @@ impl VirtualStateProcessor {
     /// Enter from a caller without an existing pruning session guard.
     fn with_authority_point<T>(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
         operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
     ) -> kaspa_database::prelude::StoreResult<T> {
-        if !authority.owns_database(&self.db) {
-            return Err(StoreError::DataInconsistency("authority belongs to another processor database".into()));
-        }
         let _session = self.pruning_lock.blocking_read();
         let pruning = self.pruning_point_store.read();
         let _metadata = self.pruning_meta_stores.read();
@@ -2403,41 +2403,44 @@ impl VirtualStateProcessor {
         operation(super::branch_readiness::ReadinessPoint { hash, index })
     }
 
+    pub(super) fn begin_authority_import(
+        &self,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentImportToken> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        self.branch_authority.begin_import()
+    }
+
     pub(super) fn authority_lease(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
     ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
-        self.with_authority_point(authority, |point| authority.lease(point))
+        self.with_authority_point(|point| self.branch_authority.lease(point))
     }
 
     pub(super) fn authority_commit(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
         lease: super::persistent_branch_authority::PersistentBranchLease,
         batch: kaspa_database::prelude::DeferredDbBatch<'_>,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        self.with_authority_point(authority, |point| authority.commit(point, lease, batch))
+        self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
     }
 
     /// Apply a pruning UTXO import chunk through the session's worker permit.
     pub(super) fn append_authorized_pruning_utxos(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
         operation: &mut super::import_operation::ImportOperation,
         utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
         multiset: &mut MuHash,
     ) -> kaspa_database::prelude::StoreResult<()> {
         use kaspa_consensus_core::muhash::MuHashExtensions;
 
-        if !authority.owns_database(&self.db) {
-            return Err(StoreError::DataInconsistency("authority belongs to another processor database".into()));
-        }
         let _session = self.pruning_lock.blocking_read();
         let _pruning = self.pruning_point_store.read();
         let metadata = self.pruning_meta_stores.write();
         let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
         metadata.utxo_set.stage_import_chunk(&mut batch, utxos)?;
-        operation.apply(authority, batch)?;
+        operation.apply(&self.branch_authority, batch)?;
         for (outpoint, entry) in utxos {
             multiset.combine(&MuHash::from_utxo(outpoint, entry));
         }
@@ -2448,7 +2451,6 @@ impl VirtualStateProcessor {
     /// The caller must quiesce header and virtual processing on this receiver.
     pub(super) fn finish_authenticated_authority_import(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
         token: super::persistent_branch_authority::PersistentImportToken,
         retention: super::branch_readiness::ReadinessPoint,
         proof: &super::import_proof_readiness::ValidatedImportProof,
@@ -2456,7 +2458,7 @@ impl VirtualStateProcessor {
     ) -> kaspa_database::prelude::StoreResult<()> {
         use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
 
-        self.finish_authority_import(authority, token, retention, |db, point| {
+        self.finish_authority_import(token, retention, |db, point| {
             proof.verify_committed(db, point)?;
             let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
             if !self
@@ -2472,13 +2474,12 @@ impl VirtualStateProcessor {
 
     pub(super) fn finish_authority_import(
         &self,
-        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
         token: super::persistent_branch_authority::PersistentImportToken,
         retention: super::branch_readiness::ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        self.with_authority_point(authority, |point| {
-            authority.complete_verified_import(token, point, retention, |db, point| {
+        self.with_authority_point(|point| {
+            self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
                 super::import_smt_readiness::verify_pruning_smt(
                     db,
                     point,

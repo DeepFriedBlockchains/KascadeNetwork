@@ -249,62 +249,62 @@ pub(super) mod tests {
         stage_explicit_evidence(&mut metadata, &mut batch, point);
         db.write(batch).unwrap();
 
-        let owner = PersistentBranchAuthority::new(db.clone());
         let proof = super::super::import_proof_readiness::ValidatedImportProof::authenticate(
             &consensus,
             &Vec::new(),
             &kaspa_consensus_core::pruning::PruningProofMetadata::new(Default::default()),
         );
         assert!(proof.is_err());
-        let token = owner.begin_import().unwrap();
-        assert!(processor.finish_authority_import(&owner, token, retention(), |_, _| panic!("missing UTXOs accepted")).is_err());
-        assert!(owner.lease(point).is_err());
+        let token = processor.begin_authority_import().unwrap();
+        assert!(processor.finish_authority_import(token, retention(), |_, _| panic!("missing UTXOs accepted")).is_err());
+        assert!(processor.authority_lease().is_err());
 
-        let token = owner.begin_import().unwrap();
-        let mut session = ImportWorkerSession::new(token);
-        let mut operation = session.try_start().unwrap();
         let unrelated = PersistentBranchAuthority::new(db.clone());
+        let mut foreign_session = ImportWorkerSession::new(unrelated.begin_import().unwrap());
+        let mut foreign_operation = foreign_session.try_start().unwrap();
+        let chunk = [(outpoint, entry.clone())];
         let mut rejected_accumulator = MuHash::new();
-        assert!(
-            processor
-                .append_authorized_pruning_utxos(&unrelated, &mut operation, &[(outpoint, entry.clone())], &mut rejected_accumulator)
-                .is_err()
-        );
+        assert!(processor.append_authorized_pruning_utxos(&mut foreign_operation, &chunk, &mut rejected_accumulator).is_err());
+        assert!(processor.begin_authority_import().is_err());
         assert_eq!(rejected_accumulator.finalize(), MuHash::new().finalize());
         assert!(verify_pruning_utxos(&db, point).is_err());
+        drop(foreign_operation);
+        drop(foreign_session);
 
+        let token = processor.begin_authority_import().unwrap();
+        let mut session = ImportWorkerSession::new(token);
+        let mut operation = session.try_start().unwrap();
         let mut accumulated = MuHash::new();
         let duplicate = [(outpoint, entry.clone()), (outpoint, entry.clone())];
-        assert!(processor.append_authorized_pruning_utxos(&owner, &mut operation, &duplicate, &mut accumulated).is_err());
+        assert!(processor.append_authorized_pruning_utxos(&mut operation, &duplicate, &mut accumulated).is_err());
         assert_eq!(accumulated.finalize(), MuHash::new().finalize());
         assert!(verify_pruning_utxos(&db, point).is_err());
 
-        let chunk = [(outpoint, entry.clone())];
-        processor.append_authorized_pruning_utxos(&owner, &mut operation, &chunk, &mut accumulated).unwrap();
-        assert!(processor.append_authorized_pruning_utxos(&owner, &mut operation, &chunk, &mut accumulated).is_err());
+        processor.append_authorized_pruning_utxos(&mut operation, &chunk, &mut accumulated).unwrap();
+        assert!(processor.append_authorized_pruning_utxos(&mut operation, &chunk, &mut accumulated).is_err());
         assert_eq!(accumulated.finalize(), MuHash::from_utxo(&outpoint, &entry).finalize());
         drop(operation);
         let Ok(token) = session.try_finish() else {
             panic!("completed UTXO worker retained its operation");
         };
         processor
-            .finish_authority_import(&owner, token, retention(), |_, actual| {
+            .finish_authority_import(token, retention(), |_, actual| {
                 assert_eq!(actual, point);
                 assert!(processor.pruning_point_store.try_write().is_none());
                 assert!(processor.pruning_meta_stores.try_write().is_none());
                 Ok(())
             })
             .unwrap();
-        let lease = processor.authority_lease(&owner).unwrap();
+        let lease = processor.authority_lease().unwrap();
         let mut write = DeferredDbBatch::new(db.clone());
         let data_key = [DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 1];
         write.put_raw(&db, data_key, b"committed").unwrap();
-        processor.authority_commit(&owner, lease, write).unwrap();
+        processor.authority_commit(lease, write).unwrap();
         assert!(db.get(data_key).unwrap().is_some());
 
         utxos.clear().unwrap();
-        let token = owner.begin_import().unwrap();
-        assert!(processor.finish_authority_import(&owner, token, retention(), |_, _| panic!("removed UTXOs accepted")).is_err());
-        assert!(owner.lease(point).is_err());
+        let token = processor.begin_authority_import().unwrap();
+        assert!(processor.finish_authority_import(token, retention(), |_, _| panic!("removed UTXOs accepted")).is_err());
+        assert!(processor.authority_lease().is_err());
     }
 }

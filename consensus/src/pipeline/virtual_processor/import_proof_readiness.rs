@@ -78,11 +78,7 @@ fn inconsistent(reason: &str) -> StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        consensus::test_consensus::TestConsensus,
-        model::stores::{headers::HeaderStore, pruning::PruningStore},
-        pipeline::virtual_processor::persistent_branch_authority::PersistentBranchAuthority,
-    };
+    use crate::{consensus::test_consensus::TestConsensus, model::stores::{headers::HeaderStore, pruning::PruningStore}};
     use kaspa_consensus_core::{
         block::Block,
         config::{ConfigBuilder, genesis::DEVNET_GENESIS, params::DEVNET_PARAMS},
@@ -104,10 +100,9 @@ mod tests {
         let proof = vec![vec![Arc::new(header.clone())]];
         let proof = ValidatedImportProof::capture_validated(&proof).unwrap();
         let child = Block::new(header, vec![]);
-        let owner = PersistentBranchAuthority::new(db);
-        let token = owner.begin_import().unwrap();
-        assert!(processor.finish_authenticated_authority_import(&owner, token, point, &proof, &child).is_err());
-        assert!(processor.authority_lease(&owner).is_err());
+        let token = processor.begin_authority_import().unwrap();
+        assert!(processor.finish_authenticated_authority_import(token, point, &proof, &child).is_err());
+        assert!(processor.authority_lease().is_err());
     }
 
     #[test]
