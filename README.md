@@ -31,12 +31,12 @@ kept in step with private development.
 | | KASCADE (design target) | Kaspa (upstream) |
 |---|---|---|
 | Consensus | GHOSTDAG BlockDAG | GHOSTDAG BlockDAG |
-| Privacy | shielded by default (Zcash Orchard notes, Halo 2, no trusted setup) | transparent |
+| Privacy | Optional shielding: transparent transactions by default, with user-selected shielded transactions (proposed Orchard/Halo 2, no trusted setup) | transparent |
 | PoW | kHeavyHash, byte-identical to Kaspa | kHeavyHash |
 | Merged mining | AuxPoW dual acceptance | — |
 | Emission | cascading emission, see `KASCADE-SPEC.md` | fixed cap |
 
-**None of the above is settled.** `KASCADE-SPEC.md` is a design document describing intent,
+**These are design targets, not claims of implemented or activated features.** KASCADE's intended privacy model is optional shielding, not mandatory or shielded-by-default transactions. `KASCADE-SPEC.md` is a design document describing intent,
 not a description of implemented behaviour. Where the specification and the code disagree,
 the code is what exists and the specification is what is being argued about. Several
 consensus parameters in this tree are still inherited from the predecessor chain and have
