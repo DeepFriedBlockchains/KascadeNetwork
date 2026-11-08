@@ -88,6 +88,7 @@ mod tests {
         header::Header,
     };
     use kaspa_database::{create_temp_db, prelude::ConnBuilder};
+    use kaspa_hashes::Hash;
 
     #[test]
     fn authenticated_completion_rejects_missing_committed_import_metadata() {
