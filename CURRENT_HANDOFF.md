@@ -45,5 +45,10 @@ checks the actual Orchard action nullifiers. Hosted validation is pending.
 The next [proof and shielded evidence candidate](docs/development/PHASE6_AUTHENTICATED_IMPORT_2026-11-08.md)
 uses the existing pruning proof validator and rechecks committed evidence in
 the isolated receiver. Guarded UTXO appends also reject duplicates before
-writing. The candidate requires hosted validation. Live IBD and direct import
+writing. Live IBD and direct import
 migration still need end-to-end staging ownership and cleanup.
+
+[Run 42489992639](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489992639) passed all
+eight jobs at `a6dd7fe6def3540bf0304506578b05a703cbf79c`. Native nextest passed 1,552 workspace
+tests with 25 skipped, and the separate no-asm suite passed 32 tests.
+The real Orchard, isolated shielded membership and authenticated proof regressions passed.

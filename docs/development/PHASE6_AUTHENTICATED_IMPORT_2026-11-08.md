@@ -22,7 +22,7 @@ jobs in [run 42348096245](https://github.com/DeepFriedBlockchains/KascadeNetwork
 
 Focused regressions cover missing committed proof headers and metadata,
 a mismatching descriptor, a substituted child body, missing or stray
-nullifier rows, and duplicate UTXO chunks. Hosted CI is pending.
+nullifier rows, and duplicate UTXO chunks.
 
 ## Remaining
 
@@ -32,3 +32,10 @@ drain detached workers and database owners before deleting staging. Verified
 restart for a receiver that has applied descendants needs a stable
 pruning-point view of the nullifier set and a freshly authenticated proof
 or a durable proof receipt. All adapters in this candidate are test-only.
+
+## Verified validation
+
+[Run 42489992639](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489992639) passed all
+eight jobs at `a6dd7fe6def3540bf0304506578b05a703cbf79c`. Native nextest passed 1,552 workspace
+tests with 25 skipped, and the separate no-asm suite passed 32 tests.
+The real Orchard, isolated shielded membership and authenticated proof regressions passed.
