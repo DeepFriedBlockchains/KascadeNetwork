@@ -1,6 +1,7 @@
 use crate::{cache::CachePolicy, db::DB, errors::StoreError};
 
 use super::prelude::{Cache, DbKey, DbWriter};
+use crate::prelude::DeferredDbBatch;
 use kaspa_utils::mem_size::MemSizeEstimator;
 use rocksdb::{Direction, IterateBounds, IteratorMode, ReadOptions};
 use serde::{Serialize, de::DeserializeOwned};
@@ -129,10 +130,11 @@ where
         if let Some(suffix) = self.version_suffix {
             return self.read_versioned(key, suffix);
         }
+        let generation = self.cache.generation();
         let db_key = DbKey::new(&self.prefix, key.clone());
         if let Some(slice) = self.db.get_pinned(&db_key)? {
             let data: TData = bincode::deserialize(&slice)?;
-            self.cache.insert(key, data.clone());
+            self.cache.insert_if_generation(key, data.clone(), &generation);
             Ok(data)
         } else {
             Err(StoreError::KeyNotFound(db_key))
@@ -191,6 +193,7 @@ where
         TData: DeserializeOwned,
         TLegacy: DeserializeOwned + Into<TData>,
     {
+        let generation = self.cache.generation();
         // Build the scan prefix = [store_prefix || logical_key]. Both the
         // legacy and versioned physical rows share this byte sequence.
         let scan_prefix = DbKey::new(&self.prefix, key.clone());
@@ -235,7 +238,7 @@ where
             )));
         };
 
-        self.cache.insert(key, data.clone());
+        self.cache.insert_if_generation(key, data.clone(), &generation);
         Ok(data)
     }
 
@@ -274,20 +277,21 @@ where
         TData: DeserializeOwned,
         TFallbackDeser: DeserializeOwned + Into<TData>,
     {
+        let generation = self.cache.generation();
         if let Some(data) = self.cache.get(&key) {
             Ok(data)
         } else {
             let db_key = DbKey::new(&self.prefix, key.clone());
             if let Some(slice) = self.db.get_pinned(&db_key)? {
                 let data: TData = bincode::deserialize(&slice)?;
-                self.cache.insert(key, data.clone());
+                self.cache.insert_if_generation(key, data.clone(), &generation);
                 Ok(data)
             } else {
                 let db_key = DbKey::new(fallback_prefix, key.clone());
                 if let Some(slice) = self.db.get_pinned(&db_key)? {
                     let data: TFallbackDeser = bincode::deserialize(&slice)?;
                     let data: TData = data.into();
-                    self.cache.insert(key, data.clone());
+                    self.cache.insert_if_generation(key, data.clone(), &generation);
                     Ok(data)
                 } else {
                     Err(StoreError::KeyNotFound(db_key))
@@ -330,6 +334,29 @@ where
         let bin_data = bincode::serialize(&data)?;
         self.cache.insert(key.clone(), data);
         writer.put(self.build_write_key(key), bin_data)?;
+        Ok(())
+    }
+
+    /// Opt-in deferred staging. Unlike `write`, no cache effect occurs here.
+    pub fn write_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, key: TKey, data: TData) -> Result<(), StoreError>
+    where
+        TKey: AsRef<[u8]>,
+        TData: Serialize,
+    {
+        batch.ensure_database(&self.db)?;
+        let bytes = bincode::serialize(&data).inspect_err(|_| batch.reject())?;
+        batch.writer().put(self.build_write_key(key.clone()), bytes).inspect_err(|_| batch.reject())?;
+        batch.invalidate_after_commit(move || self.cache.invalidate_committed(&key));
+        Ok(())
+    }
+
+    pub fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, key: TKey) -> Result<(), StoreError>
+    where
+        TKey: AsRef<[u8]>,
+    {
+        batch.ensure_database(&self.db)?;
+        self.delete_both_layouts(&mut batch.writer(), key.clone()).inspect_err(|_| batch.reject())?;
+        batch.invalidate_after_commit(move || self.cache.invalidate_committed(&key));
         Ok(())
     }
 
@@ -492,6 +519,106 @@ mod tests {
     };
     use kaspa_hashes::Hash;
     use rocksdb::WriteBatch;
+
+    #[test]
+    fn deferred_drop_and_commit_publish_only_persisted_values() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let access = CachedDbAccess::<Hash, u64>::new(db.clone(), CachePolicy::Count(8), vec![90]);
+        let key = Hash::from(1);
+        access.write(DirectDbWriter::new(&db), key, 7).unwrap();
+        {
+            let mut batch = DeferredDbBatch::new(db.clone());
+            access.write_deferred(&mut batch, key, 9).unwrap();
+            access.write_deferred(&mut batch, Hash::from(2), 11).unwrap();
+            assert_eq!(access.read(key).unwrap(), 7);
+            assert!(!access.has(Hash::from(2)).unwrap());
+        }
+        assert_eq!(access.read(key).unwrap(), 7);
+        let mut batch = DeferredDbBatch::new(db.clone());
+        access.write_deferred(&mut batch, key, 9).unwrap();
+        batch.put_raw(&db, b"commit-marker", b"ready").unwrap();
+        assert!(db.get(b"commit-marker").unwrap().is_none());
+        batch.commit().unwrap();
+        assert_eq!(access.read_from_cache(key), None);
+        assert_eq!(access.read(key).unwrap(), 9);
+        assert_eq!(db.get(b"commit-marker").unwrap().as_deref(), Some(b"ready".as_slice()));
+    }
+
+    #[test]
+    fn deferred_generation_fences_inflight_old_cache_fill() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let access = CachedDbAccess::<Hash, u64>::new(db.clone(), CachePolicy::Count(8), vec![91]);
+        let key = Hash::from(1);
+        access.write(DirectDbWriter::new(&db), key, 7).unwrap();
+        // Deterministically interleave an old read-through fill with a commit.
+        let old_generation = access.cache.generation();
+        let mut batch = DeferredDbBatch::new(db);
+        access.write_deferred(&mut batch, key, 9).unwrap();
+        batch.commit().unwrap();
+        access.cache.insert_if_generation(key, 7, &old_generation);
+        assert_eq!(access.read_from_cache(key), None);
+        assert_eq!(access.read(key).unwrap(), 9);
+    }
+
+    #[test]
+    fn deferred_wrong_database_poison_prevents_partial_commit() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let (_other_temp, other) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let access = CachedDbAccess::<Hash, u64>::new(other, CachePolicy::Count(8), vec![92]);
+        let mut batch = DeferredDbBatch::new(db.clone());
+        batch.put_raw(&db, b"trusted-sibling", b"inert").unwrap();
+        assert!(access.write_deferred(&mut batch, Hash::from(1), 7).is_err());
+        assert!(batch.commit().is_err());
+        assert!(db.get(b"trusted-sibling").unwrap().is_none());
+        assert!(!access.has(Hash::from(1)).unwrap());
+    }
+
+    #[test]
+    fn deferred_raw_wrong_database_poison_prevents_typed_write() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let (_other_temp, other) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let access = CachedDbAccess::<Hash, u64>::new(db.clone(), CachePolicy::Count(8), vec![92]);
+        let key = Hash::from(1);
+        let mut batch = DeferredDbBatch::new(db.clone());
+        access.write_deferred(&mut batch, key, 7).unwrap();
+        assert!(batch.put_raw(&other, b"commit-marker", b"ready").is_err());
+        assert!(batch.commit().is_err());
+        assert!(!access.has(key).unwrap());
+        assert!(db.get(b"commit-marker").unwrap().is_none());
+        assert!(other.get(b"commit-marker").unwrap().is_none());
+    }
+
+    #[test]
+    fn deferred_readonly_write_failure_preserves_cache_and_database() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let key = Hash::from(1);
+        let access = CachedDbAccess::<Hash, u64>::new(db.clone(), CachePolicy::Count(8), vec![93]);
+        access.write(DirectDbWriter::new(&db), key, 7).unwrap();
+        db.flush().unwrap();
+        let readonly = ConnBuilder::default().with_db_path(db.path().to_path_buf()).with_files_limit(32).build_readonly().unwrap();
+        let access = CachedDbAccess::<Hash, u64>::new(readonly.clone(), CachePolicy::Count(8), vec![93]);
+        assert_eq!(access.read(key).unwrap(), 7);
+        let mut batch = DeferredDbBatch::new(readonly);
+        access.write_deferred(&mut batch, key, 9).unwrap();
+        assert!(batch.commit().is_err());
+        assert_eq!(access.read_from_cache(key), Some(7));
+        assert_eq!(access.read(key).unwrap(), 7);
+    }
+
+    #[test]
+    fn deferred_versioned_delete_clears_disk_after_commit_only() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        let access = CachedDbAccess::<Hash, u64>::new_with_version_suffix(db.clone(), CachePolicy::Count(8), vec![94], 1);
+        let key = Hash::from(1);
+        access.write(DirectDbWriter::new(&db), key, 7).unwrap();
+        let mut batch = DeferredDbBatch::new(db.clone());
+        access.delete_deferred(&mut batch, key).unwrap();
+        assert_eq!(access.read(key).unwrap(), 7);
+        batch.commit().unwrap();
+        assert!(!access.has(key).unwrap());
+        assert!(db.get(access.build_write_key(key)).unwrap().is_none());
+        assert!(db.get(DbKey::new(&access.prefix, key)).unwrap().is_none());
+    }
 
     #[test]
     fn test_delete_all() {

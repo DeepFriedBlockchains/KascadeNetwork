@@ -111,6 +111,25 @@ impl DbUtxoSetStore {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn stage_import_chunk<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        utxos: &[(TransactionOutpoint, UtxoEntry)],
+    ) -> Result<(), StoreError> {
+        let committed = self.clone_with_new_cache(CachePolicy::Empty);
+        let mut unique = std::collections::HashSet::with_capacity(utxos.len());
+        for (outpoint, _) in utxos {
+            if !unique.insert(*outpoint) || UtxoSetStoreReader::get(&committed, outpoint).optional()?.is_some() {
+                return Err(StoreError::DataInconsistency(format!("duplicate pruning import UTXO {outpoint:?}")));
+            }
+        }
+        for (outpoint, entry) in utxos {
+            self.access.write_deferred(batch, (*outpoint).into(), Arc::new(entry.clone()))?;
+        }
+        Ok(())
+    }
+
     pub fn iterator(&self) -> impl Iterator<Item = Result<(TransactionOutpoint, Arc<UtxoEntry>), Box<dyn Error>>> + '_ {
         self.access.iterator().map(|iter_result| match iter_result {
             Ok((key_bytes, utxo_entry)) => match UtxoKey::try_from(key_bytes.as_ref()) {

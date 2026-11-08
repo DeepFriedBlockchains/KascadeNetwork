@@ -134,6 +134,8 @@ pub struct VirtualStateProcessor {
 
     // DB
     db: Arc<DB>,
+    #[cfg(test)]
+    branch_authority: super::persistent_branch_authority::PersistentBranchAuthority,
 
     // Config
     pub(super) genesis: GenesisBlock,
@@ -289,6 +291,8 @@ impl VirtualStateProcessor {
             mempool_mass_cofactors: params.mempool_block_mass_cofactors(),
             block_version: params.block_version(),
 
+            #[cfg(test)]
+            branch_authority: super::persistent_branch_authority::PersistentBranchAuthority::new(db.clone()),
             db,
             statuses_store: storage.statuses_store.clone(),
             headers_store: storage.headers_store.clone(),
@@ -2383,4 +2387,108 @@ impl VirtualStateProcessor {
 enum MergesetIncreaseResult {
     Accepted { increase_size: u64 },
     Rejected { new_candidate: Hash },
+}
+
+#[cfg(test)]
+impl VirtualStateProcessor {
+    /// Enter from a caller without an existing pruning session guard.
+    fn with_authority_point<T>(
+        &self,
+        operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
+    ) -> kaspa_database::prelude::StoreResult<T> {
+        let _session = self.pruning_lock.blocking_read();
+        let pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        let (hash, index) = pruning.pruning_point_and_index()?;
+        operation(super::branch_readiness::ReadinessPoint { hash, index })
+    }
+
+    pub(super) fn begin_authority_import(
+        &self,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentImportToken> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        self.branch_authority.begin_import()
+    }
+
+    pub(super) fn authority_lease(
+        &self,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| self.branch_authority.lease(point))
+    }
+
+    pub(super) fn authority_commit(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
+    }
+
+    /// Apply a pruning UTXO import chunk through the session's worker permit.
+    pub(super) fn append_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use kaspa_consensus_core::muhash::MuHashExtensions;
+
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.utxo_set.stage_import_chunk(&mut batch, utxos)?;
+        operation.apply(&self.branch_authority, batch)?;
+        for (outpoint, entry) in utxos {
+            multiset.combine(&MuHash::from_utxo(outpoint, entry));
+        }
+        Ok(())
+    }
+
+    /// Complete an isolated receiver only after proof and shielded corroboration.
+    /// The caller must quiesce header and virtual processing on this receiver.
+    pub(super) fn finish_authenticated_authority_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
+
+        self.finish_authority_import(token, retention, |db, point| {
+            proof.verify_committed(db, point)?;
+            let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
+            if !self
+                .reachability_service
+                .try_is_chain_ancestor_of(child.hash(), tip)
+                .map_err(|err| StoreError::DataInconsistency(err.to_string()))?
+            {
+                return Err(StoreError::DataInconsistency("shielded commitment child is off the selected header chain".into()));
+            }
+            super::import_shielded_readiness::verify_pruning_shielded(db, point, child, child.hash())
+        })
+    }
+
+    pub(super) fn finish_authority_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.with_authority_point(|point| {
+            self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
+                super::import_smt_readiness::verify_pruning_smt(
+                    db,
+                    point,
+                    self.genesis.hash,
+                    self.toccata_activation,
+                    self.finality_depth,
+                )?;
+                verify_remaining(db, point)
+            })
+        })
+    }
 }
