@@ -101,17 +101,23 @@ impl PersistentBranchAuthority {
         Ok(PersistentImportToken { inner: self.inner.clone(), closed_revision, owner: self.owner.clone(), session })
     }
 
-    fn check_import(&self, state: &AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
+    fn check_import(&self, state: &mut AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
         let active = state.import.upgrade().ok_or_else(rejected)?;
         if state.import_failed
             || !Arc::ptr_eq(&self.inner, &token.inner)
             || !Arc::ptr_eq(&self.owner, &token.owner)
             || !Arc::ptr_eq(&active, &token.session)
-            || self.readiness.closed_revision()? != Some(token.closed_revision)
         {
             return Err(rejected());
         }
-        Ok(())
+        let error = match self.readiness.closed_revision() {
+            Ok(Some(revision)) if revision == token.closed_revision => return Ok(()),
+            Ok(_) => rejected(),
+            Err(error) => error,
+        };
+        // Preserve the reservation but never revive a worker that observed a replaced marker.
+        state.import_failed = true;
+        Err(error)
     }
 
     fn check_ready(&self, state: &mut AuthorityState, point: ReadinessPoint) -> StoreResult<ReadinessRevision> {
@@ -143,7 +149,7 @@ impl PersistentBranchAuthority {
     /// Apply one authenticated import batch while the durable marker stays closed.
     pub(super) fn apply_import(&self, token: &PersistentImportToken, mut batch: DeferredDbBatch<'_>) -> StoreResult<()> {
         let mut state = self.inner.state.lock();
-        self.check_import(&state, token)?;
+        self.check_import(&mut state, token)?;
         batch.ensure_database(&self.db)?;
         self.readiness.stage_closed(&mut batch, token.closed_revision)?;
         if let Err(error) = batch.commit() {
@@ -182,10 +188,10 @@ impl PersistentBranchAuthority {
         verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
     ) -> StoreResult<()> {
         let mut state = self.inner.state.lock();
-        self.check_import(&state, &token)?;
+        self.check_import(&mut state, &token)?;
         let metadata = CommittedImportMetadata::verify(&self.db, point, retention)?;
         verify(&self.db, point)?;
-        self.check_import(&state, &token)?;
+        self.check_import(&mut state, &token)?;
         metadata.verify_current(&self.db)?;
         let revision = self.readiness.complete_sync(point)?;
         state.verified = Some(VerifiedReadiness { revision, metadata });

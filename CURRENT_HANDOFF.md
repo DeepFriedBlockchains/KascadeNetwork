@@ -33,6 +33,26 @@ with 1,518 native tests and 25 skipped. Goref regeneration is complete.
   passed [all eight jobs](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493738676),
   1,557 native tests with 25 skipped, and 32 no-asm tests.
 
+## Authority integration
+
+The public integration branch builds on `f436a1938def7370bf54d99d4f40606dff3f87ce`,
+the documentation-only continuation of green source `1e3cf48`.
+It preserves the PR #1 → #2 → #3 stack and brings the verified authority
+candidates together with focused cross-component regressions. A processor
+worker is detached, drained and reopened against the same RocksDB path.
+An import token that observes a durable revision replacement stays revoked
+until its worker releases the reservation.
+
+See the [dated integration report](docs/development/PHASE6_AUTHORITY_INTEGRATION_2026-11-08.md).
+Combined GitHub Actions and focused native results are pending.
+
+## Next executable task
+
+After combined CI is green, add an inactive staging import coordinator
+that carries the processor-owned session through proof, SMT, shielded and
+UTXO mutations and requires authenticated completion before promotion.
+Cover cancellation and verification failure through the same boundary.
+
 ## Remaining
 
 Production IBD and direct import callers still need to thread the same

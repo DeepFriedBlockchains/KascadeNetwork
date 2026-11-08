@@ -212,4 +212,31 @@ mod tests {
         operation.apply(&owner, data_batch(&db)).unwrap();
         assert_eq!(db.get(DATA_KEY).unwrap().unwrap().as_slice(), b"imported");
     }
+
+    #[test]
+    fn authority_integration_invalidates_worker_after_committed_revision_replacement() {
+        use kaspa_database::registry::DatabaseStorePrefixes;
+
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32).with_mem_budget(16_usize * 1024 * 1024));
+        let owner = PersistentBranchAuthority::new(db.clone());
+        let competing_owner = PersistentBranchAuthority::new(db.clone());
+        let mut session = ImportWorkerSession::new(owner.begin_import().unwrap());
+        let mut operation = session.try_start().unwrap();
+        let marker_key = DatabaseStorePrefixes::KascadeBranchReadiness;
+        let original = db.get(marker_key).unwrap().unwrap();
+
+        DbBranchReadiness::new(db.clone()).close_sync().unwrap();
+        assert!(operation.apply(&owner, data_batch(&db)).is_err());
+        db.put(marker_key, original).unwrap();
+        assert!(operation.apply(&owner, data_batch(&db)).is_err());
+        assert!(db.get(DATA_KEY).unwrap().is_none());
+        assert!(competing_owner.begin_import().is_err());
+
+        drop(operation);
+        drop(session);
+        let mut fresh_session = ImportWorkerSession::new(competing_owner.begin_import().unwrap());
+        let mut fresh_operation = fresh_session.try_start().unwrap();
+        fresh_operation.apply(&competing_owner, data_batch(&db)).unwrap();
+        assert_eq!(db.get(DATA_KEY).unwrap().unwrap(), b"imported");
+    }
 }
