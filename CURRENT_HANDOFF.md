@@ -62,9 +62,16 @@ isolated shielded verification cases.
 The [lease write scope report](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_2026-11-08.md) records the next inactive milestone.
 Lease issuance and commit re-read the exact committed import evidence.
 The scoped RocksDB batch keeps a lease from modifying the rows that
-authorize it. Hosted validation of this milestone is pending.
+authorize it. 
 
 The [pruning session retention report](docs/development/PHASE6_PRUNING_SESSION_RETENTION_2026-11-08.md) records a worker
 ownership fix used by the consensus session API. Cancelling an async wait
 keeps the exact pruning guard in the detached callback until it exits.
-The focused cancellation regression and full workspace checks are pending.
+
+
+## Verified milestone
+
+[Run 42493736508](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493736508) passed all eight
+jobs at `efd3c5c4fb4417f224d8d2a0ed5761b3f749b7ed`. Native nextest passed 1,557 workspace tests
+with 25 skipped. The separate no-asm suite passed 32 tests.
+The detached blocking callback regression confirmed the pruning writer stayed blocked until callback exit.
