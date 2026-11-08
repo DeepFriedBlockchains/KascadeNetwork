@@ -241,14 +241,17 @@ impl PersistentBranchAuthority {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::import_readiness::tests::{install_point as install_import_point, stage_explicit_evidence};
+    use super::*;
     use crate::model::stores::{
         past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStore},
         pruning::{DbPruningStore, PruningStore, PruningStoreReader},
         pruning_meta::PruningMetaStores,
     };
-    use kaspa_database::{create_temp_db, prelude::{CachePolicy, ConnBuilder}};
+    use kaspa_database::{
+        create_temp_db,
+        prelude::{CachePolicy, ConnBuilder},
+    };
     use rocksdb::WriteBatch;
 
     const DATA_KEY: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 0];
