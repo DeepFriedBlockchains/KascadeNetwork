@@ -25,11 +25,7 @@ pub(super) struct ValidatedImportProof {
 }
 
 impl ValidatedImportProof {
-    pub(super) fn authenticate(
-        defender: &Consensus,
-        proof: &PruningPointProof,
-        metadata: &PruningProofMetadata,
-    ) -> StoreResult<Self> {
+    pub(super) fn authenticate(defender: &Consensus, proof: &PruningPointProof, metadata: &PruningProofMetadata) -> StoreResult<Self> {
         let evidence = Self::capture_validated(proof)?;
         defender.validate_pruning_proof(proof, metadata).map_err(|err| StoreError::DataInconsistency(err.to_string()))?;
         Ok(evidence)
