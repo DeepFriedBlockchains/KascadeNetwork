@@ -19,5 +19,8 @@ row with an authenticated commitment and rejects a foreign processor.
 
 This candidate still compiles only in tests. Production IBD forwarding,
 the remaining typed import stages, and the production promotion switch
-remain open. The candidate's exact Actions run will be recorded after
-the draft PR is opened.
+remain open. [Draft PR #6](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/6) is stacked on PR #5.
+The source checkpoint is `2afec236ac42e03bdeaf21d06c0191a70bba99f7` on `feature/phase6-typed-pruning-utxo-adapter-20261108`.
+[PR run 42509613211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509613211) is pending and covers the focused tests,
+workspace suite and strict Clippy. The same-SHA [push run 42509600116](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509600116)
+was superseded. Candidate test counts are pending.

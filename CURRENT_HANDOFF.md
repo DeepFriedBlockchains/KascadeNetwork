@@ -94,7 +94,11 @@ rejected batch. The staging and restart implementation remains unchanged.
 The [dated adapter report](docs/development/PHASE6_TYPED_PRUNING_UTXO_ADAPTER_2026-11-08.md) records the first adapter
 slice on the consensus owner. The inactive path now accepts typed UTXO
 chunks through the coordinator's permit. The generic UTXO batch path
-can only write completion metadata. Candidate CI is pending.
+can only write completion metadata. [Draft PR #6](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/6) is stacked on PR #5.
+The source checkpoint is `2afec236ac42e03bdeaf21d06c0191a70bba99f7` on `feature/phase6-typed-pruning-utxo-adapter-20261108`.
+[PR run 42509613211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509613211) is pending and covers the focused tests,
+workspace suite and strict Clippy. The same-SHA [push run 42509600116](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509600116)
+was superseded. Candidate test counts are pending.
 
 ## Next executable task
 
