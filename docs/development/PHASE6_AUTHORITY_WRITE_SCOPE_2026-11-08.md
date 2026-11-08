@@ -21,6 +21,13 @@ with 25 skipped, and 32 no-asm tests in
   a stale lease. The same regression moves the pruning point and confirms
   that restoring the old point leaves its old lease revoked.
 
-Hosted validation is pending. The isolated authority and import adapters
+The isolated authority and import adapters
 remain test-only. Real branch-domain writes and live import caller migration
 need a reviewed integration with a verified restart path for populated databases.
+
+## Verified validation
+
+[Run 42493733661](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493733661) passed all eight
+jobs at `c4a5aab83303e850569fe92dd53d0381f32c85d0`. Native nextest passed 1,556 workspace tests
+with 25 skipped. The separate no-asm suite passed 32 tests.
+The lease scope, evidence drift, point change, and physical batch operation regressions passed.

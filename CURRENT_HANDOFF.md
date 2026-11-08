@@ -22,12 +22,16 @@ with 1,518 native tests and 25 skipped. Goref regeneration is complete.
   with 1,553 native tests, 25 skipped, and 32 no-asm tests. The staging
   cleanup and both abrupt WAL recovery regressions passed.
 - The [lease write scope](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_2026-11-08.md)
-  rechecks committed evidence on lease issuance and commit. The
-  [pruning session retention change](docs/development/PHASE6_PRUNING_SESSION_RETENTION_2026-11-08.md)
-  keeps a detached blocking callback's pruning guard through callback exit.
+  rechecks committed evidence on lease issuance and commit. Its source
+  `c4a5aab` passed [all eight jobs](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493733661)
+  and 1,556 native tests. The [pruning session retention change](docs/development/PHASE6_PRUNING_SESSION_RETENTION_2026-11-08.md)
+  at `efd3c5c` passed [all eight jobs](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493736508)
+  and 1,557 native tests.
 - The [processor ownership candidate](docs/development/PHASE6_PROCESSOR_AUTHORITY_OWNER_2026-11-08.md) binds the inactive
-  adapter to the owner created by the processor itself. Hosted validation
-  is pending on the newest candidate.
+  adapter to the owner created by the processor itself. Its exact
+  [tested source](https://github.com/DeepFriedBlockchains/KascadeNetwork/commit/1e3cf487d66da46dfb35b04c027f1126e923070b)
+  passed [all eight jobs](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493738676),
+  1,557 native tests with 25 skipped, and 32 no-asm tests.
 
 ## Remaining
 

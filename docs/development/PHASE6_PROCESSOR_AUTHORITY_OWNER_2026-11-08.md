@@ -15,5 +15,12 @@ cannot start a competing session. After release, its own session can
 complete verification, issue a lease and commit scoped data.
 
 This candidate descends from `c478129fb1027102b601783beb8de6c719cda7f4` and remains inactive.
-Hosted validation is pending. The next work is the production import
+The next work is the production import
 ownership boundary and verified restart for databases with descendants.
+
+## Verified validation
+
+[Run 42493738676](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493738676) passed all eight
+jobs at `1e3cf487d66da46dfb35b04c027f1126e923070b`. Native nextest passed 1,557 workspace tests
+with 25 skipped. The separate no-asm suite passed 32 tests.
+The guarded import regression rejected a second owner on the same database and completed through the processor-owned session.
