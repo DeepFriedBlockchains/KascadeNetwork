@@ -44,24 +44,29 @@ impl<'a> DeferredDbBatch<'a> {
     /// Check the actual staged point writes, including typed-store operations.
     /// Operations the iterator cannot inspect, such as range deletes, are denied.
     pub fn ensure_key_prefix(&self, prefix: u8) -> StoreResult<()> {
-        struct Scope {
-            prefix: u8,
+        self.ensure_key_prefixes(&[prefix])
+    }
+
+    /// Check a batch against the complete set of prefixes allowed for this operation.
+    pub fn ensure_key_prefixes(&self, prefixes: &[u8]) -> StoreResult<()> {
+        struct Scope<'a> {
+            prefixes: &'a [u8],
             visited: usize,
             allowed: bool,
         }
 
-        impl WriteBatchIterator for Scope {
+        impl WriteBatchIterator for Scope<'_> {
             fn put(&mut self, key: &[u8], _: &[u8]) {
                 self.delete(key);
             }
 
             fn delete(&mut self, key: &[u8]) {
                 self.visited += 1;
-                self.allowed &= key.first() == Some(&self.prefix);
+                self.allowed &= key.first().is_some_and(|prefix| self.prefixes.contains(prefix));
             }
         }
 
-        let mut scope = Scope { prefix, visited: 0, allowed: true };
+        let mut scope = Scope { prefixes, visited: 0, allowed: true };
         self.batch.iterate(&mut scope);
         if !scope.allowed || scope.visited != self.batch.len() {
             return Err(StoreError::DataInconsistency("deferred batch exceeds its authorized write scope".into()));

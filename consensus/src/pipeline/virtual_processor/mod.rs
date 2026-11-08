@@ -16,6 +16,8 @@ mod import_smt_readiness;
 #[cfg(test)]
 mod persistent_branch_authority;
 mod processor;
+#[cfg(test)]
+mod staging_import;
 mod utxo_inquirer;
 mod utxo_validation;
 pub use processor::*;

@@ -2397,9 +2397,9 @@ impl VirtualStateProcessor {
         operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
     ) -> kaspa_database::prelude::StoreResult<T> {
         let _session = self.pruning_lock.blocking_read();
-        let pruning = self.pruning_point_store.read();
+        let _pruning = self.pruning_point_store.read();
         let _metadata = self.pruning_meta_stores.read();
-        let (hash, index) = pruning.pruning_point_and_index()?;
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
         operation(super::branch_readiness::ReadinessPoint { hash, index })
     }
 
@@ -2424,6 +2424,29 @@ impl VirtualStateProcessor {
         batch: kaspa_database::prelude::DeferredDbBatch<'_>,
     ) -> kaspa_database::prelude::StoreResult<()> {
         self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
+    }
+
+    pub(super) fn apply_authorized_staging_batch(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        prefixes: &[u8],
+        build: impl FnOnce() -> kaspa_database::prelude::StoreResult<kaspa_database::prelude::DeferredDbBatch<'static>>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let batch = build()?;
+        batch.ensure_key_prefixes(prefixes)?;
+        let _pruning = self.pruning_point_store.write();
+        let _metadata = self.pruning_meta_stores.write();
+        operation.apply(&self.branch_authority, batch)
+    }
+
+    pub(super) fn commit_staging_promotion(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
+        self.authority_commit(lease, batch)
     }
 
     /// Apply a pruning UTXO import chunk through the session's worker permit.
@@ -2455,21 +2478,63 @@ impl VirtualStateProcessor {
         retention: super::branch_readiness::ReadinessPoint,
         proof: &super::import_proof_readiness::ValidatedImportProof,
         child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.finish_authority_import(token, retention, |db, point| self.verify_authenticated_staging(db, point, proof, child, None))
+    }
+
+    /// Recover an opened database against its committed selected chain. Busy
+    /// virtual or chain locks fail closed to avoid reversing the live order.
+    pub(super) fn recover_authenticated_staging(
+        &self,
+        retention: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        tip_child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        use crate::model::stores::virtual_state::DbVirtualStateStore;
+
+        self.with_authority_point(|point| {
+            let _virtual_state = self
+                .virtual_stores
+                .try_upgradable_read()
+                .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during restart verification".into()))?;
+            let _chain = self
+                .selected_chain_store
+                .try_read()
+                .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during restart verification".into()))?;
+            let token = self.branch_authority.begin_import()?;
+            let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+            self.finish_authority_import_at(token, point, retention, |db, point| {
+                self.verify_authenticated_staging(db, point, proof, child, Some((tip, tip_child)))
+            })
+        })
+    }
+
+    fn verify_authenticated_staging(
+        &self,
+        db: &Arc<DB>,
+        point: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        selected_tip: Option<(Hash, &kaspa_consensus_core::block::Block)>,
     ) -> kaspa_database::prelude::StoreResult<()> {
         use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
 
-        self.finish_authority_import(token, retention, |db, point| {
-            proof.verify_committed(db, point)?;
-            let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
-            if !self
-                .reachability_service
-                .try_is_chain_ancestor_of(child.hash(), tip)
-                .map_err(|err| StoreError::DataInconsistency(err.to_string()))?
-            {
-                return Err(StoreError::DataInconsistency("shielded commitment child is off the selected header chain".into()));
-            }
+        proof.verify_committed(db, point)?;
+        let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
+        let commitment_child = selected_tip.map_or(child, |(_, tip_child)| tip_child);
+        if !self
+            .reachability_service
+            .try_is_chain_ancestor_of(commitment_child.hash(), tip)
+            .map_err(|err| StoreError::DataInconsistency(err.to_string()))?
+        {
+            return Err(StoreError::DataInconsistency("shielded commitment child is off the selected header chain".into()));
+        }
+        if selected_tip.is_some() {
+            super::import_shielded_readiness::verify_pruning_shielded_at_tip(db, point, child, child.hash(), selected_tip)
+        } else {
             super::import_shielded_readiness::verify_pruning_shielded(db, point, child, child.hash())
-        })
+        }
     }
 
     pub(super) fn finish_authority_import(
@@ -2477,18 +2542,26 @@ impl VirtualStateProcessor {
         token: super::persistent_branch_authority::PersistentImportToken,
         retention: super::branch_readiness::ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
-    ) -> kaspa_database::prelude::StoreResult<()> {
-        self.with_authority_point(|point| {
-            self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
-                super::import_smt_readiness::verify_pruning_smt(
-                    db,
-                    point,
-                    self.genesis.hash,
-                    self.toccata_activation,
-                    self.finality_depth,
-                )?;
-                verify_remaining(db, point)
-            })
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| self.finish_authority_import_at(token, point, retention, verify_remaining))
+    }
+
+    fn finish_authority_import_at(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        point: super::branch_readiness::ReadinessPoint,
+        retention: super::branch_readiness::ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
+            super::import_smt_readiness::verify_pruning_smt(
+                db,
+                point,
+                self.genesis.hash,
+                self.toccata_activation,
+                self.finality_depth,
+            )?;
+            verify_remaining(db, point)
         })
     }
 }

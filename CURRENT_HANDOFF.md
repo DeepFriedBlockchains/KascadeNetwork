@@ -44,21 +44,34 @@ An import token that observes a durable revision replacement stays revoked
 until its worker releases the reservation.
 
 See the [dated integration report](docs/development/PHASE6_AUTHORITY_INTEGRATION_2026-11-08.md).
-Combined GitHub Actions and focused native results are pending.
+Draft [PR #4](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/4) is stacked on PR #3 at `f64839c`.
+The exact implementation head is `c44805170fb44dcd51e645e50341072c2a38e1e3` on
+`feature/phase6-authority-integration-20261108`.
+[PR run 42500808732](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42500808732) is the authoritative combined run
+and passed all eight jobs. Both focused regressions passed, along with
+1,559 workspace tests (25 skipped), 32 no-asm tests, and strict Clippy.
+The superseded
+[push run 42500792929](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42500792929) was cancelled by the PR run.
+PR #4 retains its tested implementation head.
+
+## Inactive staging coordinator
+
+The [staging coordinator report](docs/development/PHASE6_STAGING_COORDINATOR_2026-11-08.md) describes the next stacked
+candidate. One processor-owned session covers proof, SMT, shielded and
+UTXO batches. A failed or interrupted component keeps readiness closed.
+Authenticated completion issues the exact lease used by the inactive
+promotion gate.
+
+Restart on a database with descendants pins committed virtual and
+selected-chain state, verifies the applied tip and pruning-point
+shielded commitments, and checks the post-pruning nullifier projection.
+Unavailable proof, a missing authenticated tip child or an inconsistent
+committed view leaves authority closed.
 
 ## Next executable task
 
-After combined CI is green, add an inactive staging import coordinator
-that carries the processor-owned session through proof, SMT, shielded and
-UTXO mutations and requires authenticated completion before promotion.
-Cover cancellation and verification failure through the same boundary.
-
-## Remaining
-
-Production IBD and direct import callers still need to thread the same
-owner from the first mutation through authenticated state completion,
-then drain every staging handle before deletion or promotion. Verified
-restart on a database with descendants needs a stable pruning-point
-nullifier view and authenticated proof evidence. Lease writes currently
-use a dedicated inactive namespace. Main integration and activation
-remain gated.
+Verify the focused and full CI for this exact source before binding
+production IBD and direct import adapters to the coordinator. The live
+promotion boundary, transport-to-typed write adapters, and integration
+with the production staging manager remain open. Activation and main
+integration remain gated.
