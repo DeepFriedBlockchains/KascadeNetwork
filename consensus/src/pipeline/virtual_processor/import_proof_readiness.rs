@@ -78,7 +78,10 @@ fn inconsistent(reason: &str) -> StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{consensus::test_consensus::TestConsensus, model::stores::{headers::HeaderStore, pruning::PruningStore}};
+    use crate::{
+        consensus::test_consensus::TestConsensus,
+        model::stores::{headers::HeaderStore, pruning::PruningStore},
+    };
     use kaspa_consensus_core::{
         block::Block,
         config::{ConfigBuilder, genesis::DEVNET_GENESIS, params::DEVNET_PARAMS},

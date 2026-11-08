@@ -18,8 +18,9 @@ with 1,518 native tests and 25 skipped. Goref regeneration is complete.
   reopen, failed-import reservation, abrupt WAL recovery, and shielded
   proof and nullifier regressions passed.
 - The [staging drain candidate](docs/development/PHASE6_STAGING_DRAIN_2026-11-08.md)
-  at `cf098af` adds cleanup for detached import workers. See
-  [the exact Actions run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489994109).
+  at `cf098af` passed [all eight jobs](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489994109),
+  with 1,553 native tests, 25 skipped, and 32 no-asm tests. The staging
+  cleanup and both abrupt WAL recovery regressions passed.
 - The [lease write scope](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_2026-11-08.md)
   rechecks committed evidence on lease issuance and commit. The
   [pruning session retention change](docs/development/PHASE6_PRUNING_SESSION_RETENTION_2026-11-08.md)
