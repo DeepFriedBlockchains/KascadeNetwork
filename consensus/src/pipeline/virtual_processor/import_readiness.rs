@@ -189,7 +189,11 @@ pub(super) mod tests {
         db.write(staged).unwrap();
         assert_eq!(
             CommittedImportMetadata::verify(&db, point(), retention()).unwrap(),
-            CommittedImportMetadata { point: point(), retention: retention() }
+            CommittedImportMetadata {
+                point: point(),
+                retention: retention(),
+                descriptor: Arc::new(PruningProofDescriptor::new(point().hash, vec![point().hash], vec![retention().hash], vec![2])),
+            }
         );
     }
 
