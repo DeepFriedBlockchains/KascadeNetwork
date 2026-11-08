@@ -45,10 +45,15 @@ checks the actual Orchard action nullifiers. Hosted validation is pending.
 The next [proof and shielded evidence candidate](docs/development/PHASE6_AUTHENTICATED_IMPORT_2026-11-08.md)
 uses the existing pruning proof validator and rechecks committed evidence in
 the isolated receiver. Guarded UTXO appends also reject duplicates before
-writing. The candidate requires hosted validation. Live IBD and direct import
+writing. Live IBD and direct import
 migration still need end-to-end staging ownership and cleanup.
 
 The [staging drain report](docs/development/PHASE6_STAGING_DRAIN_2026-11-08.md) adds
 an inactive cleanup seam that waits for a detached import worker to release
 its permit and captured database owner. It also records the integration
-sequence for the existing PR stack. Hosted validation is pending.
+sequence for the existing PR stack.
+
+[Run 42489994109](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489994109) passed all
+eight jobs at `cf098af5e1081dd5013dae0446321f06775ef8ef`. Native nextest passed 1,553 workspace
+tests with 25 skipped, and the separate no-asm suite passed 32 tests.
+The detached staging worker and both abrupt WAL recovery regressions passed.

@@ -26,3 +26,10 @@ The older standalone runs for #1 and #2 failed. Once approved, use merge
 commits to fold #3 into #2, then #2 into #1, keeping the cumulative fixes
 together. Validate the updated cumulative heads and review the final main
 PR before merging. This branch contains independent Phase 6 candidates.
+
+## Verified validation
+
+[Run 42489994109](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489994109) passed all
+eight jobs at `cf098af5e1081dd5013dae0446321f06775ef8ef`. Native nextest passed 1,553 workspace
+tests with 25 skipped, and the separate no-asm suite passed 32 tests.
+The detached staging worker and both abrupt WAL recovery regressions passed.
