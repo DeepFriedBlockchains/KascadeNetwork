@@ -2397,9 +2397,9 @@ impl VirtualStateProcessor {
         operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
     ) -> kaspa_database::prelude::StoreResult<T> {
         let _session = self.pruning_lock.blocking_read();
-        let pruning = self.pruning_point_store.read();
+        let _pruning = self.pruning_point_store.read();
         let _metadata = self.pruning_meta_stores.read();
-        let (hash, index) = pruning.pruning_point_and_index()?;
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
         operation(super::branch_readiness::ReadinessPoint { hash, index })
     }
 
@@ -2424,6 +2424,29 @@ impl VirtualStateProcessor {
         batch: kaspa_database::prelude::DeferredDbBatch<'_>,
     ) -> kaspa_database::prelude::StoreResult<()> {
         self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
+    }
+
+    pub(super) fn apply_authorized_staging_batch(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        prefixes: &[u8],
+        build: impl FnOnce() -> kaspa_database::prelude::StoreResult<kaspa_database::prelude::DeferredDbBatch<'static>>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let batch = build()?;
+        batch.ensure_key_prefixes(prefixes)?;
+        let _pruning = self.pruning_point_store.write();
+        let _metadata = self.pruning_meta_stores.write();
+        operation.apply(&self.branch_authority, batch)
+    }
+
+    pub(super) fn commit_staging_promotion(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
+        self.authority_commit(lease, batch)
     }
 
     /// Apply a pruning UTXO import chunk through the session's worker permit.
@@ -2455,7 +2478,7 @@ impl VirtualStateProcessor {
         retention: super::branch_readiness::ReadinessPoint,
         proof: &super::import_proof_readiness::ValidatedImportProof,
         child: &kaspa_consensus_core::block::Block,
-    ) -> kaspa_database::prelude::StoreResult<()> {
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
         use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
 
         self.finish_authority_import(token, retention, |db, point| {
@@ -2477,7 +2500,7 @@ impl VirtualStateProcessor {
         token: super::persistent_branch_authority::PersistentImportToken,
         retention: super::branch_readiness::ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
-    ) -> kaspa_database::prelude::StoreResult<()> {
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
         self.with_authority_point(|point| {
             self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
                 super::import_smt_readiness::verify_pruning_smt(

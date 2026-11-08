@@ -169,7 +169,7 @@ impl PersistentBranchAuthority {
         point: ReadinessPoint,
         retention: ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<PersistentBranchLease> {
         self.complete_import(token, point, retention, |db, point| {
             verify_pruning_utxos(db, point)?;
             verify_remaining(db, point)
@@ -186,7 +186,7 @@ impl PersistentBranchAuthority {
         point: ReadinessPoint,
         retention: ReadinessPoint,
         verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<PersistentBranchLease> {
         let mut state = self.inner.state.lock();
         self.check_import(&mut state, &token)?;
         let metadata = CommittedImportMetadata::verify(&self.db, point, retention)?;
@@ -197,19 +197,23 @@ impl PersistentBranchAuthority {
         state.verified = Some(VerifiedReadiness { revision, metadata });
         state.generation = Arc::new(());
         state.import = Weak::new();
-        Ok(())
+        Ok(self.issue_lease(&state, point, revision))
     }
 
     pub(super) fn lease(&self, point: ReadinessPoint) -> StoreResult<PersistentBranchLease> {
         let mut state = self.inner.state.lock();
         let revision = self.check_ready(&mut state, point)?;
-        Ok(PersistentBranchLease {
+        Ok(self.issue_lease(&state, point, revision))
+    }
+
+    fn issue_lease(&self, state: &AuthorityState, point: ReadinessPoint, revision: ReadinessRevision) -> PersistentBranchLease {
+        PersistentBranchLease {
             inner: self.inner.clone(),
             revision,
             owner: self.owner.clone(),
             generation: state.generation.clone(),
             point,
-        })
+        }
     }
 
     /// Commit the authorized write and its new READY revision in one sync batch.
