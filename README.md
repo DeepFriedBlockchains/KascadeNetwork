@@ -43,6 +43,10 @@ consensus parameters in this tree are still inherited from the predecessor chain
 not been re-derived for KASCADE; do not read any constant in
 `consensus/core/src/config/params.rs` as a KASCADE decision.
 
+## Future quantum-security research
+
+KASCADE is exploring potential post-quantum security upgrades, including quantum-resistant wallet designs and transaction protocols. This is a **research direction**, not an implemented feature or a claim of quantum resistance. Candidate cryptographic schemes, compatibility, security tradeoffs, and any migration or activation approach require evaluation and review. This research is not a prerequisite for the initial launch.
+
 ## What is known not to work
 
 Stated plainly, because it is the honest description of the current tree:
