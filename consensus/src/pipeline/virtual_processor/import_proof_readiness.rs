@@ -138,4 +138,166 @@ mod tests {
         pruning.set_pruning_proof_descriptor(substituted).unwrap();
         assert!(validated.verify_committed(&db, point).is_err());
     }
+
+    fn install_shielded_child(db: &Arc<DB>, parent: Hash, nonce: u64) -> Block {
+        use crate::{
+            model::stores::{
+                ghostdag::{DbGhostdagStore, GhostdagData, GhostdagStore},
+                reachability::{DbReachabilityStore, ReachabilityStore},
+            },
+            processes::{reachability::interval::Interval, shielded::PruningPointShieldedMetadata},
+        };
+        use kaspa_consensus_core::{
+            merkle::calc_hash_merkle_root, subnets::SUBNETWORK_ID_COINBASE, tx::Transaction,
+            zkas_state_binding::SHIELDED_COMMITMENT_OFFSET,
+        };
+
+        let mut payload = vec![0; SHIELDED_COMMITMENT_OFFSET];
+        payload.extend_from_slice(&PruningPointShieldedMetadata::empty_state_root());
+        payload.extend_from_slice(&[0; 3]);
+        let coinbase = Transaction::new(0, vec![], vec![], 0, SUBNETWORK_ID_COINBASE, 0, payload);
+        let mut header = Header::from(&DEVNET_GENESIS);
+        header.nonce = nonce;
+        header.hash_merkle_root = calc_hash_merkle_root(std::iter::once(&coinbase));
+        header.finalize();
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
+            .insert(header.hash, Arc::new(header.clone()), 0)
+            .unwrap();
+        DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty)
+            .insert(header.hash, Arc::new(GhostdagData::new_with_selected_parent(parent, 5)))
+            .unwrap();
+        DbReachabilityStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
+            .insert(header.hash, parent, Interval::new(1, 10), nonce)
+            .unwrap();
+        Block::new(header, vec![coinbase])
+    }
+
+    #[test]
+    fn authority_integration_promotes_and_recovers_a_committed_descendant_chain() {
+        use super::super::{
+            branch_readiness::DbBranchReadiness,
+            import_readiness::tests::install_point,
+            staging_import::{PROMOTION_KEY, StagingComponent, StagingImport},
+        };
+        use crate::{
+            model::stores::{
+                ghostdag::GhostdagData,
+                headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
+                selected_chain::{DbSelectedChainStore, SelectedChainStore},
+                shielded::DbNullifierDiffStore,
+                virtual_state::{VirtualState, VirtualStateStore},
+            },
+            processes::ghostdag::ordering::SortableBlock,
+        };
+        use kaspa_consensus_core::config::params::ForkActivation;
+        use kaspa_database::{prelude::DeferredDbBatch, registry::DatabaseStorePrefixes as Prefix};
+        use kaspa_muhash::MuHash;
+        use rocksdb::WriteBatch;
+
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let db = connect();
+        let config = ConfigBuilder::new(DEVNET_PARAMS)
+            .edit_consensus_params(|params| params.toccata_activation = ForkActivation::never())
+            .skip_adding_genesis()
+            .build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender.clone());
+        let processor = consensus.virtual_processor();
+        let mut point_header = Header::from(&DEVNET_GENESIS);
+        point_header.nonce = 100;
+        point_header.utxo_commitment = MuHash::new().finalize();
+        point_header.finalize();
+        let point = ReadinessPoint { hash: point_header.hash, index: 3 };
+        let retention = ReadinessPoint { hash: 7.into(), index: 1 };
+        let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(point_header.clone())]]).unwrap();
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
+            .insert(point.hash, Arc::new(point_header), 0)
+            .unwrap();
+        install_point(&db, point, retention);
+        let child = install_shielded_child(&db, point.hash, 101);
+        let mut header_tip = DbHeadersSelectedTipStore::new(db.clone());
+        header_tip.set(SortableBlock::new(child.hash(), child.header.blue_work)).unwrap();
+
+        let mut staging = StagingImport::begin(processor.clone()).unwrap();
+        assert!(staging.finish(retention, &proof, &child).is_err());
+        assert!(StagingImport::begin(processor.clone()).is_err());
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let components = [
+            (
+                StagingComponent::Proof,
+                vec![
+                    (Prefix::PruningProofDescriptor, bincode::serialize(&proof.descriptor).unwrap()),
+                    (Prefix::BodyMissingAnticone, bincode::serialize(&Vec::<Hash>::new()).unwrap()),
+                ],
+            ),
+            (StagingComponent::Smt, vec![(Prefix::SmtSyncFlag, bincode::serialize(&true).unwrap())]),
+            (StagingComponent::Shielded, vec![(Prefix::ShieldedSyncFlag, bincode::serialize(&true).unwrap())]),
+            (
+                StagingComponent::Utxo,
+                vec![
+                    (Prefix::PruningUtxosetPosition, bincode::serialize(&point.hash).unwrap()),
+                    (Prefix::PruningUtxosetSyncFlag, bincode::serialize(&true).unwrap()),
+                ],
+            ),
+        ];
+        for (component, rows) in components {
+            let worker_db = db.clone();
+            runtime.block_on(async {
+                staging
+                    .submit(component, true, move || {
+                        let mut batch = DeferredDbBatch::new(worker_db.clone());
+                        for (prefix, data) in rows {
+                            batch.put_raw(&worker_db, prefix, data)?;
+                        }
+                        Ok(batch)
+                    })
+                    .unwrap()
+                    .await
+                    .unwrap()
+                    .unwrap();
+            });
+            assert!(processor.authority_lease().is_err());
+        }
+        let verified = staging.finish(retention, &proof, &child).unwrap();
+        let sibling = processor.authority_lease().unwrap();
+        verified.promote().unwrap();
+        assert!(processor.commit_staging_promotion(sibling).is_err());
+        assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
+        drop(staging);
+
+        let tip_child = install_shielded_child(&db, child.hash(), 102);
+        header_tip.set(SortableBlock::new(tip_child.hash(), tip_child.header.blue_work)).unwrap();
+        let mut chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+        let mut batch = WriteBatch::default();
+        chain.init_with_pruning_point(&mut batch, point.hash).unwrap();
+        chain.write_entry(&mut batch, 1, child.hash()).unwrap();
+        chain.set_highest_index(&mut batch, 1).unwrap();
+        db.write(batch).unwrap();
+        let state = VirtualState { ghostdag_data: GhostdagData::new_with_selected_parent(child.hash(), 5), ..Default::default() };
+        processor.virtual_stores.write().state.set(Arc::new(state)).unwrap();
+        drop(chain);
+        drop(header_tip);
+        drop(consensus);
+        drop(db);
+
+        let db = connect();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender);
+        let processor = consensus.virtual_processor();
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(readiness.is_ready(point).unwrap());
+        assert!(processor.authority_lease().is_err());
+        let diffs = DbNullifierDiffStore::new(db.clone(), CachePolicy::Empty);
+        let mut batch = WriteBatch::default();
+        diffs.set_batch(&mut batch, child.hash(), vec![[9; 32]]).unwrap();
+        db.write(batch).unwrap();
+        assert!(processor.recover_authenticated_staging(retention, &proof, &child, &tip_child).is_err());
+        assert!(!readiness.is_ready(point).unwrap());
+
+        let mut batch = WriteBatch::default();
+        diffs.delete_batch(&mut batch, child.hash()).unwrap();
+        db.write(batch).unwrap();
+        assert!(processor.recover_authenticated_staging(retention, &proof, &child, &tip_child).is_ok());
+        assert!(processor.authority_lease().is_ok());
+    }
 }

@@ -231,9 +231,9 @@ pub struct DbVirtualStateStore {
 }
 
 impl DbVirtualStateStore {
-    pub fn new(db: Arc<DB>, lkg_virtual_state: LkgVirtualState) -> Self {
-        let access = CachedDbItem::new_with_version_suffix(
-            db.clone(),
+    fn access(db: Arc<DB>) -> CachedDbItem<Arc<VirtualState>, PreToccataVirtualState> {
+        CachedDbItem::new_with_version_suffix(
+            db,
             DatabaseStorePrefixes::VirtualState.into(),
             POST_TOCCATA_VIRTUAL_STATE_VERSION,
             // `None` ⇒ legacy rows live at the unversioned `[prefix]` key.
@@ -241,7 +241,16 @@ impl DbVirtualStateStore {
             // `Some(POST_TOCCATA_VIRTUAL_STATE_VERSION)` and bump the
             // current-version constant.
             None,
-        );
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_committed(db: Arc<DB>) -> StoreResult<Arc<VirtualState>> {
+        Self::access(db).read()
+    }
+
+    pub fn new(db: Arc<DB>, lkg_virtual_state: LkgVirtualState) -> Self {
+        let access = Self::access(db.clone());
         // Init the LKG cache from DB store data
         lkg_virtual_state.store(access.read().optional().unwrap().unwrap_or_default());
         Self { db, access, lkg_virtual_state }

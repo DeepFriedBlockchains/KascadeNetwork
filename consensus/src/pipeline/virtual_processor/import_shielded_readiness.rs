@@ -1,28 +1,54 @@
-//! Shielded evidence for an isolated pruning import receiver.
+//! Shielded evidence for an isolated receiver or a guarded restart.
 //!
 //! Hold the pruning session, point, and metadata guards through this check and
 //! readiness publication. The caller must authenticate the selected child on
-//! the header chain independently of the imported body. The receiver must have
-//! no applied descendants because its global nullifier rows must represent the
-//! pruning point itself.
+//! the header chain independently of the imported body. A restart must also
+//! pin the committed virtual and selected-chain view through publication.
 
 use super::branch_readiness::ReadinessPoint;
 use crate::{
     model::stores::{
         ghostdag::{DbGhostdagStore, GhostdagStoreReader},
         headers::{DbHeadersStore, HeaderStoreReader},
+        selected_chain::{DbSelectedChainStore, SelectedChainStoreReader},
+        shielded::{DbNullifierDiffStore, NullifierDiffStoreReader},
     },
     processes::shielded::{PruningPointShieldedMetadata, ShieldedStateManager},
 };
 use kaspa_consensus_core::{block::Block, hashing, merkle::calc_hash_merkle_root, zkas_state_binding::extract_state_root};
 use kaspa_database::prelude::{CachePolicy, DB, StoreError, StoreResult};
 use kaspa_hashes::Hash;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 pub(super) fn verify_pruning_shielded(db: &Arc<DB>, point: ReadinessPoint, child: &Block, trusted_child: Hash) -> StoreResult<()> {
+    verify_pruning_shielded_at_tip(db, point, child, trusted_child, None)
+}
+
+pub(super) fn verify_pruning_shielded_at_tip(
+    db: &Arc<DB>,
+    point: ReadinessPoint,
+    child: &Block,
+    trusted_child: Hash,
+    selected_tip: Option<(Hash, &Block)>,
+) -> StoreResult<()> {
+    let expected = authenticated_commitment(db, point.hash, child, trusted_child)?;
+    let store = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
+    let mut nullifiers = store.nullifier_set_snapshot()?;
+    if let Some((tip, tip_child)) = selected_tip {
+        if tip == point.hash && tip_child.hash() != trusted_child {
+            return Err(inconsistent("restart supplied different children for the same state"));
+        }
+        let tip_commitment = authenticated_commitment(db, tip, tip_child, tip_child.hash())?;
+        verify_commitment(&store, tip, tip_commitment, &nullifiers)?;
+        nullifiers = pruning_nullifiers(db, point.hash, trusted_child, tip, nullifiers)?;
+    }
+    verify_commitment(&store, point.hash, expected, &nullifiers)
+}
+
+fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_child: Hash) -> StoreResult<[u8; 32]> {
     let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
     let header = headers.get_header(trusted_child)?;
-    if trusted_child == point.hash
+    if trusted_child == point
         || header.hash != trusted_child
         || hashing::header::hash(&header) != trusted_child
         || child.hash() != trusted_child
@@ -32,7 +58,7 @@ pub(super) fn verify_pruning_shielded(db: &Arc<DB>, point: ReadinessPoint, child
     }
 
     let ghostdag = DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty);
-    if ghostdag.get_selected_parent(trusted_child)? != point.hash {
+    if ghostdag.get_selected_parent(trusted_child)? != point {
         return Err(inconsistent("shielded commitment child does not select the pruning point"));
     }
     let coinbase = child
@@ -43,20 +69,61 @@ pub(super) fn verify_pruning_shielded(db: &Arc<DB>, point: ReadinessPoint, child
     if calc_hash_merkle_root(child.transactions.iter()) != header.hash_merkle_root {
         return Err(inconsistent("shielded commitment child body does not match the authenticated header"));
     }
-    let expected = extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))?;
+    extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))
+}
 
-    let store = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
-    let nullifiers = store.nullifier_set_snapshot()?;
-    if let Some(metadata) = store.export_pruning_point_shielded(point.hash)? {
+fn verify_commitment(
+    store: &ShieldedStateManager,
+    point: Hash,
+    expected: [u8; 32],
+    nullifiers: &[[u8; 32]],
+) -> StoreResult<()> {
+    if let Some(metadata) = store.export_pruning_point_shielded(point)? {
         ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
         ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).map_err(StoreError::DataInconsistency)?;
     } else if expected != PruningPointShieldedMetadata::empty_state_root()
-        || store.state_root_at(point.hash)? != expected
+        || store.state_root_at(point)? != expected
         || !nullifiers.is_empty()
     {
         return Err(inconsistent("committed shielded state does not match the authenticated empty commitment"));
     }
     Ok(())
+}
+
+fn pruning_nullifiers(
+    db: &Arc<DB>,
+    point: Hash,
+    child: Hash,
+    tip: Hash,
+    nullifiers: Vec<[u8; 32]>,
+) -> StoreResult<Vec<[u8; 32]>> {
+    let chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+    let point_index = chain.get_by_hash(point)?;
+    let (tip_index, committed_tip) = chain.get_tip()?;
+    if committed_tip != tip || point_index > tip_index || chain.get_by_index(point_index)? != point {
+        return Err(inconsistent("committed selected chain does not match virtual restart state"));
+    }
+
+    let mut nullifiers: HashSet<_> = nullifiers.into_iter().collect();
+    let diffs = DbNullifierDiffStore::new(db.clone(), CachePolicy::Empty);
+    let ghostdag = DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty);
+    let mut previous = point;
+    for index in point_index..tip_index {
+        let block = chain.get_by_index(index + 1)?;
+        if chain.get_by_hash(block)? != index + 1
+            || ghostdag.get_selected_parent(block)? != previous
+            || (index == point_index && block != child)
+        {
+            return Err(inconsistent("restart descendants are not the authenticated selected chain"));
+        }
+        for nullifier in diffs.get(block)? {
+            if !nullifiers.remove(&nullifier) {
+                return Err(inconsistent("descendant nullifier is missing or repeated in committed membership"));
+            }
+        }
+        previous = block;
+    }
+    Ok(nullifiers.into_iter().collect())
 }
 
 fn inconsistent(reason: &str) -> StoreError {
