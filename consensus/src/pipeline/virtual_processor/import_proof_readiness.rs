@@ -211,9 +211,7 @@ mod tests {
         let point = ReadinessPoint { hash: point_header.hash, index: 3 };
         let retention = ReadinessPoint { hash: 7.into(), index: 1 };
         let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(point_header.clone())]]).unwrap();
-        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
-            .insert(point.hash, Arc::new(point_header), 0)
-            .unwrap();
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(point_header), 0).unwrap();
         install_point(&db, point, retention);
         let child = install_shielded_child(&db, point.hash, 101);
         let mut header_tip = DbHeadersSelectedTipStore::new(db.clone());

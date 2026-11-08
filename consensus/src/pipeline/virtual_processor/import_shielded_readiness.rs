@@ -72,12 +72,7 @@ fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_ch
     extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))
 }
 
-fn verify_commitment(
-    store: &ShieldedStateManager,
-    point: Hash,
-    expected: [u8; 32],
-    nullifiers: &[[u8; 32]],
-) -> StoreResult<()> {
+fn verify_commitment(store: &ShieldedStateManager, point: Hash, expected: [u8; 32], nullifiers: &[[u8; 32]]) -> StoreResult<()> {
     if let Some(metadata) = store.export_pruning_point_shielded(point)? {
         ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
         ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).map_err(StoreError::DataInconsistency)?;
@@ -90,13 +85,7 @@ fn verify_commitment(
     Ok(())
 }
 
-fn pruning_nullifiers(
-    db: &Arc<DB>,
-    point: Hash,
-    child: Hash,
-    tip: Hash,
-    nullifiers: Vec<[u8; 32]>,
-) -> StoreResult<Vec<[u8; 32]>> {
+fn pruning_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash, nullifiers: Vec<[u8; 32]>) -> StoreResult<Vec<[u8; 32]>> {
     let chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
     let point_index = chain.get_by_hash(point)?;
     let (tip_index, committed_tip) = chain.get_tip()?;
