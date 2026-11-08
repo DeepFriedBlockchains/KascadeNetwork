@@ -498,8 +498,12 @@ async fn real_shielded_spend_through_mined_block() {
 
     let source = &ctx.consensus.virtual_processor().shielded_state_manager;
     let metadata = source.export_pruning_point_shielded(point).unwrap().unwrap();
-    let nullifiers = source.nullifier_set_snapshot().unwrap();
-    assert_eq!(nullifiers.len(), 1, "the accepted Orchard spend must contribute a nullifier");
+    let bundle = kaspa_shielded_core::bundle::ShieldedBundle::from_bytes(&spend_tx.payload).unwrap();
+    let mut expected_nullifiers: Vec<_> = bundle.actions.iter().map(|action| action.nullifier).collect();
+    expected_nullifiers.sort_unstable();
+    let mut nullifiers = ctx.consensus.virtual_processor().collect_pruning_point_nullifiers(point).unwrap().as_ref().clone();
+    nullifiers.sort_unstable();
+    assert_eq!(nullifiers, expected_nullifiers, "the pruning point must contain every accepted Orchard action nullifier");
     ShieldedStateManager::verify_import_binding(&metadata, committed).unwrap();
     ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).unwrap();
 

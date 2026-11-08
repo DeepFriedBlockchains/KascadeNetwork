@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 7, 2026.
+Updated November 8, 2026.
 
 The [validation stack](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/3) remains PR #1 → #2 → #3.
 The stack tip `f64839c5c8ec8bff501cf5f69698723a0f7d9f37` passed all eight jobs in
@@ -35,3 +35,9 @@ in [run 42402654584](https://github.com/DeepFriedBlockchains/KascadeNetwork/acti
 The next inactive adapter stages pruning UTXOs through the worker permit
 and updates the accumulator only after commit. See [the append report](docs/development/PHASE6_UTXO_IMPORT_2026-11-07.md).
 Live wiring, proof authentication and full branch validation remain pending.
+
+The [restart and session report](docs/development/PHASE6_AUTHORITY_RESTART_2026-11-08.md)
+records the current candidate. Lease issuance requires a revision verified on
+this database open. Failed import writes invalidate the token while retaining
+the session until the worker releases it. The shielded import fixture now
+checks the actual Orchard action nullifiers. Hosted validation is pending.

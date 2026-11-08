@@ -126,8 +126,12 @@ impl DbBranchReadiness {
     /// Only stage after independent, authoritative verification of the complete
     /// state at this point. Never use default-true cached flags as that proof.
     /// A dropped or failed batch does not expose readiness to any reader.
-    pub(super) fn stage_ready(&self, batch: &mut DeferredDbBatch<'_>, point: ReadinessPoint) -> StoreResult<()> {
-        batch.put_raw(&self.db, Self::key(), Self::encode(Some(point))?)
+    pub(super) fn stage_ready(&self, batch: &mut DeferredDbBatch<'_>, point: ReadinessPoint) -> StoreResult<ReadinessRevision> {
+        let bytes = Self::encode(Some(point))?;
+        let mut revision = [0; 32];
+        revision.copy_from_slice(&bytes[42..]);
+        batch.put_raw(&self.db, Self::key(), bytes)?;
+        Ok(ReadinessRevision(revision))
     }
 
     pub(super) fn stage_closed(&self, batch: &mut DeferredDbBatch<'_>, revision: ReadinessRevision) -> StoreResult<()> {
@@ -141,10 +145,11 @@ impl DbBranchReadiness {
     /// the same metadata guards across verification and this entire call.
     /// Explicit recovery uses the same verified path; merely retrying a nested
     /// import operation must never call this and reopen an outer session.
-    pub(super) fn complete_sync(&self, point: ReadinessPoint) -> StoreResult<()> {
+    pub(super) fn complete_sync(&self, point: ReadinessPoint) -> StoreResult<ReadinessRevision> {
         let mut batch = DeferredDbBatch::new(self.db.clone());
-        self.stage_ready(&mut batch, point)?;
-        batch.commit()
+        let revision = self.stage_ready(&mut batch, point)?;
+        batch.commit()?;
+        Ok(revision)
     }
 }
 

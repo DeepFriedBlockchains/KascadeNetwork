@@ -41,7 +41,9 @@ static AUTHORITIES: OnceLock<AuthorityRegistry> = OnceLock::new();
 struct AuthorityState {
     generation: Arc<()>,
     import: Weak<()>,
-    failed: bool,
+    import_failed: bool,
+    // A newly opened authority must corroborate committed state before issuing leases.
+    verified_revision: Option<ReadinessRevision>,
 }
 
 /// Opaque, non-cloneable, and usable only with its exact creating owner.
@@ -86,9 +88,10 @@ impl PersistentBranchAuthority {
         if state.import.upgrade().is_some() {
             return Err(rejected());
         }
-        state.failed = true;
+        state.verified_revision = None;
         state.generation = Arc::new(());
         let closed_revision = self.readiness.close_revision_sync()?;
+        state.import_failed = false;
         let session = Arc::new(());
         state.import = Arc::downgrade(&session);
         Ok(PersistentImportToken { inner: self.inner.clone(), closed_revision, owner: self.owner.clone(), session })
@@ -100,7 +103,8 @@ impl PersistentBranchAuthority {
 
     fn check_import(&self, state: &AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
         let active = state.import.upgrade().ok_or_else(rejected)?;
-        if !Arc::ptr_eq(&self.inner, &token.inner)
+        if state.import_failed
+            || !Arc::ptr_eq(&self.inner, &token.inner)
             || !Arc::ptr_eq(&self.owner, &token.owner)
             || !Arc::ptr_eq(&active, &token.session)
             || self.readiness.closed_revision()? != Some(token.closed_revision)
@@ -126,7 +130,8 @@ impl PersistentBranchAuthority {
         batch.ensure_database(&self.db)?;
         self.readiness.stage_closed(&mut batch, token.closed_revision)?;
         if let Err(error) = batch.commit() {
-            state.import = Weak::new();
+            // An invalidated worker still owns the session until its token is dropped.
+            state.import_failed = true;
             return Err(error);
         }
         Ok(())
@@ -167,19 +172,18 @@ impl PersistentBranchAuthority {
         verify(&self.db, point)?;
         self.check_import(&state, &token)?;
         self.verify_point(point)?;
-        self.readiness.complete_sync(point)?;
+        state.verified_revision = Some(self.readiness.complete_sync(point)?);
         state.generation = Arc::new(());
-        state.failed = false;
         state.import = Weak::new();
         Ok(())
     }
 
     pub(super) fn lease(&self, point: ReadinessPoint) -> StoreResult<PersistentBranchLease> {
         let state = self.inner.state.lock();
-        if state.failed || state.import.upgrade().is_some() {
+        let revision = state.verified_revision.ok_or_else(rejected)?;
+        if state.import.upgrade().is_some() || self.readiness.ready_revision(point)? != Some(revision) {
             return Err(rejected());
         }
-        let revision = self.readiness.ready_revision(point)?.ok_or_else(rejected)?;
         self.verify_point(point)?;
         Ok(PersistentBranchLease {
             inner: self.inner.clone(),
@@ -201,7 +205,7 @@ impl PersistentBranchAuthority {
         if !Arc::ptr_eq(&self.inner, &lease.inner)
             || !Arc::ptr_eq(&self.owner, &lease.owner)
             || !Arc::ptr_eq(&state.generation, &lease.generation)
-            || state.failed
+            || state.verified_revision != Some(lease.revision)
             || state.import.upgrade().is_some()
             || lease.point != point
             || self.readiness.ready_revision(point)? != Some(lease.revision)
@@ -211,11 +215,11 @@ impl PersistentBranchAuthority {
         self.verify_point(point)?;
         batch.ensure_database(&self.db)?;
         state.generation = Arc::new(());
-        state.failed = true;
+        state.verified_revision = None;
         self.readiness.close_revision_sync()?;
-        self.readiness.stage_ready(&mut batch, point)?;
+        let revision = self.readiness.stage_ready(&mut batch, point)?;
         batch.commit()?;
-        state.failed = false;
+        state.verified_revision = Some(revision);
         Ok(())
     }
 }
@@ -294,6 +298,8 @@ mod tests {
         readiness.close_sync().unwrap();
         readiness.complete_sync(point()).unwrap();
         assert!(owner.commit(point(), old, data_batch(&db)).is_err());
+        assert!(owner.lease(point()).is_err());
+        complete(&owner);
         let lease = owner.lease(point()).unwrap();
         DbPastPruningPointsStore::new(db.clone(), CachePolicy::Empty).set(point().index, 42.into()).unwrap();
         assert!(owner.lease(point()).is_err());
@@ -394,10 +400,37 @@ mod tests {
         let mut batch = data_batch(&db);
         batch.reject();
         assert!(owner.apply_import(&token, batch).is_err());
+        let other_owner = PersistentBranchAuthority::new(db.clone());
+        assert!(other_owner.begin_import().is_err());
         assert!(owner.apply_import(&token, data_batch(&db)).is_err());
         assert!(owner.complete_import(token, point(), |_, _| panic!("invalid token accepted")).is_err());
         assert!(db.get(DATA_KEY).unwrap().is_none());
         assert!(owner.lease(point()).is_err());
+        assert!(other_owner.begin_import().is_ok());
+    }
+
+    #[test]
+    fn durable_ready_marker_requires_verification_after_database_reopen() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(32).with_db_path(temp.path().to_owned()).build().unwrap();
+        {
+            let db = connect();
+            install_point(&db);
+            complete(&PersistentBranchAuthority::new(db));
+        }
+        let db = connect();
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(readiness.is_ready(point()).unwrap());
+
+        let owner = PersistentBranchAuthority::new(db);
+        assert!(owner.lease(point()).is_err());
+        let token = owner.begin_import().unwrap();
+        assert!(owner.complete_import(token, point(), |_, _| Err(rejected())).is_err());
+        assert!(!readiness.is_ready(point()).unwrap());
+        assert!(owner.lease(point()).is_err());
+
+        complete(&owner);
+        assert!(owner.lease(point()).is_ok());
     }
 
     #[test]
