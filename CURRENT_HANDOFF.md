@@ -40,4 +40,11 @@ The [restart and session report](docs/development/PHASE6_AUTHORITY_RESTART_2026-
 records the current candidate. Lease issuance requires a revision verified on
 this database open. Failed import writes invalidate the token while retaining
 the session until the worker releases it. The shielded import fixture now
-checks the actual Orchard action nullifiers. Hosted validation is pending.
+checks the actual Orchard action nullifiers. 
+
+[Run 42489324499, attempt 2](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489324499/attempts/2)
+completed successfully on `433c10f7d65cac9d4ee6ec861c4e777fb6554107`. All eight jobs
+are green. Native nextest passed 1,549 tests with 25 skipped, and 32 no-asm
+tests passed. Attempt 1 had one abrupt-writer subprocess exit without
+the expected status. The identical code passed that test on retry and
+on the later authenticated import and staging drain candidates.

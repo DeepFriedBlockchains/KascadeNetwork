@@ -22,6 +22,14 @@ did not resolve in KascadeNetwork.
   The fixed-count assertion was the only failure in
   [run 42405344527](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42405344527).
 
-The authority and import integration remain test-only. The candidate is
-pending hosted validation. Proof authentication, guarded shielded completion,
+The authority and import integration remain test-only. Proof authentication, guarded shielded completion,
 and end-to-end caller migration remain open.
+
+## Verified validation
+
+[Run 42489324499, attempt 2](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489324499/attempts/2)
+completed successfully on `433c10f7d65cac9d4ee6ec861c4e777fb6554107`. All eight jobs
+are green. Native nextest passed 1,549 tests with 25 skipped, and 32 no-asm
+tests passed. Attempt 1 had one abrupt-writer subprocess exit without
+the expected status. The identical code passed that test on retry and
+on the later authenticated import and staging drain candidates.
