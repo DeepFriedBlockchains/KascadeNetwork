@@ -311,4 +311,105 @@ pub(super) mod tests {
         assert!(processor.finish_authority_import(token, retention(), |_, _| panic!("removed UTXOs accepted")).is_err());
         assert!(processor.authority_lease().is_err());
     }
+
+    #[test]
+    fn authority_integration_drains_processor_worker_and_rejects_reopened_lease() {
+        use super::super::branch_readiness::DbBranchReadiness;
+        use std::sync::mpsc;
+
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let db = connect();
+        let old_db = Arc::downgrade(&db);
+        let config =
+            ConfigBuilder::new(DEVNET_PARAMS).edit_consensus_params(|p| p.toccata_activation = ForkActivation::never()).build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender.clone());
+        let processor = consensus.virtual_processor();
+        let mut header = Header::from(&DEVNET_GENESIS);
+        header.utxo_commitment = MuHash::new().finalize();
+        header.nonce += 1;
+        header.finalize();
+        let point = ReadinessPoint { hash: header.hash, index: 3 };
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(header), 0).unwrap();
+        install_point(&db, point, retention());
+        processor.pruning_point_store.write().set(point.hash, point.index).unwrap();
+        {
+            let mut metadata = PruningMetaStores::new(db.clone(), CachePolicy::Empty);
+            let mut batch = WriteBatch::default();
+            stage_explicit_evidence(&mut metadata, &mut batch, point);
+            db.write(batch).unwrap();
+        }
+
+        let token = processor.begin_authority_import().unwrap();
+        processor.finish_authority_import(token, retention(), |_, _| Ok(())).unwrap();
+        let stale_lease = processor.authority_lease().unwrap();
+        let token = processor.begin_authority_import().unwrap();
+        let mut session = ImportWorkerSession::new(token);
+        let outpoint = TransactionOutpoint::new(Hash::from_bytes([8; 32]), 0);
+        let entry = UtxoEntry::new(10, ScriptPublicKey::from_vec(0, vec![0x51]), 1, false, None);
+        let worker_processor = processor.clone();
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        runtime.block_on(async {
+            let worker = session
+                .spawn_blocking(move |operation| {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    worker_processor.append_authorized_pruning_utxos(operation, &[(outpoint, entry)], &mut MuHash::new())
+                })
+                .unwrap();
+            started_rx.await.unwrap();
+            drop(worker);
+        });
+        assert!(processor.authority_lease().is_err());
+        assert!(PersistentBranchAuthority::new(db.clone()).begin_import().is_err());
+        assert!(session.try_start().is_none());
+        drop(consensus);
+        drop(db);
+
+        runtime.block_on(async {
+            let mut drain = Box::pin(session.cancel_and_wait());
+            tokio::select! {
+                biased;
+                () = &mut drain => panic!("staging cleanup completed while the processor worker was still running"),
+                () = std::future::ready(()) => {}
+            }
+            release_tx.send(()).unwrap();
+            drain.await;
+        });
+        assert!(old_db.upgrade().is_none());
+
+        let db = connect();
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(readiness.closed_revision().unwrap().is_some());
+        assert!(!readiness.is_ready(point).unwrap());
+        let mut utxos = DbUtxoSetStore::new(db.clone(), CachePolicy::Empty, DatabaseStorePrefixes::PruningUtxoset.into());
+        assert_eq!(utxos.iterator().next().unwrap().unwrap().0, outpoint);
+        let reopened_config = config.to_builder().skip_adding_genesis().build();
+        let consensus = TestConsensus::with_db(db.clone(), &reopened_config, sender);
+        let processor = consensus.virtual_processor();
+        assert_eq!(processor.pruning_point_store.read().pruning_point_and_index().unwrap(), (point.hash, point.index));
+        assert!(processor.authority_lease().is_err());
+        let token = processor.begin_authority_import().unwrap();
+        assert!(processor.finish_authority_import(token, retention(), |_, _| panic!("unverified UTXO row accepted")).is_err());
+        assert!(!readiness.is_ready(point).unwrap());
+
+        // Restore the fixture's authenticated empty UTXO set through a new session.
+        let token = processor.begin_authority_import().unwrap();
+        utxos.clear().unwrap();
+        processor.finish_authority_import(token, retention(), |_, _| Ok(())).unwrap();
+        let data_key = [DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 1];
+        let mut write = DeferredDbBatch::new(db.clone());
+        write.put_raw(&db, data_key, b"stale").unwrap();
+        assert!(processor.authority_commit(stale_lease, write).is_err());
+        assert!(db.get(data_key).unwrap().is_none());
+
+        let lease = processor.authority_lease().unwrap();
+        let mut write = DeferredDbBatch::new(db.clone());
+        write.put_raw(&db, data_key, b"fresh").unwrap();
+        processor.authority_commit(lease, write).unwrap();
+        assert_eq!(db.get(data_key).unwrap().unwrap().as_slice(), b"fresh");
+    }
 }
