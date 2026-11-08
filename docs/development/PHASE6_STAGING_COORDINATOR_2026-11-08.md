@@ -40,16 +40,15 @@ adapters and staging promotion switch still require integration.
 ## Validation and next checkpoint
 
 [Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
-The current source checkpoint is `2854f56fea4bf8a67a4e225b445499282e7f8bc2` on
-`feature/phase6-staging-coordinator-20261108`.
-[Combined PR run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037) is in progress and covers
-the focused authority regressions, full workspace suite and strict
-Clippy. The same-SHA [push run 42503813493](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503813493) was
-superseded by the PR run. Candidate test counts are pending.
+The source checkpoint is `6e5c4ae4479920cd5dee63acdac9ec816d1e1fb2` on `feature/phase6-staging-coordinator-20261108`.
+[PR run 42504801081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42504801081) validates the corrected source.
+The same-SHA [push run 42504797523](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42504797523) was superseded.
+Focused and full workspace results are pending.
 
-The original [PR run 42503679589](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503679589)
-on `9e332bb5e22f9b6e6c429b45a25350df60379c72` reported rustfmt differences. The current source
-applies those changes. The handoff is on a separate branch so PR checks
-remain attached to the source commit.
+[Run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037)
+reported two E0573 errors in the staging proof tests. Both `Check`
+and `Lints` found the missing consensus hash type. The current source
+imports `kaspa_hashes::Hash` in the test module. The implementation
+of staging and descendant restart is unchanged.
 
 Verify all eight jobs before integrating the production adapters.
