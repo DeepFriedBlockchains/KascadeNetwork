@@ -63,3 +63,8 @@ The [lease write scope report](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_202
 Lease issuance and commit re-read the exact committed import evidence.
 The scoped RocksDB batch keeps a lease from modifying the rows that
 authorize it. Hosted validation of this milestone is pending.
+
+The [pruning session retention report](docs/development/PHASE6_PRUNING_SESSION_RETENTION_2026-11-08.md) records a worker
+ownership fix used by the consensus session API. Cancelling an async wait
+keeps the exact pruning guard in the detached callback until it exits.
+The focused cancellation regression and full workspace checks are pending.

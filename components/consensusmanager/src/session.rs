@@ -168,7 +168,14 @@ impl ConsensusSessionOwned {
         F: FnOnce(&dyn ConsensusApi) -> R + Send + 'static,
         R: Send + 'static,
     {
-        spawn_blocking(move || f(self.consensus.as_ref())).await.unwrap()
+        spawn_blocking(move || {
+            let result = f(self.consensus.as_ref());
+            // Capture the whole session so a detached worker retains its pruning guard.
+            drop(self);
+            result
+        })
+        .await
+        .unwrap()
     }
 }
 
@@ -685,3 +692,42 @@ impl ConsensusSessionOwned {
 }
 
 pub type ConsensusProxy = ConsensusSessionOwned;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{future::ready, sync::mpsc, time::Duration};
+    use tokio::{sync::oneshot, time::timeout};
+
+    struct StubConsensus;
+
+    impl ConsensusApi for StubConsensus {}
+
+    #[tokio::test]
+    async fn cancelled_wait_keeps_pruning_guard_until_blocking_callback_returns() {
+        let pruning_lock = SessionLock::new();
+        let consensus = ConsensusInstance::new(pruning_lock.clone(), Arc::new(StubConsensus));
+        let session = consensus.session().await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let caller = tokio::spawn(session.spawn_blocking(move |_| {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        }));
+
+        timeout(Duration::from_secs(5), started_rx).await.unwrap().unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+
+        let writer = pruning_lock.0.write();
+        tokio::pin!(writer);
+        tokio::select! {
+            biased;
+            _ = &mut writer => panic!("the detached callback released its pruning guard"),
+            () = ready(()) => {}
+        }
+
+        release_tx.send(()).unwrap();
+        let _writer = timeout(Duration::from_secs(5), writer).await.unwrap();
+    }
+}
