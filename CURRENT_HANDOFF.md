@@ -71,12 +71,17 @@ committed view leaves authority closed.
 ## Candidate validation
 
 [Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
-The exact source checkpoint is `9e332bb5e22f9b6e6c429b45a25350df60379c72` on
+The current source checkpoint is `2854f56fea4bf8a67a4e225b445499282e7f8bc2` on
 `feature/phase6-staging-coordinator-20261108`.
-[Combined PR run 42503679589](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503679589) is pending. It includes the
-focused authority tests and full workspace validation. The initial
-[push run 42503664314](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503664314) targets the same SHA. Test counts
-for this candidate are pending.
+[Combined PR run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037) is in progress and covers
+the focused authority regressions, full workspace suite and strict
+Clippy. The same-SHA [push run 42503813493](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503813493) was
+superseded by the PR run. Candidate test counts are pending.
+
+The original [PR run 42503679589](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503679589)
+on `9e332bb5e22f9b6e6c429b45a25350df60379c72` reported rustfmt differences. The current source
+applies those changes. The handoff is on a separate branch so PR checks
+remain attached to the source commit.
 
 ## Next executable task
 
