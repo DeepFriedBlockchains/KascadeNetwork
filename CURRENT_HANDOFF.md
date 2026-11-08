@@ -47,3 +47,8 @@ uses the existing pruning proof validator and rechecks committed evidence in
 the isolated receiver. Guarded UTXO appends also reject duplicates before
 writing. The candidate requires hosted validation. Live IBD and direct import
 migration still need end-to-end staging ownership and cleanup.
+
+The [staging drain report](docs/development/PHASE6_STAGING_DRAIN_2026-11-08.md) adds
+an inactive cleanup seam that waits for a detached import worker to release
+its permit and captured database owner. It also records the integration
+sequence for the existing PR stack. Hosted validation is pending.
