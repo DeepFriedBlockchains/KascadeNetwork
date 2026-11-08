@@ -44,7 +44,15 @@ An import token that observes a durable revision replacement stays revoked
 until its worker releases the reservation.
 
 See the [dated integration report](docs/development/PHASE6_AUTHORITY_INTEGRATION_2026-11-08.md).
-Combined GitHub Actions and focused native results are pending.
+Draft [PR #4](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/4) is stacked on PR #3 at `f64839c`.
+The exact implementation head is `c44805170fb44dcd51e645e50341072c2a38e1e3` on
+`feature/phase6-authority-integration-20261108`.
+[PR run 42500808732](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42500808732) is the authoritative combined run
+and is pending at this handoff. The superseded
+[push run 42500792929](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42500792929) was cancelled by the PR run.
+The focused and workspace test counts are pending. This handoff is kept
+on a separate documentation branch so PR checks stay attached to the
+implementation head.
 
 ## Next executable task
 
