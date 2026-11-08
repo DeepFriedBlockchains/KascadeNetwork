@@ -190,7 +190,11 @@ mod tests {
             },
             processes::ghostdag::ordering::SortableBlock,
         };
-        use kaspa_consensus_core::config::params::ForkActivation;
+        use kaspa_consensus_core::{
+            config::params::ForkActivation,
+            muhash::MuHashExtensions,
+            tx::{ScriptPublicKey, TransactionOutpoint, UtxoEntry},
+        };
         use kaspa_database::{prelude::DeferredDbBatch, registry::DatabaseStorePrefixes as Prefix};
         use kaspa_muhash::MuHash;
         use rocksdb::WriteBatch;
@@ -207,7 +211,9 @@ mod tests {
         let processor = consensus.virtual_processor();
         let mut point_header = Header::from(&DEVNET_GENESIS);
         point_header.nonce = 100;
-        point_header.utxo_commitment = MuHash::new().finalize();
+        let outpoint = TransactionOutpoint::new(12.into(), 0);
+        let entry = UtxoEntry::new(10, ScriptPublicKey::from_vec(0, vec![0x51]), 1, false, None);
+        point_header.utxo_commitment = MuHash::from_utxo(&outpoint, &entry).finalize();
         point_header.finalize();
         let point = ReadinessPoint { hash: point_header.hash, index: 3 };
         let retention = ReadinessPoint { hash: 7.into(), index: 1 };
@@ -221,6 +227,8 @@ mod tests {
         let mut staging = StagingImport::begin(processor.clone()).unwrap();
         assert!(staging.finish(retention, &proof, &child).is_err());
         assert!(StagingImport::begin(processor.clone()).is_err());
+        let (_foreign_temp, foreign_db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let foreign = TestConsensus::with_db(foreign_db, &config, sender.clone());
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let components = [
             (
@@ -241,6 +249,14 @@ mod tests {
             ),
         ];
         for (component, rows) in components {
+            if component == StagingComponent::Utxo {
+                let chunk = vec![(outpoint, entry.clone())];
+                assert!(foreign.stage_phase6_pruning_utxo_chunk(&mut staging, chunk.clone()).is_err());
+                runtime
+                    .block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await })
+                    .unwrap()
+                    .unwrap();
+            }
             let worker_db = db.clone();
             runtime.block_on(async {
                 staging

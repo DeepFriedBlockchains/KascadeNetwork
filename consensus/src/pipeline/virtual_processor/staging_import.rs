@@ -1,14 +1,22 @@
 //! Inactive staging import coordination for a single processor-owned session.
 
 use super::{
-    VirtualStateProcessor, branch_readiness::ReadinessPoint, import_operation::ImportWorkerSession,
-    import_proof_readiness::ValidatedImportProof, persistent_branch_authority::PersistentBranchLease,
+    VirtualStateProcessor,
+    branch_readiness::ReadinessPoint,
+    import_operation::{ImportOperation, ImportWorkerSession},
+    import_proof_readiness::ValidatedImportProof,
+    persistent_branch_authority::PersistentBranchLease,
 };
-use kaspa_consensus_core::block::Block;
+use crate::consensus::Consensus;
+use kaspa_consensus_core::{
+    block::Block,
+    tx::{TransactionOutpoint, UtxoEntry},
+};
 use kaspa_database::{
     prelude::{DeferredDbBatch, StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
 };
+use kaspa_muhash::MuHash;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -73,7 +81,7 @@ impl StagingComponent {
                 ShieldedDevAccrued,
                 ShieldedAnchorSourceScore,
             ],
-            Self::Utxo => &[PruningUtxoset, PruningUtxosetPosition, PruningUtxosetSyncFlag],
+            Self::Utxo => &[PruningUtxosetPosition, PruningUtxosetSyncFlag],
         }
     }
 }
@@ -112,6 +120,18 @@ impl StagingImport {
         last_chunk: bool,
         build: impl FnOnce() -> StoreResult<DeferredDbBatch<'static>> + Send + 'static,
     ) -> StoreResult<JoinHandle<StoreResult<()>>> {
+        self.submit_operation(component, last_chunk, move |processor, operation| {
+            let prefixes: Vec<_> = component.write_prefixes().iter().copied().map(u8::from).collect();
+            processor.apply_authorized_staging_batch(operation, &prefixes, build)
+        })
+    }
+
+    fn submit_operation(
+        &mut self,
+        component: StagingComponent,
+        last_chunk: bool,
+        apply: impl FnOnce(&VirtualStateProcessor, &mut ImportOperation) -> StoreResult<()> + Send + 'static,
+    ) -> StoreResult<JoinHandle<StoreResult<()>>> {
         if *self.progress.lock() != StagingProgress::Writing(component) {
             return Err(inconsistent("staging component is out of order or the session has failed"));
         }
@@ -124,8 +144,7 @@ impl StagingImport {
             .spawn_blocking(move |operation| {
                 // A build error, write error, or unwind aborts this staging attempt.
                 *progress.lock() = StagingProgress::Failed;
-                let prefixes: Vec<_> = component.write_prefixes().iter().copied().map(u8::from).collect();
-                processor.apply_authorized_staging_batch(operation, &prefixes, build)?;
+                apply(&processor, operation)?;
                 *progress.lock() = if last_chunk { component.next() } else { StagingProgress::Writing(component) };
                 Ok(())
             })
@@ -157,6 +176,24 @@ impl StagingImport {
         };
         let lease = self.processor.finish_authenticated_authority_import(token, retention, proof, child)?;
         Ok(VerifiedStaging { processor: self.processor.clone(), lease })
+    }
+}
+
+impl Consensus {
+    /// Inactive typed ingress for direct pruning UTXO chunks. The staging
+    /// session remains the only path to the database write.
+    pub(super) fn stage_phase6_pruning_utxo_chunk(
+        &self,
+        staging: &mut StagingImport,
+        utxos: Vec<(TransactionOutpoint, UtxoEntry)>,
+    ) -> StoreResult<JoinHandle<StoreResult<()>>> {
+        if !Arc::ptr_eq(&self.virtual_processor, &staging.processor) {
+            return Err(inconsistent("UTXO input does not belong to the staging processor"));
+        }
+
+        staging.submit_operation(StagingComponent::Utxo, false, move |processor, operation| {
+            processor.append_authorized_pruning_utxos(operation, &utxos, &mut MuHash::new())
+        })
     }
 }
 

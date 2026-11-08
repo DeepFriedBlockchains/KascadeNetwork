@@ -68,10 +68,38 @@ shielded commitments, and checks the post-pruning nullifier projection.
 Unavailable proof, a missing authenticated tip child or an inconsistent
 committed view leaves authority closed.
 
+## Candidate validation
+
+[Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
+The source checkpoint is `4eb422549fa822b804968f9c2911018b518286f0` on `feature/phase6-staging-coordinator-20261108`.
+[PR run 42506751029](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506751029) passed all eight jobs.
+All four focused regressions and 1,561 native workspace tests passed
+(25 skipped). The no-asm suite passed 32 tests. Formatting and strict
+Clippy passed.
+The same-SHA [push run 42506746483](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506746483) was superseded.
+
+[Run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037)
+reported the missing `kaspa_hashes::Hash` test import in Check and
+Clippy. Its correction `6e5c4ae` passed both jobs and five other platform
+and build checks, with seven of eight jobs passing overall in
+[run 42504801081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42504801081).
+The focused suite passed three of four regressions, including committed
+descendant recovery. The staging cancellation fixture expected an absent
+anticone row, but consensus initialization creates it. The corrected test
+requires both scoped rows to equal their pre-operation bytes after the
+rejected batch. The staging and restart implementation remains unchanged.
+
+## Typed UTXO adapter
+
+The [dated adapter report](docs/development/PHASE6_TYPED_PRUNING_UTXO_ADAPTER_2026-11-08.md) records the first adapter
+slice on the consensus owner. The inactive path now accepts typed UTXO
+chunks through the coordinator's permit. The generic UTXO batch path
+can only write completion metadata. Candidate CI is pending.
+
 ## Next executable task
 
-Verify the focused and full CI for this exact source before binding
-production IBD and direct import adapters to the coordinator. The live
-promotion boundary, transport-to-typed write adapters, and integration
-with the production staging manager remain open. Activation and main
-integration remain gated.
+Validate the typed adapter candidate, then forward IBD UTXO chunks into
+this same owner-bound path. Complete typed proof, SMT and shielded write
+adapters before moving the production promotion boundary behind verified
+completion. The existing IBD and direct import entry points remain active
+on their current paths until the inactive adapter work is ready.
