@@ -9,7 +9,7 @@ use super::branch_readiness::ReadinessPoint;
 use crate::model::stores::{
     headers::{DbHeadersStore, HeaderStoreReader},
     past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStoreReader},
-    pruning::{DbPruningStore, PruningStoreReader},
+    pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
     utxo_set::DbUtxoSetStore,
 };
 use kaspa_consensus_core::{hashing, muhash::MuHashExtensions};
@@ -25,8 +25,9 @@ use std::sync::Arc;
 /// verification of the import's UTXO, SMT, shielded, or pruning proof data.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct CommittedImportMetadata {
-    point: ReadinessPoint,
+    pub(super) point: ReadinessPoint,
     retention: ReadinessPoint,
+    descriptor: Arc<PruningProofDescriptor>,
 }
 
 impl CommittedImportMetadata {
@@ -75,7 +76,14 @@ impl CommittedImportMetadata {
             return Err(inconsistent("committed pruning proof descriptor does not match the import"));
         }
 
-        Ok(Self { point, retention })
+        Ok(Self { point, retention, descriptor })
+    }
+
+    pub(super) fn verify_current(&self, db: &Arc<DB>) -> StoreResult<()> {
+        if Self::verify(db, self.point, self.retention)? != *self {
+            return Err(inconsistent("committed pruning import evidence changed after verification"));
+        }
+        Ok(())
     }
 }
 
@@ -105,7 +113,7 @@ fn inconsistent(reason: &str) -> StoreError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::{
         super::{import_operation::ImportWorkerSession, persistent_branch_authority::PersistentBranchAuthority},
         *,
@@ -116,7 +124,7 @@ mod tests {
         model::stores::{
             headers::HeaderStore,
             past_pruning_points::PastPruningPointsStore,
-            pruning::{PruningProofDescriptor, PruningStore},
+            pruning::PruningStore,
             pruning_meta::PruningMetaStores,
         },
         params::DEVNET_PARAMS,
@@ -140,7 +148,7 @@ mod tests {
         ReadinessPoint { hash: Hash::from_bytes([7; 32]), index: 1 }
     }
 
-    fn install_point(db: &Arc<DB>, point: ReadinessPoint, retention: ReadinessPoint) {
+    pub(in crate::pipeline::virtual_processor) fn install_point(db: &Arc<DB>, point: ReadinessPoint, retention: ReadinessPoint) {
         let mut pruning = DbPruningStore::new(db.clone());
         let history = DbPastPruningPointsStore::new(db.clone(), CachePolicy::Empty);
         let mut batch = WriteBatch::default();
@@ -154,7 +162,11 @@ mod tests {
         pruning.set_pruning_proof_descriptor(descriptor).unwrap();
     }
 
-    fn stage_explicit_evidence(metadata: &mut PruningMetaStores, batch: &mut WriteBatch, point: ReadinessPoint) {
+    pub(in crate::pipeline::virtual_processor) fn stage_explicit_evidence(
+        metadata: &mut PruningMetaStores,
+        batch: &mut WriteBatch,
+        point: ReadinessPoint,
+    ) {
         metadata.set_utxoset_position(batch, point.hash).unwrap();
         metadata.set_pruning_utxoset_stable_flag(batch, true).unwrap();
         metadata.set_pruning_smt_stable_flag(batch, true).unwrap();
@@ -288,9 +300,10 @@ mod tests {
             .unwrap();
         let lease = processor.authority_lease(&owner).unwrap();
         let mut write = DeferredDbBatch::new(db.clone());
-        write.put_raw(&db, b"verified-authority-test", b"committed").unwrap();
+        let data_key = [DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 1];
+        write.put_raw(&db, data_key, b"committed").unwrap();
         processor.authority_commit(&owner, lease, write).unwrap();
-        assert!(db.get(b"verified-authority-test").unwrap().is_some());
+        assert!(db.get(data_key).unwrap().is_some());
 
         utxos.clear().unwrap();
         let token = owner.begin_import().unwrap();

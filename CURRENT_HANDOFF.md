@@ -52,3 +52,14 @@ The [staging drain report](docs/development/PHASE6_STAGING_DRAIN_2026-11-08.md) 
 an inactive cleanup seam that waits for a detached import worker to release
 its permit and captured database owner. It also records the integration
 sequence for the existing PR stack. Hosted validation is pending.
+
+The authenticated import source `a6dd7fe` passed all eight jobs in
+[run 42489992639](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42489992639).
+Native nextest passed 1,552 tests with 25 skipped, and the no-asm suite passed
+32 tests. This includes both abrupt-reopen regressions and the Orchard and
+isolated shielded verification cases.
+
+The [lease write scope report](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_2026-11-08.md) records the next inactive milestone.
+Lease issuance and commit re-read the exact committed import evidence.
+The scoped RocksDB batch keeps a lease from modifying the rows that
+authorize it. Hosted validation of this milestone is pending.

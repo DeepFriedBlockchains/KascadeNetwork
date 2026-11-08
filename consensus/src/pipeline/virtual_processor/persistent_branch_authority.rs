@@ -10,11 +10,10 @@ use super::{
     branch_readiness::{DbBranchReadiness, ReadinessPoint, ReadinessRevision},
     import_readiness::{CommittedImportMetadata, verify_pruning_utxos},
 };
-use crate::model::stores::{
-    past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStoreReader},
-    pruning::{DbPruningStore, PruningStoreReader},
+use kaspa_database::{
+    prelude::{DB, DeferredDbBatch, StoreError, StoreResult},
+    registry::DatabaseStorePrefixes,
 };
-use kaspa_database::prelude::{CachePolicy, DB, DeferredDbBatch, StoreError, StoreResult};
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
@@ -43,7 +42,12 @@ struct AuthorityState {
     import: Weak<()>,
     import_failed: bool,
     // A newly opened authority must corroborate committed state before issuing leases.
-    verified_revision: Option<ReadinessRevision>,
+    verified: Option<VerifiedReadiness>,
+}
+
+struct VerifiedReadiness {
+    revision: ReadinessRevision,
+    metadata: CommittedImportMetadata,
 }
 
 /// Opaque, non-cloneable, and usable only with its exact creating owner.
@@ -88,7 +92,7 @@ impl PersistentBranchAuthority {
         if state.import.upgrade().is_some() {
             return Err(rejected());
         }
-        state.verified_revision = None;
+        state.verified = None;
         state.generation = Arc::new(());
         let closed_revision = self.readiness.close_revision_sync()?;
         state.import_failed = false;
@@ -114,13 +118,26 @@ impl PersistentBranchAuthority {
         Ok(())
     }
 
-    fn verify_point(&self, point: ReadinessPoint) -> StoreResult<()> {
-        let pruning = DbPruningStore::new(self.db.clone());
-        let past = DbPastPruningPointsStore::new(self.db.clone(), CachePolicy::Empty);
-        if pruning.pruning_point_and_index()? != (point.hash, point.index) || past.get(point.index)? != point.hash {
+    fn check_ready(&self, state: &mut AuthorityState, point: ReadinessPoint) -> StoreResult<ReadinessRevision> {
+        let verified = state.verified.as_ref().ok_or_else(rejected)?;
+        if state.import.upgrade().is_some() || verified.metadata.point != point {
             return Err(rejected());
         }
-        Ok(())
+
+        let revision = verified.revision;
+        let result = self.readiness.ready_revision(point).and_then(|committed| {
+            if committed != Some(revision) {
+                return Err(rejected());
+            }
+            verified.metadata.verify_current(&self.db)
+        });
+        if let Err(error) = result {
+            state.verified = None;
+            state.generation = Arc::new(());
+            self.readiness.close_revision_sync()?;
+            return Err(error);
+        }
+        Ok(revision)
     }
 
     /// Apply one authenticated import batch while the durable marker stays closed.
@@ -147,12 +164,9 @@ impl PersistentBranchAuthority {
         retention: ReadinessPoint,
         verify_remaining: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
     ) -> StoreResult<()> {
-        self.complete_import(token, point, |db, point| {
-            CommittedImportMetadata::verify(db, point, retention)?;
+        self.complete_import(token, point, retention, |db, point| {
             verify_pruning_utxos(db, point)?;
-            verify_remaining(db, point)?;
-            CommittedImportMetadata::verify(db, point, retention)?;
-            Ok(())
+            verify_remaining(db, point)
         })
     }
 
@@ -164,27 +178,25 @@ impl PersistentBranchAuthority {
         &self,
         token: PersistentImportToken,
         point: ReadinessPoint,
+        retention: ReadinessPoint,
         verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
     ) -> StoreResult<()> {
         let mut state = self.inner.state.lock();
         self.check_import(&state, &token)?;
-        self.verify_point(point)?;
+        let metadata = CommittedImportMetadata::verify(&self.db, point, retention)?;
         verify(&self.db, point)?;
         self.check_import(&state, &token)?;
-        self.verify_point(point)?;
-        state.verified_revision = Some(self.readiness.complete_sync(point)?);
+        metadata.verify_current(&self.db)?;
+        let revision = self.readiness.complete_sync(point)?;
+        state.verified = Some(VerifiedReadiness { revision, metadata });
         state.generation = Arc::new(());
         state.import = Weak::new();
         Ok(())
     }
 
     pub(super) fn lease(&self, point: ReadinessPoint) -> StoreResult<PersistentBranchLease> {
-        let state = self.inner.state.lock();
-        let revision = state.verified_revision.ok_or_else(rejected)?;
-        if state.import.upgrade().is_some() || self.readiness.ready_revision(point)? != Some(revision) {
-            return Err(rejected());
-        }
-        self.verify_point(point)?;
+        let mut state = self.inner.state.lock();
+        let revision = self.check_ready(&mut state, point)?;
         Ok(PersistentBranchLease {
             inner: self.inner.clone(),
             revision,
@@ -205,21 +217,21 @@ impl PersistentBranchAuthority {
         if !Arc::ptr_eq(&self.inner, &lease.inner)
             || !Arc::ptr_eq(&self.owner, &lease.owner)
             || !Arc::ptr_eq(&state.generation, &lease.generation)
-            || state.verified_revision != Some(lease.revision)
-            || state.import.upgrade().is_some()
             || lease.point != point
-            || self.readiness.ready_revision(point)? != Some(lease.revision)
         {
             return Err(rejected());
         }
-        self.verify_point(point)?;
         batch.ensure_database(&self.db)?;
+        batch.ensure_key_prefix(DatabaseStorePrefixes::KascadeBranchAuthorityData as u8)?;
+        if self.check_ready(&mut state, point)? != lease.revision {
+            return Err(rejected());
+        }
+        let mut verified = state.verified.take().ok_or_else(rejected)?;
         state.generation = Arc::new(());
-        state.verified_revision = None;
         self.readiness.close_revision_sync()?;
-        let revision = self.readiness.stage_ready(&mut batch, point)?;
+        verified.revision = self.readiness.stage_ready(&mut batch, point)?;
         batch.commit()?;
-        state.verified_revision = Some(revision);
+        state.verified = Some(verified);
         Ok(())
     }
 }
@@ -227,23 +239,36 @@ impl PersistentBranchAuthority {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::stores::{past_pruning_points::PastPruningPointsStore, pruning::PruningStore};
-    use kaspa_database::{create_temp_db, prelude::ConnBuilder, registry::DatabaseStorePrefixes};
+    use super::super::import_readiness::tests::{install_point as install_import_point, stage_explicit_evidence};
+    use crate::model::stores::{
+        past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStore},
+        pruning::{DbPruningStore, PruningStoreReader},
+        pruning_meta::PruningMetaStores,
+    };
+    use kaspa_database::{create_temp_db, prelude::{CachePolicy, ConnBuilder}};
+    use rocksdb::WriteBatch;
 
-    const DATA_KEY: &[u8] = b"authority-test-data";
+    const DATA_KEY: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 0];
 
     fn point() -> ReadinessPoint {
         ReadinessPoint { hash: kaspa_hashes::Hash::from_bytes([7; 32]), index: 11 }
     }
 
+    fn retention() -> ReadinessPoint {
+        ReadinessPoint { hash: kaspa_hashes::Hash::from_bytes([6; 32]), index: 10 }
+    }
+
     fn install_point(db: &Arc<DB>) {
-        DbPruningStore::new(db.clone()).set(point().hash, point().index).unwrap();
-        DbPastPruningPointsStore::new(db.clone(), CachePolicy::Empty).set(point().index, point().hash).unwrap();
+        install_import_point(db, point(), retention());
+        let mut metadata = PruningMetaStores::new(db.clone(), CachePolicy::Empty);
+        let mut batch = WriteBatch::default();
+        stage_explicit_evidence(&mut metadata, &mut batch, point());
+        db.write(batch).unwrap();
     }
 
     fn complete(owner: &PersistentBranchAuthority) {
         let token = owner.begin_import().unwrap();
-        owner.complete_import(token, point(), |_, _| Ok(())).unwrap();
+        owner.complete_import(token, point(), retention(), |_, _| Ok(())).unwrap();
     }
 
     fn data_batch(db: &Arc<DB>) -> DeferredDbBatch<'static> {
@@ -284,6 +309,50 @@ mod tests {
         assert!(owner.commit(ReadinessPoint { index: 12, ..point() }, lease, data_batch(&db)).is_err());
         assert!(db.get(DATA_KEY).unwrap().is_none());
         assert!(foreign.get(DATA_KEY).unwrap().is_none());
+        assert!(owner.lease(point()).is_ok());
+    }
+
+    #[test]
+    fn lease_batch_cannot_change_its_own_committed_evidence() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        install_point(&db);
+        let owner = PersistentBranchAuthority::new(db.clone());
+        complete(&owner);
+        let lease = owner.lease(point()).unwrap();
+
+        let position = DatabaseStorePrefixes::PruningUtxosetPosition;
+        let before = db.get(position).unwrap().unwrap();
+        let mut batch = data_batch(&db);
+        batch.put_raw(&db, position, b"invalid").unwrap();
+        assert!(owner.commit(point(), lease, batch).is_err());
+        assert_eq!(db.get(position).unwrap().unwrap(), before);
+        assert!(db.get(DATA_KEY).unwrap().is_none());
+
+        let lease = owner.lease(point()).unwrap();
+        owner.commit(point(), lease, data_batch(&db)).unwrap();
+        assert!(db.get(DATA_KEY).unwrap().is_some());
+    }
+
+    #[test]
+    fn metadata_drift_closes_readiness_and_restoring_rows_cannot_revive_a_lease() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+        install_point(&db);
+        let owner = PersistentBranchAuthority::new(db.clone());
+        complete(&owner);
+        let lease = owner.lease(point()).unwrap();
+        let mut pruning = DbPruningStore::new(db.clone());
+        let before = pruning.pruning_proof_descriptor().unwrap();
+        let mut changed = (*before).clone();
+        changed.counts[0] += 1;
+        pruning.set_pruning_proof_descriptor(changed).unwrap();
+
+        assert!(owner.commit(point(), lease, data_batch(&db)).is_err());
+        assert!(!DbBranchReadiness::new(db.clone()).is_ready(point()).unwrap());
+        assert!(db.get(DATA_KEY).unwrap().is_none());
+
+        pruning.set_pruning_proof_descriptor((*before).clone()).unwrap();
+        assert!(owner.lease(point()).is_err());
+        complete(&owner);
         assert!(owner.lease(point()).is_ok());
     }
 
@@ -331,7 +400,7 @@ mod tests {
         assert!(!readiness.is_ready(point()).unwrap());
         assert!(owner.lease(point()).is_err());
         owner
-            .complete_import(token, point(), |verified_db, actual| {
+            .complete_import(token, point(), retention(), |verified_db, actual| {
                 assert!(Arc::ptr_eq(&db, verified_db));
                 assert_eq!(actual, point());
                 assert_eq!(verified_db.get(DATA_KEY)?.unwrap().as_slice(), b"committed");
@@ -354,7 +423,7 @@ mod tests {
         let restarted = PersistentBranchAuthority::new(db);
         assert!(restarted.lease(point()).is_err());
         let token = restarted.begin_import().unwrap();
-        assert!(restarted.complete_import(token, point(), |_, _| Err(rejected())).is_err());
+        assert!(restarted.complete_import(token, point(), retention(), |_, _| Err(rejected())).is_err());
         assert!(restarted.lease(point()).is_err());
         complete(&restarted);
     }
@@ -385,7 +454,7 @@ mod tests {
         db.put(DatabaseStorePrefixes::KascadeBranchReadiness.as_ref(), legacy).unwrap();
         assert!(owner.lease(point()).is_err());
         let token = owner.begin_import().unwrap();
-        assert!(owner.complete_import(token, point(), |_, _| panic!("missing history accepted")).is_err());
+        assert!(owner.complete_import(token, point(), retention(), |_, _| panic!("missing history accepted")).is_err());
         assert!(owner.lease(point()).is_err());
         install_point(&db);
         complete(&owner);
@@ -403,7 +472,7 @@ mod tests {
         let other_owner = PersistentBranchAuthority::new(db.clone());
         assert!(other_owner.begin_import().is_err());
         assert!(owner.apply_import(&token, data_batch(&db)).is_err());
-        assert!(owner.complete_import(token, point(), |_, _| panic!("invalid token accepted")).is_err());
+        assert!(owner.complete_import(token, point(), retention(), |_, _| panic!("invalid token accepted")).is_err());
         assert!(db.get(DATA_KEY).unwrap().is_none());
         assert!(owner.lease(point()).is_err());
         assert!(other_owner.begin_import().is_ok());
@@ -425,7 +494,7 @@ mod tests {
         let owner = PersistentBranchAuthority::new(db);
         assert!(owner.lease(point()).is_err());
         let token = owner.begin_import().unwrap();
-        assert!(owner.complete_import(token, point(), |_, _| Err(rejected())).is_err());
+        assert!(owner.complete_import(token, point(), retention(), |_, _| Err(rejected())).is_err());
         assert!(!readiness.is_ready(point()).unwrap());
         assert!(owner.lease(point()).is_err());
 
@@ -451,7 +520,7 @@ mod tests {
         assert_eq!(db.get(DATA_KEY).unwrap().unwrap().as_slice(), b"committed");
         let token = owner.begin_import().unwrap();
         owner
-            .complete_import(token, point(), |verified_db, _| {
+            .complete_import(token, point(), retention(), |verified_db, _| {
                 if verified_db.get(DATA_KEY)?.as_deref() != Some(b"committed".as_slice()) {
                     return Err(rejected());
                 }
@@ -481,7 +550,7 @@ mod tests {
         assert!(restarted.lease(point()).is_err());
         let recovery = restarted.begin_import().unwrap();
         assert!(restarted.apply_import(&old_token, data_batch(&db)).is_err());
-        restarted.complete_import(recovery, point(), |_, _| Ok(())).unwrap();
+        restarted.complete_import(recovery, point(), retention(), |_, _| Ok(())).unwrap();
         assert!(restarted.commit(point(), old_lease, data_batch(&db)).is_err());
         assert!(db.get(DATA_KEY).unwrap().is_none());
     }

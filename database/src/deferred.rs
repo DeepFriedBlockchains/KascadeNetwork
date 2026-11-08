@@ -1,6 +1,6 @@
 //! Opt-in single-write batches with cache invalidation only after persistence.
 use crate::prelude::{BatchDbWriter, DB, StoreError, StoreResult};
-use rocksdb::{WriteBatch, WriteOptions};
+use rocksdb::{WriteBatch, WriteBatchIterator, WriteOptions};
 use std::{collections::BTreeSet, sync::Arc};
 
 /// Does not publish staged values. Dropping the owner abandons all effects.
@@ -37,6 +37,34 @@ impl<'a> DeferredDbBatch<'a> {
         if !Arc::ptr_eq(&self.db, db) {
             self.rejected = true;
             return Err(StoreError::DataInconsistency("deferred batch belongs to another database".into()));
+        }
+        Ok(())
+    }
+
+    /// Check the actual staged point writes, including typed-store operations.
+    /// Operations the iterator cannot inspect, such as range deletes, are denied.
+    pub fn ensure_key_prefix(&self, prefix: u8) -> StoreResult<()> {
+        struct Scope {
+            prefix: u8,
+            visited: usize,
+            allowed: bool,
+        }
+
+        impl WriteBatchIterator for Scope {
+            fn put(&mut self, key: &[u8], _: &[u8]) {
+                self.delete(key);
+            }
+
+            fn delete(&mut self, key: &[u8]) {
+                self.visited += 1;
+                self.allowed &= key.first() == Some(&self.prefix);
+            }
+        }
+
+        let mut scope = Scope { prefix, visited: 0, allowed: true };
+        self.batch.iterate(&mut scope);
+        if !scope.allowed || scope.visited != self.batch.len() {
+            return Err(StoreError::DataInconsistency("deferred batch exceeds its authorized write scope".into()));
         }
         Ok(())
     }
