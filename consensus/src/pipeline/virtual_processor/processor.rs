@@ -2444,6 +2444,32 @@ impl VirtualStateProcessor {
         Ok(())
     }
 
+    /// Complete an isolated receiver only after proof and shielded corroboration.
+    /// The caller must quiesce header and virtual processing on this receiver.
+    pub(super) fn finish_authenticated_authority_import(
+        &self,
+        authority: &super::persistent_branch_authority::PersistentBranchAuthority,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
+
+        self.finish_authority_import(authority, token, retention, |db, point| {
+            proof.verify_committed(db, point)?;
+            let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
+            if !self
+                .reachability_service
+                .try_is_chain_ancestor_of(child.hash(), tip)
+                .map_err(|err| StoreError::DataInconsistency(err.to_string()))?
+            {
+                return Err(StoreError::DataInconsistency("shielded commitment child is off the selected header chain".into()));
+            }
+            super::import_shielded_readiness::verify_pruning_shielded(db, point, child, child.hash())
+        })
+    }
+
     pub(super) fn finish_authority_import(
         &self,
         authority: &super::persistent_branch_authority::PersistentBranchAuthority,

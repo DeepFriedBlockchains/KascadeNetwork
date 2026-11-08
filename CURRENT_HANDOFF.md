@@ -41,3 +41,9 @@ records the current candidate. Lease issuance requires a revision verified on
 this database open. Failed import writes invalidate the token while retaining
 the session until the worker releases it. The shielded import fixture now
 checks the actual Orchard action nullifiers. Hosted validation is pending.
+
+The next [proof and shielded evidence candidate](docs/development/PHASE6_AUTHENTICATED_IMPORT_2026-11-08.md)
+uses the existing pruning proof validator and rechecks committed evidence in
+the isolated receiver. Guarded UTXO appends also reject duplicates before
+writing. The candidate requires hosted validation. Live IBD and direct import
+migration still need end-to-end staging ownership and cleanup.

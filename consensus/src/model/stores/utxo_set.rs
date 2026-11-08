@@ -117,6 +117,13 @@ impl DbUtxoSetStore {
         batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
         utxos: &[(TransactionOutpoint, UtxoEntry)],
     ) -> Result<(), StoreError> {
+        let committed = self.clone_with_new_cache(CachePolicy::Empty);
+        let mut unique = std::collections::HashSet::with_capacity(utxos.len());
+        for (outpoint, _) in utxos {
+            if !unique.insert(*outpoint) || UtxoSetStoreReader::get(&committed, outpoint).optional()?.is_some() {
+                return Err(StoreError::DataInconsistency(format!("duplicate pruning import UTXO {outpoint:?}")));
+            }
+        }
         for (outpoint, entry) in utxos {
             self.access.write_deferred(batch, (*outpoint).into(), Arc::new(entry.clone()))?;
         }

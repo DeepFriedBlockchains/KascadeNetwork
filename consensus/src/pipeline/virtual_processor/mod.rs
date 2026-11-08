@@ -6,7 +6,11 @@ pub(crate) mod fork_logger;
 #[cfg(test)]
 mod import_operation;
 #[cfg(test)]
+mod import_proof_readiness;
+#[cfg(test)]
 mod import_readiness;
+#[cfg(test)]
+mod import_shielded_readiness;
 #[cfg(test)]
 mod import_smt_readiness;
 #[cfg(test)]

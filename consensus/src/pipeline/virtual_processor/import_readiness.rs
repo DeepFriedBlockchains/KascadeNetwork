@@ -241,6 +241,12 @@ mod tests {
         db.write(batch).unwrap();
 
         let owner = PersistentBranchAuthority::new(db.clone());
+        let proof = super::super::import_proof_readiness::ValidatedImportProof::authenticate(
+            &consensus,
+            &Vec::new(),
+            &kaspa_consensus_core::pruning::PruningProofMetadata::new(Default::default()),
+        );
+        assert!(proof.is_err());
         let token = owner.begin_import().unwrap();
         assert!(processor.finish_authority_import(&owner, token, retention(), |_, _| panic!("missing UTXOs accepted")).is_err());
         assert!(owner.lease(point).is_err());
@@ -259,7 +265,14 @@ mod tests {
         assert!(verify_pruning_utxos(&db, point).is_err());
 
         let mut accumulated = MuHash::new();
-        processor.append_authorized_pruning_utxos(&owner, &mut operation, &[(outpoint, entry.clone())], &mut accumulated).unwrap();
+        let duplicate = [(outpoint, entry.clone()), (outpoint, entry.clone())];
+        assert!(processor.append_authorized_pruning_utxos(&owner, &mut operation, &duplicate, &mut accumulated).is_err());
+        assert_eq!(accumulated.finalize(), MuHash::new().finalize());
+        assert!(verify_pruning_utxos(&db, point).is_err());
+
+        let chunk = [(outpoint, entry.clone())];
+        processor.append_authorized_pruning_utxos(&owner, &mut operation, &chunk, &mut accumulated).unwrap();
+        assert!(processor.append_authorized_pruning_utxos(&owner, &mut operation, &chunk, &mut accumulated).is_err());
         assert_eq!(accumulated.finalize(), MuHash::from_utxo(&outpoint, &entry).finalize());
         drop(operation);
         let Ok(token) = session.try_finish() else {

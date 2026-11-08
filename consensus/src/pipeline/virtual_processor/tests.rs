@@ -350,31 +350,6 @@ async fn shielded_coinbase_mints_into_the_pool_live() {
     assert!(advanced, "shielded coinbase must have appended notes and advanced the anchor past empty");
 }
 
-// The hash comes from the validated selected chain, independently of the imported state.
-fn authenticated_shielded_child_root(child: &Block, trusted_child: Hash) -> Result<[u8; 32], &'static str> {
-    use kaspa_consensus_core::{hashing, merkle::calc_hash_merkle_root, zkas_state_binding::extract_state_root};
-
-    if child.hash() != trusted_child || hashing::header::hash(&child.header) != trusted_child {
-        return Err("unexpected shielded commitment child");
-    }
-    let coinbase = child.transactions.first().filter(|tx| tx.is_coinbase()).ok_or("missing shielded commitment coinbase")?;
-    if calc_hash_merkle_root(child.transactions.iter()) != child.header.hash_merkle_root {
-        return Err("shielded commitment child body does not match the trusted header");
-    }
-    extract_state_root(&coinbase.payload).ok_or("missing shielded commitment")
-}
-
-// This receiver has imported exactly the point and has not applied descendants.
-// Its global nullifier rows must therefore match the point's committed accumulator.
-fn verify_seeded_shielded_state(store: &ShieldedStateManager, point: Hash, expected: [u8; 32]) -> Result<(), String> {
-    let metadata =
-        store.export_pruning_point_shielded(point).map_err(|error| error.to_string())?.ok_or("missing shielded frontier")?;
-    ShieldedStateManager::verify_import_binding(&metadata, expected)?;
-    let nullifiers = store.nullifier_set_snapshot().map_err(|error| error.to_string())?;
-    ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter())?;
-    Ok(())
-}
-
 /// THE end-to-end milestone (PLAN §2): under REAL FishHashPlus PoW, mine a
 /// shielded-coinbase chain, then have the "wallet" build a REAL Orchard spend of
 /// a mined coinbase note and push it through a mined block. The consensus layer
@@ -484,18 +459,13 @@ async fn real_shielded_spend_through_mined_block() {
     assert_eq!(status, BlockStatus::StatusUTXOValid);
     let trusted_child = ctx.consensus.get_headers_selected_tip();
     assert_eq!(ctx.consensus.get_ghostdag_data(trusted_child).unwrap().selected_parent, point);
-    let committed = authenticated_shielded_child_root(&child, trusted_child).unwrap();
+    let committed = kaspa_consensus_core::zkas_state_binding::extract_state_root(&child.transactions[0].payload).unwrap();
 
     let mut forged_body = child.transactions.as_ref().clone();
     forged_body[0].payload[kaspa_consensus_core::zkas_state_binding::SHIELDED_COMMITMENT_OFFSET] ^= 1;
     forged_body[0].finalize();
     let forged = Block::from_arcs(child.header.clone(), std::sync::Arc::new(forged_body));
     assert_eq!(forged.hash(), trusted_child);
-    assert_eq!(
-        authenticated_shielded_child_root(&forged, trusted_child),
-        Err("shielded commitment child body does not match the trusted header")
-    );
-
     let source = &ctx.consensus.virtual_processor().shielded_state_manager;
     let metadata = source.export_pruning_point_shielded(point).unwrap().unwrap();
     let bundle = kaspa_shielded_core::bundle::ShieldedBundle::from_bytes(&spend_tx.payload).unwrap();
@@ -508,17 +478,29 @@ async fn real_shielded_spend_through_mined_block() {
     ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).unwrap();
 
     let (_lifetime, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32));
+    use crate::model::stores::{
+        ghostdag::{DbGhostdagStore, GhostdagData, GhostdagStore},
+        headers::{DbHeadersStore, HeaderStore},
+    };
+
+    DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(trusted_child, child.header.clone(), 0).unwrap();
+    DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty)
+        .insert(trusted_child, std::sync::Arc::new(GhostdagData::new_with_selected_parent(point, 5)))
+        .unwrap();
     let receiver = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
     let mut batch = WriteBatch::default();
     receiver.seed_pruning_point_shielded(&mut batch, point, &metadata, nullifiers.iter()).unwrap();
     db.write(batch).unwrap();
-    verify_seeded_shielded_state(&receiver, point, committed).unwrap();
+    let import_point = super::branch_readiness::ReadinessPoint { hash: point, index: 0 };
+    let verify = |block| super::import_shielded_readiness::verify_pruning_shielded(&db, import_point, block, trusted_child);
+    verify(&child).unwrap();
+    assert!(verify(&forged).is_err());
 
     let mut batch = WriteBatch::default();
     receiver.nullifiers().delete_batch(&mut batch, nullifiers[0]).unwrap();
     db.write(batch).unwrap();
     assert_eq!(receiver.state_root_at(point).unwrap(), committed, "the snapshot still claims the trusted root");
-    assert!(verify_seeded_shielded_state(&receiver, point, committed).is_err(), "the verifier must detect the missing membership row");
+    assert!(verify(&child).is_err(), "the verifier must detect the missing membership row");
 }
 
 /// NEGATIVE / soundness + LIVENESS (PLAN §2.5, task #31): a **cryptographically
