@@ -122,10 +122,7 @@ pub(super) mod tests {
         config::ConfigBuilder,
         consensus::test_consensus::TestConsensus,
         model::stores::{
-            headers::HeaderStore,
-            past_pruning_points::PastPruningPointsStore,
-            pruning::PruningStore,
-            pruning_meta::PruningMetaStores,
+            headers::HeaderStore, past_pruning_points::PastPruningPointsStore, pruning::PruningStore, pruning_meta::PruningMetaStores,
         },
         params::DEVNET_PARAMS,
     };
