@@ -188,6 +188,8 @@ mod tests {
         let config = ConfigBuilder::new(DEVNET_PARAMS).skip_adding_genesis().build();
         let consensus = TestConsensus::with_db(db.clone(), &config, sender);
         let processor = consensus.virtual_processor();
+        let anticone_before = db.get(DatabaseStorePrefixes::BodyMissingAnticone).unwrap();
+        let shielded_before = db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
         let mut staging = StagingImport::begin(processor.clone()).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let (started_tx, started_rx) = oneshot::channel();
@@ -220,8 +222,8 @@ mod tests {
             release_tx.send(()).unwrap();
             drain.await;
         });
-        assert!(db.get(DatabaseStorePrefixes::BodyMissingAnticone).unwrap().is_none());
-        assert!(db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap().is_none());
+        assert_eq!(db.get(DatabaseStorePrefixes::BodyMissingAnticone).unwrap(), anticone_before);
+        assert_eq!(db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), shielded_before);
         assert!(db.get(PROMOTION_KEY).unwrap().is_none());
         assert!(DbBranchReadiness::new(db).closed_revision().unwrap().is_some());
         assert!(StagingImport::begin(processor.clone()).is_ok());
