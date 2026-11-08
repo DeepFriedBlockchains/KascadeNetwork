@@ -72,10 +72,7 @@ mod tests {
         shielded::NullifierSetStore,
     };
     use kaspa_consensus_core::{
-        config::genesis::DEVNET_GENESIS,
-        header::Header,
-        subnets::SUBNETWORK_ID_COINBASE,
-        tx::Transaction,
+        config::genesis::DEVNET_GENESIS, header::Header, subnets::SUBNETWORK_ID_COINBASE, tx::Transaction,
         zkas_state_binding::SHIELDED_COMMITMENT_OFFSET,
     };
     use kaspa_database::{create_temp_db, prelude::ConnBuilder};
