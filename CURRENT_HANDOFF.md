@@ -62,4 +62,11 @@ isolated shielded verification cases.
 The [lease write scope report](docs/development/PHASE6_AUTHORITY_WRITE_SCOPE_2026-11-08.md) records the next inactive milestone.
 Lease issuance and commit re-read the exact committed import evidence.
 The scoped RocksDB batch keeps a lease from modifying the rows that
-authorize it. Hosted validation of this milestone is pending.
+authorize it. 
+
+## Verified milestone
+
+[Run 42493733661](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42493733661) passed all eight
+jobs at `c4a5aab83303e850569fe92dd53d0381f32c85d0`. Native nextest passed 1,556 workspace tests
+with 25 skipped. The separate no-asm suite passed 32 tests.
+The lease scope, evidence drift, point change, and physical batch operation regressions passed.
