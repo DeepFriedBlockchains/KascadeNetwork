@@ -120,12 +120,13 @@ impl PersistentBranchAuthority {
 
     fn check_ready(&self, state: &mut AuthorityState, point: ReadinessPoint) -> StoreResult<ReadinessRevision> {
         let verified = state.verified.as_ref().ok_or_else(rejected)?;
-        if state.import.upgrade().is_some() || verified.metadata.point != point {
+        if state.import.upgrade().is_some() {
             return Err(rejected());
         }
 
         let revision = verified.revision;
-        let result = self.readiness.ready_revision(point).and_then(|committed| {
+        let verified_point = verified.metadata.point;
+        let result = self.readiness.ready_revision(verified_point).and_then(|committed| {
             if committed != Some(revision) {
                 return Err(rejected());
             }
@@ -136,6 +137,9 @@ impl PersistentBranchAuthority {
             state.generation = Arc::new(());
             self.readiness.close_revision_sync()?;
             return Err(error);
+        }
+        if verified_point != point {
+            return Err(rejected());
         }
         Ok(revision)
     }
@@ -217,13 +221,12 @@ impl PersistentBranchAuthority {
         if !Arc::ptr_eq(&self.inner, &lease.inner)
             || !Arc::ptr_eq(&self.owner, &lease.owner)
             || !Arc::ptr_eq(&state.generation, &lease.generation)
-            || lease.point != point
         {
             return Err(rejected());
         }
         batch.ensure_database(&self.db)?;
         batch.ensure_key_prefix(DatabaseStorePrefixes::KascadeBranchAuthorityData as u8)?;
-        if self.check_ready(&mut state, point)? != lease.revision {
+        if self.check_ready(&mut state, point)? != lease.revision || lease.point != point {
             return Err(rejected());
         }
         let mut verified = state.verified.take().ok_or_else(rejected)?;
@@ -242,7 +245,7 @@ mod tests {
     use super::super::import_readiness::tests::{install_point as install_import_point, stage_explicit_evidence};
     use crate::model::stores::{
         past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStore},
-        pruning::{DbPruningStore, PruningStoreReader},
+        pruning::{DbPruningStore, PruningStore, PruningStoreReader},
         pruning_meta::PruningMetaStores,
     };
     use kaspa_database::{create_temp_db, prelude::{CachePolicy, ConnBuilder}};
@@ -353,7 +356,12 @@ mod tests {
         pruning.set_pruning_proof_descriptor((*before).clone()).unwrap();
         assert!(owner.lease(point()).is_err());
         complete(&owner);
-        assert!(owner.lease(point()).is_ok());
+        let lease = owner.lease(point()).unwrap();
+        let moved = ReadinessPoint { hash: 42.into(), index: point().index + 1 };
+        pruning.set(moved.hash, moved.index).unwrap();
+        assert!(owner.lease(moved).is_err());
+        pruning.set(point().hash, point().index).unwrap();
+        assert!(owner.commit(point(), lease, data_batch(&db)).is_err());
     }
 
     #[test]

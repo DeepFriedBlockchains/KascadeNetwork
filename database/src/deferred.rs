@@ -105,3 +105,31 @@ impl<'a> DeferredDbBatch<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        create_temp_db,
+        prelude::{CachePolicy, CachedDbAccess, ConnBuilder},
+    };
+
+    #[test]
+    fn scoped_batch_checks_typed_deletes_and_rejects_uninspected_operations() {
+        const ALLOWED: u8 = 97;
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let allowed = CachedDbAccess::<[u8; 1], u64>::new(db.clone(), CachePolicy::Empty, vec![ALLOWED]);
+        let foreign = CachedDbAccess::<[u8; 1], u64>::new(db.clone(), CachePolicy::Empty, vec![13]);
+        let mut batch = DeferredDbBatch::new(db.clone());
+        allowed.delete_deferred(&mut batch, [0]).unwrap();
+        batch.put_raw(&db, [ALLOWED, 1], [1]).unwrap();
+        batch.ensure_key_prefix(ALLOWED).unwrap();
+
+        foreign.delete_deferred(&mut batch, [0]).unwrap();
+        assert!(batch.ensure_key_prefix(ALLOWED).is_err());
+
+        let mut range = DeferredDbBatch::new(db);
+        range.batch.delete_range([ALLOWED, 0], [ALLOWED, 2]);
+        assert!(range.ensure_key_prefix(ALLOWED).is_err());
+    }
+}

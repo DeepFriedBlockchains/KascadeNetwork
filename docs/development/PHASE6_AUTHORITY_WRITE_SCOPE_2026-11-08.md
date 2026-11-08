@@ -18,7 +18,8 @@ with 25 skipped, and 32 no-asm tests in
   write.
 - Regressions check that a batch cannot publish data while changing its own
   readiness evidence, and that restoring changed proof metadata cannot revive
-  a stale lease.
+  a stale lease. The same regression moves the pruning point and confirms
+  that restoring the old point leaves its old lease revoked.
 
 Hosted validation is pending. The isolated authority and import adapters
 remain test-only. Real branch-domain writes and live import caller migration
