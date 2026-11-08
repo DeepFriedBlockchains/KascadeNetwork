@@ -39,5 +39,12 @@ adapters and staging promotion switch still require integration.
 
 ## Validation and next checkpoint
 
-Candidate CI is pending. Verify the focused regressions and all eight
-jobs on the stacked PR head before integrating the production adapters.
+[Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
+The exact source checkpoint is `9e332bb5e22f9b6e6c429b45a25350df60379c72` on
+`feature/phase6-staging-coordinator-20261108`.
+[Combined PR run 42503679589](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503679589) is pending. It includes the
+focused authority tests and full workspace validation. The initial
+[push run 42503664314](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503664314) targets the same SHA. Test counts
+for this candidate are pending.
+
+Verify all eight jobs before integrating the production adapters.
