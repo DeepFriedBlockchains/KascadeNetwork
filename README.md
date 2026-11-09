@@ -12,19 +12,15 @@ anything of value.
 
 ---
 
-## What this repository is
+## Development repository
 
-This is the **public source snapshot** of KASCADE's node and tooling: the node, the miner,
-the wallet daemon, the explorer API, the shielded-state libraries, and the WASM/SDK
-bindings.
+KascadeNetwork is the primary public development repository for KASCADE's node,
+miner, wallet daemon, API, shielded libraries and SDK.
 
-It is deliberately **not** the project's development history. The private development
-repository carries the full commit history, the engineering handoffs, the internal design
-notes, and the security-review material. This snapshot is a curated, history-free export of
-the source tree at a single reviewed point, published so that development can be followed
-and reviewed without exposing operational material. See
-[`PUBLICATION.md`](./PUBLICATION.md) for exactly how the snapshot is produced and how it is
-kept in step with private development.
+The public history began with the reviewed source snapshot at `62248169`.
+Development now proceeds through feature branches and pull requests.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for the review and validation workflow,
+and [PUBLICATION.md](./PUBLICATION.md) for source provenance.
 
 ## What KASCADE is trying to be
 
@@ -105,10 +101,9 @@ If you find something, please report it privately rather than opening a public i
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md). Because this repository is a curated snapshot
-rather than the development branch, **pull requests against it cannot be merged directly**.
-Discussion and patches are welcome; accepted changes are applied in the private development
-repository and appear here in a later snapshot. See [`PUBLICATION.md`](./PUBLICATION.md).
+Fork this repository, create a feature branch, and submit a pull request.
+Review and required checks precede integration. Consensus activation requires
+explicit maintainer authorization. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License and provenance
 
