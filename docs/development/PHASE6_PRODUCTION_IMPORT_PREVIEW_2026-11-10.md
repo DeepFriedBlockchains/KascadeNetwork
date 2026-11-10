@@ -34,3 +34,12 @@ The initial draft [run 42908162867](https://github.com/DeepFriedBlockchains/Kasc
 reported formatting differences and two shielded return-type mismatches.
 The follow-up fixes those errors and uses one stop signal per managed
 staging lifecycle before joining workers and removing the staging DB.
+
+[Draft PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
+is stacked on `feature/phase6-owned-proof-import-20261110`.
+The exact source is `20db28f7dbd8e228d695202f6129fbbc2fd0586a` on
+`feature/phase6-production-import-preview-20261110`. Authoritative
+[PR run 42908550005](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42908550005)
+is pending. Its same-SHA push run 42908537162 was superseded.
+The green parent passed eight focused tests, 1,565 workspace tests
+(25 skipped), and 32 no-asm tests.
