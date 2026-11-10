@@ -297,7 +297,10 @@ pub trait ConsensusApi: Send + Sync {
         false
     }
 
-    fn begin_verified_staging_import(&self, _proof: ValidatedStagingPruningProof) -> Result<StagingImportSession, StagingPromotionError> {
+    fn begin_verified_staging_import(
+        &self,
+        _proof: ValidatedStagingPruningProof,
+    ) -> Result<StagingImportSession, StagingPromotionError> {
         Err(StagingPromotionError::Unsupported)
     }
 

@@ -22,6 +22,15 @@ and the existing stale-authority and restart cases. CI enables the
 preview for Check, strict Clippy, and focused regressions. The regular
 workspace suite continues to exercise the default build.
 
-Full peer-driven integration coverage and candidate CI remain pending.
+The existing two-daemon shielded IBD test is also exercised with preview
+enabled. It requires the active receiver to require verified promotion
+and checks the imported frontier and post-IBD block acceptance. The
+additional peer-driven cancellation and restart cases remain open.
+Candidate CI is pending.
 The default consensus settings and default IBD promotion route remain
 in effect.
+
+The initial draft [run 42908162867](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42908162867)
+reported formatting differences and two shielded return-type mismatches.
+The follow-up fixes those errors and uses one stop signal per managed
+staging lifecycle before joining workers and removing the staging DB.

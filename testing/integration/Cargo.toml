@@ -82,6 +82,7 @@ kaspa-shielded-core.workspace = true
 kaspa-p2p-flows = { workspace = true, features = ["test-smt-small-chunks"] }
 
 [features]
+phase6-staging-preview = ["kaspa-consensus/phase6-staging-preview"]
 heap = ["dhat"]
 html_reports = []
 devnet-prealloc = ["kaspad/devnet-prealloc"]

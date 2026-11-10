@@ -1,20 +1,13 @@
 //! Evidence from the existing pruning proof validator for inactive import completion.
 
 use super::branch_readiness::ReadinessPoint;
-use crate::{
-    model::stores::{
-        headers::{DbHeadersStore, HeaderStoreReader},
-        pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
-    },
-};
-use kaspa_consensus_core::{
-    BlockHashSet,
-    api::ValidatedStagingPruningProof,
-    hashing,
-    pruning::PruningPointProof,
-};
 #[cfg(test)]
 use crate::consensus::Consensus;
+use crate::model::stores::{
+    headers::{DbHeadersStore, HeaderStoreReader},
+    pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
+};
+use kaspa_consensus_core::{BlockHashSet, api::ValidatedStagingPruningProof, hashing, pruning::PruningPointProof};
 #[cfg(test)]
 use kaspa_consensus_core::{api::ConsensusApi, pruning::PruningProofMetadata};
 use kaspa_database::prelude::{CachePolicy, DB, StoreError, StoreResult};
@@ -337,12 +330,7 @@ mod tests {
         assert!(processor.commit_staging_promotion_checked(receipt, &proof, &child, true).is_err());
         assert!(processor.authority_lease().is_err());
 
-        processor
-            .virtual_stores
-            .write()
-            .utxo_set
-            .write_from_iterator_without_cache([(outpoint, Arc::new(entry))])
-            .unwrap();
+        processor.virtual_stores.write().utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry))]).unwrap();
         let token = processor.begin_authority_import().unwrap();
         let receipt = processor.finish_verified_ibd_import(token, &proof, &child).unwrap();
         processor.commit_staging_promotion_checked(receipt, &proof, &child, true).unwrap();

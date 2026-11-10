@@ -279,17 +279,16 @@ impl IbdFlow {
             IbdType::DownloadHeadersProof => {
                 drop(session); // Avoid holding the previous consensus throughout the staging IBD
                 let staging = self.ctx.consensus_manager.new_managed_staging_consensus().await;
-                let promotion = match self
-                    .prepare_staging_import(&staging, negotiation_output.syncer_virtual_selected_parent, &relay_block)
-                    .await
-                {
-                    Ok(promotion) => promotion,
-                    Err(error) => {
-                        warn!("IBD with headers proof from {} was unsuccessful ({})", self.router, error);
-                        staging.cancel().await;
-                        return Err(error);
-                    }
-                };
+                let promotion =
+                    match self.prepare_staging_import(&staging, negotiation_output.syncer_virtual_selected_parent, &relay_block).await
+                    {
+                        Ok(promotion) => promotion,
+                        Err(error) => {
+                            warn!("IBD with headers proof from {} was unsuccessful ({})", self.router, error);
+                            staging.cancel().await;
+                            return Err(error);
+                        }
+                    };
                 let verified = promotion.is_some();
                 staging.commit(promotion).await.map_err(staging_error)?;
                 session = self.ctx.consensus().session().await;
@@ -1330,7 +1329,7 @@ impl IbdFlow {
             while let Some(chunk) = stream.next_chunk().await? {
                 tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming shielded importer stopped unexpectedly"))?;
             }
-            Ok(binding.map(|(child, _)| child))
+            Ok(())
         }
         .await;
         drop(tx);
@@ -1338,7 +1337,7 @@ impl IbdFlow {
         consensus.async_set_pruning_shielded_stable().await;
 
         info!("shielded state synced: {} nullifiers", stream.count());
-        Ok(())
+        Ok(binding.map(|(child, _)| child))
     }
 
     /// F-02: determine the pruning point's selected child `c` on the local header

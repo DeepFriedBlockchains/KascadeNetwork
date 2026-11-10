@@ -2,7 +2,15 @@ use itertools::Itertools;
 use kaspa_consensus_core::api::{ConsensusApi, DynConsensus, StagingPromotion, StagingPromotionError};
 use kaspa_core::{core::Core, debug, service::Service};
 use parking_lot::RwLock;
-use std::{collections::VecDeque, ops::Deref, sync::Arc, thread::JoinHandle};
+use std::{
+    collections::VecDeque,
+    ops::Deref,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::JoinHandle,
+};
 
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
 
@@ -152,7 +160,7 @@ impl ConsensusManager {
         let (done, cancelled) = oneshot::channel();
         let stage = self.new_staging_consensus();
         ManagedStagingConsensus {
-            owner: StagingOwner(Some(Arc::new(StagingLifetime { stage: Some(stage), gate: Some(gate), done: Some(done) }))),
+            owner: StagingOwner(Some(Arc::new(StagingLifetime { stage: Some(stage), gate: Some(gate), done: Some(done), stopped: AtomicBool::new(false) }))),
             cancelled,
         }
     }
@@ -234,11 +242,14 @@ struct StagingLifetime {
     stage: Option<StagingConsensus>,
     gate: Option<OwnedMutexGuard<()>>,
     done: Option<oneshot::Sender<()>>,
+    stopped: AtomicBool,
 }
 
 impl StagingLifetime {
     fn stop(&self) {
-        if let Some(stage) = &self.stage {
+        if !self.stopped.swap(true, Ordering::AcqRel)
+            && let Some(stage) = &self.stage
+        {
             stage.staging.ctl.stop();
         }
     }
@@ -246,11 +257,12 @@ impl StagingLifetime {
 
 impl Drop for StagingLifetime {
     fn drop(&mut self) {
+        self.stop();
         if let Some(stage) = self.stage.take() {
             let gate = self.gate.take();
             let done = self.done.take();
             std::thread::spawn(move || {
-                stage.cancel();
+                stage.finish_cancel();
                 drop(gate);
                 if let Some(done) = done {
                     let _ = done.send(());
@@ -355,6 +367,10 @@ impl StagingConsensus {
 
     pub fn cancel(self) {
         self.staging.ctl.stop();
+        self.finish_cancel();
+    }
+
+    fn finish_cancel(self) {
         for handle in self.handles {
             handle.join().unwrap();
         }

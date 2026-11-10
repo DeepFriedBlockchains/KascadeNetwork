@@ -176,7 +176,11 @@ impl ConsensusSessionOwned {
         self.staging_import.as_ref()
     }
 
-    pub async fn check_staging_component(&self, component: StagingImportComponent, complete: bool) -> Result<(), StagingPromotionError> {
+    pub async fn check_staging_component(
+        &self,
+        component: StagingImportComponent,
+        complete: bool,
+    ) -> Result<(), StagingPromotionError> {
         let Some(import) = self.staging_import.clone() else { return Ok(()) };
         self.clone()
             .spawn_blocking(move |c| {

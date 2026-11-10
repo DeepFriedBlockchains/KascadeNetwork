@@ -1,17 +1,18 @@
 //! Inactive staging import coordination for a single processor-owned session.
 
+#[cfg(test)]
+use super::branch_readiness::ReadinessPoint;
 use super::{
     VirtualStateProcessor,
     import_operation::{ImportOperation, ImportWorkerSession},
     import_proof_readiness::ValidatedImportProof,
     persistent_branch_authority::PersistentBranchLease,
 };
-#[cfg(test)]
-use super::branch_readiness::ReadinessPoint;
 use crate::consensus::Consensus;
 use kaspa_consensus_core::{
     api::{
-        ConsensusApi, StagingImportComponent, StagingImportSession, StagingPromotion, StagingPromotionError, ValidatedStagingPruningProof,
+        ConsensusApi, StagingImportComponent, StagingImportSession, StagingPromotion, StagingPromotionError,
+        ValidatedStagingPruningProof,
     },
     block::Block,
     header::Header,
@@ -19,6 +20,8 @@ use kaspa_consensus_core::{
     trusted::TrustedBlock,
     tx::{TransactionOutpoint, UtxoEntry},
 };
+#[cfg(test)]
+use kaspa_database::prelude::DeferredDbBatch;
 use kaspa_database::{
     prelude::{StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
@@ -27,8 +30,6 @@ use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
 use parking_lot::Mutex;
 use std::sync::Arc;
-#[cfg(test)]
-use kaspa_database::prelude::DeferredDbBatch;
 #[cfg(test)]
 use tokio::task::JoinHandle;
 
@@ -216,7 +217,13 @@ impl StagingImport {
             }
         };
         let lease = self.processor.finish_authenticated_authority_import(token, retention, &self.proof, child)?;
-        Ok(VerifiedStaging { processor: self.processor.clone(), lease, proof: self.proof.clone(), child: child.clone(), verify_virtual: false })
+        Ok(VerifiedStaging {
+            processor: self.processor.clone(),
+            lease,
+            proof: self.proof.clone(),
+            child: child.clone(),
+            verify_virtual: false,
+        })
     }
 }
 
@@ -317,7 +324,8 @@ impl Consensus {
         let session = import.session.take().ok_or_else(|| rejected(inconsistent("staging session has ended")))?;
         let token = session.try_finish().map_err(|_| rejected(inconsistent("a staging worker still holds the import permit")))?;
         let lease = self.virtual_processor.finish_verified_ibd_import(token, &import.proof, child).map_err(rejected)?;
-        Ok(VerifiedStaging { processor: import.processor, lease, proof: import.proof, child: child.clone(), verify_virtual: true }.into_promotion())
+        Ok(VerifiedStaging { processor: import.processor, lease, proof: import.proof, child: child.clone(), verify_virtual: true }
+            .into_promotion())
     }
 
     pub(super) fn begin_phase6_staging_import(&self, receipt: ValidatedStagingPruningProof) -> StoreResult<StagingImport> {
