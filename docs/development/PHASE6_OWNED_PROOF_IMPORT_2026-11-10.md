@@ -37,4 +37,11 @@ SMT and shielded IBD now close their chunk sender and join the writer on
 both success and stream failure before returning to the caller. A test
 pins the writer past a simulated peer failure and checks that the error
 returns only after release. Stable flags still require successful stream
-and worker completion. The combined Actions run is pending.
+and worker completion. 
+The combined source is `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` on
+`feature/phase6-owned-proof-import-20261110`. Its exact validation is
+[run 42898217206](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42898217206).
+The unchanged PR #6 baseline
+[run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
+had passed seven of eight jobs, including strict Clippy and Linux release.
+Its workspace Test Suite was in progress when this handoff was recorded.
