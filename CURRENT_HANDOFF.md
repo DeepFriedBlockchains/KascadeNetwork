@@ -128,11 +128,17 @@ The follow-up source `5a50cefa4204e33abe1453eb114fc88d28be2c20` reached
 [run 42895630450](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895630450).
 The lint job reported one signature wrap before Clippy could run.
 
-The current source is `d91941020b2eb2992068fd18665d80fe84c145a9` on
+The formatting correction `d91941020b2eb2992068fd18665d80fe84c145a9` passed formatting in
+[run 42895867984](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895867984).
+Check and strict Clippy both reported E0308 in the new SMT verification
+helper. The helper now discards the verified evidence value while
+preserving its error.
+
+The current source is `42476e2661b5e579f665407d18352a36af09c301` on
 `feature/phase6-typed-pruning-utxo-adapter-20261108`. Its authoritative
-[PR run 42895867984](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895867984)
+[PR run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
 is pending. The same-SHA
-[push run 42895857275](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895857275)
+[push run 42896184228](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896184228)
 was superseded. Run 42895086028 passed Check, strict Clippy, formatting,
 Check WASM32 and Check no_std before its full workspace job was superseded.
 
