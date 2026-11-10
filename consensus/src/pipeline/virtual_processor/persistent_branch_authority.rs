@@ -217,12 +217,7 @@ impl PersistentBranchAuthority {
     }
 
     /// Commit the authorized write and its new READY revision in one sync batch.
-    pub(super) fn commit(
-        &self,
-        point: ReadinessPoint,
-        lease: PersistentBranchLease,
-        batch: DeferredDbBatch<'_>,
-    ) -> StoreResult<()> {
+    pub(super) fn commit(&self, point: ReadinessPoint, lease: PersistentBranchLease, batch: DeferredDbBatch<'_>) -> StoreResult<()> {
         self.commit_rechecked(point, lease, batch, |_, _| Ok(()))
     }
 
