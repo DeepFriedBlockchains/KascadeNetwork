@@ -263,15 +263,9 @@ mod tests {
         assert!(foreign.stage_phase6_pruning_utxo_chunk(&mut staging, chunk.clone()).is_err());
         assert!(foreign.complete_phase6_pruning_utxos(&mut staging, point.hash).is_err());
         assert!(staging.submit(StagingComponent::Utxo, true, || panic!("generic UTXO batch started")).is_err());
-        runtime
-            .block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await })
-            .unwrap()
-            .unwrap();
+        runtime.block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await }).unwrap().unwrap();
         assert!(staging.finish(retention, &proof, &child).is_err());
-        runtime
-            .block_on(async { consensus.complete_phase6_pruning_utxos(&mut staging, point.hash).unwrap().await })
-            .unwrap()
-            .unwrap();
+        runtime.block_on(async { consensus.complete_phase6_pruning_utxos(&mut staging, point.hash).unwrap().await }).unwrap().unwrap();
         let verified = staging.finish(retention, &proof, &child).unwrap();
         let sibling = processor.authority_lease().unwrap();
         use kaspa_consensus_core::api::{StagingPromotion, StagingPromotionError};
