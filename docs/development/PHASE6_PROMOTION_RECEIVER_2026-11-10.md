@@ -57,11 +57,14 @@ removes a committed UTXO after lease issuance, verifies that promotion
 fails closed, and verifies that restoring the row alone cannot revive
 authority.
 
-The combined source is `5a50cefa4204e33abe1453eb114fc88d28be2c20` on
+The follow-up source `5a50cefa4204e33abe1453eb114fc88d28be2c20` reached
+[run 42895630450](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895630450).
+The lint job reported one signature wrap before Clippy could run.
+
+The current source is `d91941020b2eb2992068fd18665d80fe84c145a9` on
 `feature/phase6-typed-pruning-utxo-adapter-20261108`. Its authoritative
-[PR run 42895630450](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895630450)
-is in progress. The same-SHA
-[push run 42895619810](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895619810)
-was superseded. The prior run 42895086028 passed Check, strict Clippy,
-formatting, Check WASM32 and Check no_std before its full workspace job
-was cancelled by the follow-up.
+[PR run 42895867984](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895867984)
+is pending. The same-SHA
+[push run 42895857275](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895857275)
+was superseded. Run 42895086028 passed Check, strict Clippy, formatting,
+Check WASM32 and Check no_std before its full workspace job was superseded.
