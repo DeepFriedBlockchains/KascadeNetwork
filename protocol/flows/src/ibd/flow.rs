@@ -10,6 +10,7 @@ use kaspa_consensus_core::{
     api::{BlockValidationFuture, ShieldedHistoryVerdict},
     block::Block,
     config::params::{ForkActivation, Params},
+    errors::pruning::PruningImportResult,
     header::Header,
     pruning::{PruningPointProof, PruningPointsList, PruningProofMetadata},
     trusted::TrustedBlock,
@@ -38,7 +39,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 
 use super::{HeadersChunk, IBD_BATCH_SIZE, PruningPointUtxosetChunkStream, progress::ProgressReporter};
 use std::collections::HashSet;
@@ -942,12 +943,15 @@ impl IbdFlow {
         let builder_handle =
             tokio::task::spawn_blocking(move || consensus_for_import.import_pruning_point_smt(pruning_point, md, shortcut_block, rx));
 
-        while let Some(chunk) = stream.next_chunk().await? {
-            tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming SMT builder stopped unexpectedly"))?;
+        let stream_result = async {
+            while let Some(chunk) = stream.next_chunk().await? {
+                tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming SMT builder stopped unexpectedly"))?;
+            }
+            Ok(())
         }
+        .await;
         drop(tx);
-
-        builder_handle.await.map_err(|e| ProtocolError::OtherOwned(format!("SMT builder task panicked: {e}")))??;
+        finish_pruning_import_worker(stream_result, builder_handle, "SMT builder").await?;
         consensus.async_set_pruning_smt_stable().await;
 
         info!("SMT state synced: {} lanes", stream.lane_count());
@@ -1273,12 +1277,15 @@ impl IbdFlow {
             consensus_for_import.import_pruning_point_shielded(pruning_point, md, expected_state_root, rx)
         });
 
-        while let Some(chunk) = stream.next_chunk().await? {
-            tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming shielded importer stopped unexpectedly"))?;
+        let stream_result = async {
+            while let Some(chunk) = stream.next_chunk().await? {
+                tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming shielded importer stopped unexpectedly"))?;
+            }
+            Ok(())
         }
+        .await;
         drop(tx);
-
-        builder_handle.await.map_err(|e| ProtocolError::OtherOwned(format!("shielded importer task panicked: {e}")))??;
+        finish_pruning_import_worker(stream_result, builder_handle, "shielded importer").await?;
         consensus.async_set_pruning_shielded_stable().await;
 
         info!("shielded state synced: {} nullifiers", stream.count());
@@ -1674,6 +1681,19 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
     }
 }
 
+// The stream sender must be dropped before draining. A receive failure can
+// otherwise return control to staging cleanup while the writer is still live.
+async fn finish_pruning_import_worker(
+    stream_result: Result<(), ProtocolError>,
+    worker: JoinHandle<PruningImportResult<()>>,
+    component: &str,
+) -> Result<(), ProtocolError> {
+    let result = worker.await;
+    stream_result?;
+    result.map_err(|error| ProtocolError::OtherOwned(format!("{component} task panicked: {error}")))??;
+    Ok(())
+}
+
 /// [Toccata] Fresh nodes cannot easily identify outdated peers after activation, so we guard
 /// against syncers advertising pruning points that are clearly stale.
 ///
@@ -1745,6 +1765,26 @@ mod tests {
 
     fn pruning_period_millis(params: &Params) -> u64 {
         params.pruning_depth().saturating_add(params.finality_depth()).saturating_mul(params.target_time_per_block())
+    }
+
+    #[test]
+    fn authority_integration_ibd_stream_error_drains_writer() {
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        runtime.block_on(async {
+            let (release, wait_for_release) = tokio::sync::oneshot::channel();
+            let worker = tokio::task::spawn_blocking(move || {
+                wait_for_release.blocking_recv().unwrap();
+                Ok(())
+            });
+            let mut result = Box::pin(finish_pruning_import_worker(Err(ProtocolError::Other("peer stream ended")), worker, "test"));
+            tokio::select! {
+                biased;
+                _ = &mut result => panic!("the stream error escaped while the writer was live"),
+                () = std::future::ready(()) => {}
+            }
+            release.send(()).unwrap();
+            assert!(matches!(result.await, Err(ProtocolError::Other("peer stream ended"))));
+        });
     }
 
     #[test]

@@ -25,6 +25,16 @@ held across the legacy writer's point and virtual locks.
 
 Focused coverage exercises competing ownership, a wrong history,
 stale durable authority, and the real pruning proof and history writer.
-Candidate CI is pending. Continue by passing the coordinator and its
+The initial proof candidate `863ec4fd7293fa3c54916b229c0f9c5f9a6ba659` passed formatting and Check in
+[run 42897872282](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42897872282)
+before the streaming follow-up. Continue by passing the coordinator and its
 permit through trusted-body processing, SMT, shielded and UTXO writes
 before invoking the verified promotion boundary.
+
+## Streaming writer drain
+
+SMT and shielded IBD now close their chunk sender and join the writer on
+both success and stream failure before returning to the caller. A test
+pins the writer past a simulated peer failure and checks that the error
+returns only after release. Stable flags still require successful stream
+and worker completion. The combined Actions run is pending.

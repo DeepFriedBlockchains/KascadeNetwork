@@ -139,8 +139,9 @@ The [dated report](docs/development/PHASE6_OWNED_PROOF_IMPORT_2026-11-10.md) rec
 The coordinator binds the defender's exact receipt before its first
 database write and keeps the proof evidence through completion. Both IBD
 proof branches use the same proof and history application entry point.
-The coordinator-specific entry point remains inactive. Candidate Actions
-validation is pending.
+The coordinator-specific entry point remains inactive. The initial proof candidate `863ec4fd7293fa3c54916b229c0f9c5f9a6ba659` passed formatting and Check in
+[run 42897872282](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42897872282)
+before the streaming follow-up.
 
 ## Next executable task
 
@@ -151,3 +152,8 @@ workers. Keep the detached-worker permit and pruning guard alive until
 the worker exits. Complete UTXO finalization and route the completed
 receipt through `StagingConsensus::commit_verified` before replacing
 legacy IBD promotion.
+
+The streaming follow-up also drains the SMT and shielded writer on a
+stream error before returning to the staging caller. A focused test
+covers error propagation only after worker release. Combined CI is
+pending.
