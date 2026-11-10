@@ -2592,5 +2592,6 @@ impl VirtualStateProcessor {
         point: super::branch_readiness::ReadinessPoint,
     ) -> kaspa_database::prelude::StoreResult<()> {
         super::import_smt_readiness::verify_pruning_smt(db, point, self.genesis.hash, self.toccata_activation, self.finality_depth)
+            .map(|_| ())
     }
 }
