@@ -46,5 +46,5 @@ The unchanged PR #6 baseline
 passed all eight jobs at `42476e2661b5e579f665407d18352a36af09c301`.
 It passed six focused regressions, 1,563 native workspace tests
 (25 skipped), and 32 no-asm tests. Combined run 42898217206 has passed
-Check, strict Clippy, Check no_std, Check WASM32, Test WASM32, and
-Linux release. Its WASM SDK build and Test Suite are still running.
+seven of eight jobs, including formatting, strict Clippy, Linux release,
+and the WASM SDK build. Its Test Suite is still running.
