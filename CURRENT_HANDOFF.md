@@ -125,13 +125,29 @@ spending the lease. A regression removes committed UTXOs after receipt
 issuance and requires the write to fail with readiness closed. The
 follow-up Actions run is pending.
 
+## Owner-bound proof application
+
+The candidate on `feature/phase6-owned-proof-import-20261110` builds on draft
+[PR #6](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/6)
+at `42476e2661b5e579f665407d18352a36af09c301`. The baseline
+[run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
+had passed six jobs at candidate preparation. The Linux release build and
+workspace Test Suite were still running. The candidate uses a separate
+branch to preserve that run.
+
+The [dated report](docs/development/PHASE6_OWNED_PROOF_IMPORT_2026-11-10.md) records the receiver-owned proof worker.
+The coordinator binds the defender's exact receipt before its first
+database write and keeps the proof evidence through completion. Both IBD
+proof branches use the same proof and history application entry point.
+The coordinator-specific entry point remains inactive. Candidate Actions
+validation is pending.
+
 ## Next executable task
 
-Start in `protocol/flows/src/ibd/flow.rs` at
-`sync_and_validate_pruning_proof`. Bind the typed defender proof receipt
-to the processor-owned session before applying it. Pin that permit across
-the proof, SMT, shielded, and UTXO workers and drain it before deleting
-a cancelled database. Build the staging state before calling
-`StagingConsensus::commit_verified`. The UTXO import/reset split is
-ready for that wiring. Keep the existing path until the complete
-authenticated adapter can be exercised behind an inactive gate.
+Validate the new proof worker against the real pruning proof validator
+and receiver. Then pass the owned coordinator through
+`sync_and_validate_pruning_proof` and into the SMT and shielded streaming
+workers. Keep the detached-worker permit and pruning guard alive until
+the worker exits. Complete UTXO finalization and route the completed
+receipt through `StagingConsensus::commit_verified` before replacing
+legacy IBD promotion.

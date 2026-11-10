@@ -9,8 +9,11 @@ use super::{
 };
 use crate::consensus::Consensus;
 use kaspa_consensus_core::{
-    api::{StagingPromotion, StagingPromotionError},
+    api::{ConsensusApi, StagingPromotion, StagingPromotionError, ValidatedStagingPruningProof},
     block::Block,
+    header::Header,
+    pruning::PruningPointsList,
+    trusted::TrustedBlock,
     tx::{TransactionOutpoint, UtxoEntry},
 };
 use kaspa_database::{
@@ -98,6 +101,8 @@ enum StagingProgress {
 pub(super) struct StagingImport {
     processor: Arc<VirtualStateProcessor>,
     session: Option<ImportWorkerSession>,
+    proof: ValidatedImportProof,
+    unapplied_proof: Option<ValidatedStagingPruningProof>,
     progress: Arc<Mutex<StagingProgress>>,
 }
 
@@ -110,10 +115,18 @@ pub(super) struct VerifiedStaging {
 }
 
 impl StagingImport {
-    pub(super) fn begin(processor: Arc<VirtualStateProcessor>) -> StoreResult<Self> {
+    fn begin(
+        processor: Arc<VirtualStateProcessor>,
+        proof: ValidatedImportProof,
+        unapplied_proof: Option<ValidatedStagingPruningProof>,
+    ) -> StoreResult<Self> {
         let session = ImportWorkerSession::new(processor.begin_authority_import()?);
         let progress = Arc::new(Mutex::new(StagingProgress::Writing(StagingComponent::Proof)));
-        Ok(Self { processor, session: Some(session), progress })
+        Ok(Self { processor, session: Some(session), proof, unapplied_proof, progress })
+    }
+
+    pub(super) fn begin_fixture(processor: Arc<VirtualStateProcessor>, proof: ValidatedImportProof) -> StoreResult<Self> {
+        Self::begin(processor, proof, None)
     }
 
     /// Build the component batch on the blocking worker. Each successful
@@ -126,6 +139,9 @@ impl StagingImport {
     ) -> StoreResult<JoinHandle<StoreResult<()>>> {
         if component == StagingComponent::Utxo {
             return Err(inconsistent("staging UTXO requires the typed import path"));
+        }
+        if self.unapplied_proof.is_some() {
+            return Err(inconsistent("the authenticated staging proof has not been applied"));
         }
         self.submit_operation(component, last_chunk, move |processor, operation| {
             let prefixes: Vec<_> = component.write_prefixes().iter().copied().map(u8::from).collect();
@@ -164,12 +180,7 @@ impl StagingImport {
         }
     }
 
-    pub(super) fn finish(
-        &mut self,
-        retention: ReadinessPoint,
-        proof: &ValidatedImportProof,
-        child: &Block,
-    ) -> StoreResult<VerifiedStaging> {
+    pub(super) fn finish(&mut self, retention: ReadinessPoint, child: &Block) -> StoreResult<VerifiedStaging> {
         if *self.progress.lock() != StagingProgress::Verify {
             return Err(inconsistent("staging import is incomplete"));
         }
@@ -181,12 +192,48 @@ impl StagingImport {
                 return Err(inconsistent("a staging worker still holds the import permit"));
             }
         };
-        let lease = self.processor.finish_authenticated_authority_import(token, retention, proof, child)?;
-        Ok(VerifiedStaging { processor: self.processor.clone(), lease, proof: proof.clone(), child: child.clone() })
+        let lease = self.processor.finish_authenticated_authority_import(token, retention, &self.proof, child)?;
+        Ok(VerifiedStaging { processor: self.processor.clone(), lease, proof: self.proof.clone(), child: child.clone() })
     }
 }
 
 impl Consensus {
+    pub(super) fn begin_phase6_staging_import(&self, receipt: ValidatedStagingPruningProof) -> StoreResult<StagingImport> {
+        let proof = ValidatedImportProof::from_receipt(&receipt)?;
+        StagingImport::begin(self.virtual_processor.clone(), proof, Some(receipt))
+    }
+
+    /// Apply the bound proof and pruning history. Trusted-body processing
+    /// and the remaining staging components still have to complete.
+    pub(super) fn stage_phase6_pruning_proof(
+        self: &Arc<Self>,
+        staging: &mut StagingImport,
+        trusted: Vec<TrustedBlock>,
+        header_only_chain_segment: Vec<Arc<Header>>,
+        pruning_points: PruningPointsList,
+    ) -> StoreResult<JoinHandle<StoreResult<()>>> {
+        if !Arc::ptr_eq(&self.virtual_processor, &staging.processor) {
+            return Err(inconsistent("proof input does not belong to the staging processor"));
+        }
+        if pruning_points.last().map(|header| header.hash) != Some(staging.proof.pruning_point()) {
+            return Err(inconsistent("pruning history does not match the authenticated staging proof"));
+        }
+        let receipt = staging.unapplied_proof.take().ok_or_else(|| inconsistent("no unapplied staging proof"))?;
+        let proof = staging.proof.clone();
+        let consensus = self.clone();
+        let result = staging.submit_operation(StagingComponent::Proof, false, move |processor, operation| {
+            processor.apply_authorized_pruning_proof(operation, &proof, || {
+                consensus
+                    .apply_staging_pruning_proof_and_history(receipt, &trusted, &header_only_chain_segment, pruning_points)
+                    .map_err(|error| StoreError::DataInconsistency(error.to_string()))
+            })
+        });
+        if result.is_err() {
+            *staging.progress.lock() = StagingProgress::Failed;
+        }
+        result
+    }
+
     pub(crate) fn authorize_phase6_staging_promotion(&self, promotion: StagingPromotion) -> Result<(), StagingPromotionError> {
         let verified = promotion.downcast::<VerifiedStaging>()?;
         if !Arc::ptr_eq(&self.virtual_processor, &verified.processor) {
@@ -241,10 +288,61 @@ fn inconsistent(reason: &str) -> StoreError {
 mod tests {
     use super::*;
     use crate::{consensus::test_consensus::TestConsensus, pipeline::virtual_processor::branch_readiness::DbBranchReadiness};
-    use kaspa_consensus_core::config::{ConfigBuilder, params::DEVNET_PARAMS};
+    use kaspa_consensus_core::{
+        config::{
+            ConfigBuilder,
+            genesis::DEVNET_GENESIS,
+            params::{DEVNET_PARAMS, ForkActivation},
+        },
+        pruning::PruningProofMetadata,
+    };
     use kaspa_database::{create_temp_db, prelude::ConnBuilder};
     use std::sync::mpsc;
     use tokio::sync::oneshot;
+
+    #[test]
+    fn authority_integration_pruning_proof_worker_checks_receiver_and_revision() {
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let (sender, _receiver) = async_channel::unbounded();
+        let config = ConfigBuilder::new(DEVNET_PARAMS)
+            .edit_consensus_params(|params| params.toccata_activation = ForkActivation::never())
+            .build();
+        let (_defender_temp, defender_db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let defender = TestConsensus::with_db(defender_db, &config, sender.clone());
+        let receiver_config = ConfigBuilder::new(config.params.clone()).skip_adding_genesis().build();
+        let receiver = TestConsensus::with_db(db.clone(), &receiver_config, sender);
+        let proof = defender.get_pruning_point_proof();
+        let header = proof[0].last().unwrap().clone();
+        let metadata = PruningProofMetadata::new(header.blue_work);
+        let receipt = defender.validate_staging_pruning_proof((*proof).clone(), &metadata).unwrap();
+        let mut staging = receiver.begin_phase6_staging_import(receipt).unwrap();
+        let receipt = defender.validate_staging_pruning_proof((*proof).clone(), &metadata).unwrap();
+        assert!(receiver.begin_phase6_staging_import(receipt).is_err());
+        assert!(defender.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![header.clone()]).is_err());
+        assert!(receiver.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![]).is_err());
+        assert!(staging.submit(StagingComponent::Proof, true, || panic!("unbound proof writer started")).is_err());
+
+        let before = db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap();
+        let readiness = DbBranchReadiness::new(db.clone());
+        readiness.close_revision_sync().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let result = runtime.block_on(async {
+            receiver.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![header.clone()]).unwrap().await.unwrap()
+        });
+        assert!(result.is_err());
+        assert_eq!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap(), before);
+        runtime.block_on(staging.cancel());
+
+        let receipt = defender.validate_staging_pruning_proof((*proof).clone(), &metadata).unwrap();
+        let mut staging = receiver.begin_phase6_staging_import(receipt).unwrap();
+        runtime.block_on(async {
+            receiver.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![header]).unwrap().await.unwrap().unwrap();
+        });
+        assert!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().is_some());
+        assert!(readiness.closed_revision().unwrap().is_some());
+        assert!(db.get(PROMOTION_KEY).unwrap().is_none());
+        runtime.block_on(staging.cancel());
+    }
 
     #[test]
     fn authority_integration_rejects_partial_staging_and_drains_cancelled_worker() {
@@ -255,7 +353,10 @@ mod tests {
         let processor = consensus.virtual_processor();
         let anticone_before = db.get(DatabaseStorePrefixes::BodyMissingAnticone).unwrap();
         let shielded_before = db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
-        let mut staging = StagingImport::begin(processor.clone()).unwrap();
+        let mut header = Header::from(&DEVNET_GENESIS);
+        header.finalize();
+        let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header)]]).unwrap();
+        let mut staging = StagingImport::begin_fixture(processor.clone(), proof.clone()).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = mpsc::channel();
@@ -275,7 +376,7 @@ mod tests {
             drop(worker);
             assert!(staging.submit(StagingComponent::Proof, true, || panic!("overlapping worker launched")).is_err());
         });
-        assert!(StagingImport::begin(processor.clone()).is_err());
+        assert!(StagingImport::begin_fixture(processor.clone(), proof.clone()).is_err());
 
         runtime.block_on(async {
             let mut drain = Box::pin(staging.cancel());
@@ -291,6 +392,6 @@ mod tests {
         assert_eq!(db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), shielded_before);
         assert!(db.get(PROMOTION_KEY).unwrap().is_none());
         assert!(DbBranchReadiness::new(db).closed_revision().unwrap().is_some());
-        assert!(StagingImport::begin(processor.clone()).is_ok());
+        assert!(StagingImport::begin_fixture(processor.clone(), proof).is_ok());
     }
 }

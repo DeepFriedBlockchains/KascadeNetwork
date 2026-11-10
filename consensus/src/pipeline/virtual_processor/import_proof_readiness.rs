@@ -10,7 +10,7 @@ use crate::{
 };
 use kaspa_consensus_core::{
     BlockHashSet,
-    api::ConsensusApi,
+    api::{ConsensusApi, ValidatedStagingPruningProof},
     hashing,
     pruning::{PruningPointProof, PruningProofMetadata},
 };
@@ -32,7 +32,15 @@ impl ValidatedImportProof {
         Ok(evidence)
     }
 
-    fn capture_validated(proof: &PruningPointProof) -> StoreResult<Self> {
+    pub(super) fn from_receipt(receipt: &ValidatedStagingPruningProof) -> StoreResult<Self> {
+        Self::capture_validated(receipt.proof())
+    }
+
+    pub(super) fn pruning_point(&self) -> kaspa_hashes::Hash {
+        self.descriptor.pruning_point
+    }
+
+    pub(super) fn capture_validated(proof: &PruningPointProof) -> StoreResult<Self> {
         let point = proof.first().and_then(|level| level.last()).ok_or_else(|| inconsistent("empty pruning proof"))?.hash;
         if proof.iter().any(Vec::is_empty) {
             return Err(inconsistent("pruning proof has an empty level"));
@@ -226,9 +234,9 @@ mod tests {
         let mut header_tip = DbHeadersSelectedTipStore::new(db.clone());
         header_tip.set(SortableBlock::new(child.hash(), child.header.blue_work)).unwrap();
 
-        let mut staging = StagingImport::begin(processor.clone()).unwrap();
-        assert!(staging.finish(retention, &proof, &child).is_err());
-        assert!(StagingImport::begin(processor.clone()).is_err());
+        let mut staging = StagingImport::begin_fixture(processor.clone(), proof.clone()).unwrap();
+        assert!(staging.finish(retention, &child).is_err());
+        assert!(StagingImport::begin_fixture(processor.clone(), proof.clone()).is_err());
         let (_foreign_temp, foreign_db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let foreign = TestConsensus::with_db(foreign_db, &config, sender.clone());
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
@@ -266,9 +274,9 @@ mod tests {
         assert!(foreign.complete_phase6_pruning_utxos(&mut staging, point.hash).is_err());
         assert!(staging.submit(StagingComponent::Utxo, true, || panic!("generic UTXO batch started")).is_err());
         runtime.block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await }).unwrap().unwrap();
-        assert!(staging.finish(retention, &proof, &child).is_err());
+        assert!(staging.finish(retention, &child).is_err());
         runtime.block_on(async { consensus.complete_phase6_pruning_utxos(&mut staging, point.hash).unwrap().await }).unwrap().unwrap();
-        let verified = staging.finish(retention, &proof, &child).unwrap();
+        let verified = staging.finish(retention, &child).unwrap();
         let sibling = processor.authority_lease().unwrap();
 
         assert!(matches!(

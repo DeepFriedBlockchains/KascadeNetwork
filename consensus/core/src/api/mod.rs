@@ -493,6 +493,17 @@ pub trait ConsensusApi: Send + Sync {
         self.apply_pruning_proof(proof.0, trusted_set, header_only_chain_segment)
     }
 
+    fn apply_staging_pruning_proof_and_history(
+        &self,
+        proof: ValidatedStagingPruningProof,
+        trusted_set: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+        pruning_points: PruningPointsList,
+    ) -> PruningImportResult<()> {
+        self.apply_staging_pruning_proof(proof, trusted_set, header_only_chain_segment)?;
+        self.import_pruning_points(pruning_points)
+    }
+
     fn apply_pruning_proof(
         &self,
         proof: PruningPointProof,

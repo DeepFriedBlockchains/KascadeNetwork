@@ -101,6 +101,10 @@ impl PersistentBranchAuthority {
         Ok(PersistentImportToken { inner: self.inner.clone(), closed_revision, owner: self.owner.clone(), session })
     }
 
+    pub(super) fn verify_import(&self, token: &PersistentImportToken) -> StoreResult<()> {
+        self.check_import(&mut self.inner.state.lock(), token)
+    }
+
     fn check_import(&self, state: &mut AuthorityState, token: &PersistentImportToken) -> StoreResult<()> {
         let active = state.import.upgrade().ok_or_else(rejected)?;
         if state.import_failed

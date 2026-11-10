@@ -2440,6 +2440,24 @@ impl VirtualStateProcessor {
         operation.apply(&self.branch_authority, batch)
     }
 
+    /// Legacy proof stores take their own point and virtual locks. Keep the
+    /// worker and pruning guard pinned, and never hold the authority mutex
+    /// across the legacy writer.
+    pub(super) fn apply_authorized_pruning_proof(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        apply: impl FnOnce() -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        operation.verify(&self.branch_authority)?;
+        apply()?;
+        let _pruning = self.pruning_point_store.read();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        proof.verify_committed(&self.db, super::branch_readiness::ReadinessPoint { hash, index })?;
+        operation.verify(&self.branch_authority)
+    }
+
     pub(super) fn commit_staging_promotion(
         &self,
         lease: super::persistent_branch_authority::PersistentBranchLease,

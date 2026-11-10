@@ -68,6 +68,10 @@ impl ImportWorkerSession {
 }
 
 impl ImportOperation {
+    pub(super) fn verify(&mut self, owner: &PersistentBranchAuthority) -> StoreResult<()> {
+        owner.verify_import(&self.token)
+    }
+
     /// Each batch is checked by the creating authority against its exact
     /// owner, session, database, and committed closed revision. Borrow the
     /// permit exclusively so the worker cannot use it for parallel writes.

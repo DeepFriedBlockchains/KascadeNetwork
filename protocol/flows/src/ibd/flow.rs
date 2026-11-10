@@ -754,8 +754,7 @@ impl IbdFlow {
                 .clone()
                 .spawn_blocking(move |c| {
                     let ref_proof = proof.proof().clone();
-                    c.apply_staging_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
-                    c.import_pruning_points(pruning_points)?;
+                    c.apply_staging_pruning_proof_and_history(proof, &trusted_set, &header_only_chain_segment, pruning_points)?;
 
                     info!("Building the proof which was just applied (sanity test)");
                     let built_proof = c.get_pruning_point_proof();
@@ -785,8 +784,7 @@ impl IbdFlow {
             trusted_set = staging
                 .clone()
                 .spawn_blocking(move |c| {
-                    c.apply_staging_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
-                    c.import_pruning_points(pruning_points)?;
+                    c.apply_staging_pruning_proof_and_history(proof, &trusted_set, &header_only_chain_segment, pruning_points)?;
                     Result::<_, ProtocolError>::Ok(trusted_set)
                 })
                 .await?;
