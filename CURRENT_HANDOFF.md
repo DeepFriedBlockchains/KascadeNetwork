@@ -143,16 +143,6 @@ The coordinator-specific entry point remains inactive. The initial proof candida
 [run 42897872282](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42897872282)
 before the streaming follow-up.
 
-## Next executable task
-
-Validate the new proof worker against the real pruning proof validator
-and receiver. Then pass the owned coordinator through
-`sync_and_validate_pruning_proof` and into the SMT and shielded streaming
-workers. Keep the detached-worker permit and pruning guard alive until
-the worker exits. Complete UTXO finalization and route the completed
-receipt through `StagingConsensus::commit_verified` before replacing
-legacy IBD promotion.
-
 The streaming follow-up also drains the SMT and shielded writer on a
 stream error before returning to the staging caller. A focused test
 covers error propagation only after worker release. Combined CI is in progress.
@@ -162,5 +152,22 @@ The combined source is `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` on
 [run 42898217206](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42898217206).
 The unchanged PR #6 baseline
 [run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
-had passed seven of eight jobs, including strict Clippy and Linux release.
-Its workspace Test Suite was in progress when this handoff was recorded.
+passed all eight jobs at `42476e2661b5e579f665407d18352a36af09c301`.
+It passed six focused regressions, 1,563 native workspace tests
+(25 skipped), and 32 no-asm tests. Combined run 42898217206 has passed
+Check, strict Clippy, Check no_std, Check WASM32, Test WASM32, and
+Linux release. Its WASM SDK build and Test Suite are still running.
+
+## Next executable task
+
+Check the focused proof-worker and stream-drain regressions in
+run 42898217206. Continue from `sync_and_validate_pruning_proof`.
+Call the owner-bound receiver admission before the shared proof/history
+writer and retain the coordinator through trusted-body processing.
+Use a single pruning read guard for each worker. The processor's
+owner-bound entry already takes that guard, so the caller must not
+enter it with a separately guarded proxy to the same receiver. Move
+the same permit into SMT and shielded workers, drain on cancellation,
+and complete UTXO writes including the virtual UTXO set before calling
+`StagingConsensus::commit_verified`. Only switch the live promotion
+path after the complete inactive route passes end-to-end tests.

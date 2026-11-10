@@ -43,5 +43,8 @@ The combined source is `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` on
 [run 42898217206](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42898217206).
 The unchanged PR #6 baseline
 [run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
-had passed seven of eight jobs, including strict Clippy and Linux release.
-Its workspace Test Suite was in progress when this handoff was recorded.
+passed all eight jobs at `42476e2661b5e579f665407d18352a36af09c301`.
+It passed six focused regressions, 1,563 native workspace tests
+(25 skipped), and 32 no-asm tests. Combined run 42898217206 has passed
+Check, strict Clippy, Check no_std, Check WASM32, Test WASM32, and
+Linux release. Its WASM SDK build and Test Suite are still running.
