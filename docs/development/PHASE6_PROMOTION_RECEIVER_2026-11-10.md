@@ -55,4 +55,13 @@ shielded child. Under the authority and pruning guards, promotion rechecks
 the committed proof, SMT, shielded, and UTXO data. The descendant fixture
 removes a committed UTXO after lease issuance, verifies that promotion
 fails closed, and verifies that restoring the row alone cannot revive
-authority. Follow-up Actions results are pending.
+authority.
+
+The combined source is `5a50cefa4204e33abe1453eb114fc88d28be2c20` on
+`feature/phase6-typed-pruning-utxo-adapter-20261108`. Its authoritative
+[PR run 42895630450](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895630450)
+is in progress. The same-SHA
+[push run 42895619810](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895619810)
+was superseded. The prior run 42895086028 passed Check, strict Clippy,
+formatting, Check WASM32 and Check no_std before its full workspace job
+was cancelled by the follow-up.
