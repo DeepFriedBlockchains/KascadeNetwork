@@ -160,7 +160,12 @@ impl ConsensusManager {
         let (done, cancelled) = oneshot::channel();
         let stage = self.new_staging_consensus();
         ManagedStagingConsensus {
-            owner: StagingOwner(Some(Arc::new(StagingLifetime { stage: Some(stage), gate: Some(gate), done: Some(done), stopped: AtomicBool::new(false) }))),
+            owner: StagingOwner(Some(Arc::new(StagingLifetime {
+                stage: Some(stage),
+                gate: Some(gate),
+                done: Some(done),
+                stopped: AtomicBool::new(false),
+            }))),
             cancelled,
         }
     }
@@ -395,7 +400,11 @@ mod tests {
 
     struct StubConsensus;
 
-    impl ConsensusApi for StubConsensus {}
+    impl ConsensusApi for StubConsensus {
+        fn supports_verified_staging_import(&self) -> bool {
+            true
+        }
+    }
 
     impl ConsensusCtl for StubConsensus {
         fn start(&self) -> Vec<JoinHandle<()>> {
@@ -456,6 +465,11 @@ mod tests {
             cancel.await;
             assert!(deleted.load(Ordering::SeqCst));
             assert!(manager.staging_gate.try_lock().is_ok());
+
+            deleted.store(false, Ordering::SeqCst);
+            let stage = manager.new_managed_staging_consensus().await;
+            assert!(matches!(stage.commit(None).await, Err(StagingPromotionError::InvalidReceipt)));
+            assert!(deleted.load(Ordering::SeqCst));
         });
     }
 

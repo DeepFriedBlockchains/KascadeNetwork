@@ -2505,15 +2505,20 @@ impl VirtualStateProcessor {
         let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
         batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
         self.with_authority_point(|point| {
-            self.branch_authority.commit_rechecked(point, lease, batch, |db, point| {
+            // Retain the virtual read guard through the durable marker write.
+            let mut virtual_guard = None;
+            let result = self.branch_authority.commit_rechecked(point, lease, batch, |db, point| {
                 super::import_readiness::verify_pruning_utxos(db, point)?;
                 self.verify_authority_smt(db, point)?;
                 self.verify_authenticated_staging(db, point, proof, child, None)?;
                 if verify_virtual {
-                    self.verify_staging_virtual_utxos(db, point)?;
+                    virtual_guard = Some(self.try_read_staging_virtual()?);
+                    super::import_readiness::verify_virtual_utxos(db, point)?;
                 }
                 Ok(())
-            })
+            });
+            drop(virtual_guard);
+            result
         })
     }
 
@@ -2575,23 +2580,18 @@ impl VirtualStateProcessor {
         child: &kaspa_consensus_core::block::Block,
     ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
         self.with_authority_point(|point| {
+            let _virtual = self.try_read_staging_virtual()?;
             self.finish_authority_import_at(token, point, point, |db, point| {
                 self.verify_authenticated_staging(db, point, proof, child, None)?;
-                self.verify_staging_virtual_utxos(db, point)
+                super::import_readiness::verify_virtual_utxos(db, point)
             })
         })
     }
 
-    fn verify_staging_virtual_utxos(
-        &self,
-        db: &Arc<DB>,
-        point: super::branch_readiness::ReadinessPoint,
-    ) -> kaspa_database::prelude::StoreResult<()> {
-        let _virtual = self
-            .virtual_stores
+    fn try_read_staging_virtual(&self) -> kaspa_database::prelude::StoreResult<parking_lot::RwLockReadGuard<'_, VirtualStores>> {
+        self.virtual_stores
             .try_read()
-            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during staging verification".into()))?;
-        super::import_readiness::verify_virtual_utxos(db, point)
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during staging verification".into()))
     }
 
     /// Complete an isolated receiver only after proof and shielded corroboration.

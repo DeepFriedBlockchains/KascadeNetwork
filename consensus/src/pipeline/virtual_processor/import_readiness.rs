@@ -10,9 +10,10 @@ use crate::model::stores::{
     headers::{DbHeadersStore, HeaderStoreReader},
     past_pruning_points::{DbPastPruningPointsStore, PastPruningPointsStoreReader},
     pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
+    statuses::{DbStatusesStore, StatusesStoreReader},
     utxo_set::DbUtxoSetStore,
 };
-use kaspa_consensus_core::{hashing, muhash::MuHashExtensions};
+use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, hashing, muhash::MuHashExtensions};
 use kaspa_database::{
     prelude::{CachePolicy, CachedDbItem, DB, StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
@@ -103,6 +104,9 @@ pub(super) fn verify_pruning_utxos(db: &Arc<DB>, point: ReadinessPoint) -> Store
 }
 
 pub(super) fn verify_virtual_utxos(db: &Arc<DB>, point: ReadinessPoint) -> StoreResult<()> {
+    if DbStatusesStore::new(db.clone(), CachePolicy::Empty).get(point.hash)? != StatusUTXOValid {
+        return Err(inconsistent("the imported pruning point is not UTXO valid"));
+    }
     let virtual_state = crate::model::stores::virtual_state::DbVirtualStateStore::read_committed(db.clone())?;
     if virtual_state.parents.as_slice() != [point.hash] || virtual_state.ghostdag_data.selected_parent != point.hash {
         return Err(inconsistent("committed virtual state is not based on the imported pruning point"));

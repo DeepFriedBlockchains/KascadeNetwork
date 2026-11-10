@@ -192,12 +192,14 @@ mod tests {
                 headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
                 selected_chain::{DbSelectedChainStore, SelectedChainStore},
                 shielded::DbNullifierDiffStore,
+                statuses::{DbStatusesStore, StatusesStore},
                 virtual_state::{VirtualState, VirtualStateStore},
             },
             processes::ghostdag::ordering::SortableBlock,
         };
         use kaspa_consensus_core::{
             api::{StagingPromotion, StagingPromotionError},
+            blockstatus::BlockStatus::StatusUTXOValid,
             config::params::ForkActivation,
             muhash::MuHashExtensions,
             tx::{ScriptPublicKey, TransactionOutpoint, UtxoEntry},
@@ -310,6 +312,7 @@ mod tests {
             db.write(batch).unwrap();
         };
         write_retention(point.hash);
+        DbStatusesStore::new(db.clone(), CachePolicy::Empty).set(point.hash, StatusUTXOValid).unwrap();
         let token = processor.begin_authority_import().unwrap();
         assert!(processor.finish_verified_ibd_import(token, &proof, &child).is_err());
         assert!(processor.authority_lease().is_err());

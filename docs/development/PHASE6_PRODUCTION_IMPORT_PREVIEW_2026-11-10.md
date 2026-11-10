@@ -34,3 +34,8 @@ The initial draft [run 42908162867](https://github.com/DeepFriedBlockchains/Kasc
 reported formatting differences and two shielded return-type mismatches.
 The follow-up fixes those errors and uses one stop signal per managed
 staging lifecycle before joining workers and removing the staging DB.
+
+[Run 42908550005](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42908550005)
+passed Check and reported a formatting difference in managed staging.
+The next source also pins the virtual read guard through the durable
+write and requires committed UTXO-valid status at the pruning point.
