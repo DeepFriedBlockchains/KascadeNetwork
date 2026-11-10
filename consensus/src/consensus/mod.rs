@@ -726,6 +726,14 @@ impl Consensus {
 }
 
 impl ConsensusApi for Consensus {
+    #[cfg(test)]
+    fn authorize_staging_promotion(
+        &self,
+        promotion: kaspa_consensus_core::api::StagingPromotion,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        self.authorize_phase6_staging_promotion(promotion)
+    }
+
     fn build_block_template(
         &self,
         miner_data: MinerData,

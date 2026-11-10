@@ -39,5 +39,23 @@ adapters and staging promotion switch still require integration.
 
 ## Validation and next checkpoint
 
-Candidate CI is pending. Verify the focused regressions and all eight
-jobs on the stacked PR head before integrating the production adapters.
+[Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
+The source checkpoint is `4eb422549fa822b804968f9c2911018b518286f0` on `feature/phase6-staging-coordinator-20261108`.
+[PR run 42506751029](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506751029) passed all eight jobs.
+All four focused regressions and 1,561 native workspace tests passed
+(25 skipped). The no-asm suite passed 32 tests. Formatting and strict
+Clippy passed.
+The same-SHA [push run 42506746483](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506746483) was superseded.
+
+[Run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037)
+reported the missing `kaspa_hashes::Hash` test import in Check and
+Clippy. Its correction `6e5c4ae` passed both jobs and five other platform
+and build checks, with seven of eight jobs passing overall in
+[run 42504801081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42504801081).
+The focused suite passed three of four regressions, including committed
+descendant recovery. The staging cancellation fixture expected an absent
+anticone row, but consensus initialization creates it. The corrected test
+requires both scoped rows to equal their pre-operation bytes after the
+rejected batch. The staging and restart implementation remains unchanged.
+
+The exact green source can be used for the production adapter checkpoint.

@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 8, 2026.
+Updated November 10, 2026.
 
 ## Validation stack
 
@@ -68,10 +68,70 @@ shielded commitments, and checks the post-pruning nullifier projection.
 Unavailable proof, a missing authenticated tip child or an inconsistent
 committed view leaves authority closed.
 
+## Candidate validation
+
+[Draft PR #5](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/5) is stacked on PR #4.
+The source checkpoint is `4eb422549fa822b804968f9c2911018b518286f0` on `feature/phase6-staging-coordinator-20261108`.
+[PR run 42506751029](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506751029) passed all eight jobs.
+All four focused regressions and 1,561 native workspace tests passed
+(25 skipped). The no-asm suite passed 32 tests. Formatting and strict
+Clippy passed.
+The same-SHA [push run 42506746483](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42506746483) was superseded.
+
+[Run 42503818037](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42503818037)
+reported the missing `kaspa_hashes::Hash` test import in Check and
+Clippy. Its correction `6e5c4ae` passed both jobs and five other platform
+and build checks, with seven of eight jobs passing overall in
+[run 42504801081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42504801081).
+The focused suite passed three of four regressions, including committed
+descendant recovery. The staging cancellation fixture expected an absent
+anticone row, but consensus initialization creates it. The corrected test
+requires both scoped rows to equal their pre-operation bytes after the
+rejected batch. The staging and restart implementation remains unchanged.
+
+## Typed UTXO adapter
+
+[Draft PR #6](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/6)
+is stacked on PR #5. The original typed chunk source
+`2afec236ac42e03bdeaf21d06c0191a70bba99f7` passed all eight jobs in
+[run 42509613211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509613211).
+Four focused regressions, 1,561 native workspace tests (25 skipped), and
+32 no-asm tests passed.
+
+## Owner-bound completion and promotion receiver
+
+The [November 10 report](docs/development/PHASE6_PROMOTION_RECEIVER_2026-11-10.md)
+records the continuation on the PR #6 branch. The typed UTXO completion
+worker verifies committed UTXO rows before publishing the position and
+stable flag in the same authority-checked batch. The consensus manager has
+a separate verified commit entry point. It asks the exact staging receiver
+to consume the completion receipt before swapping consensus. The real
+receipt issuer and receiver remain inactive test code pending production
+wiring. The initial source `bc393eae2d9bd03df2f684d06e53ec78e865da60` reached
+[run 42894808941](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42894808941).
+Formatting reported two line wraps in the regression test. The correction
+`72af6c818be80c8a0365036e23c4744da8b4bf94` passed formatting in
+[run 42895086028](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895086028).
+Check and strict Clippy also passed. The full workspace result was
+pending when the follow-up source was prepared.
+
+## IBD proof receipt and promotion recheck
+
+IBD now passes the exact proof accepted by the defender to the staging
+receiver in a typed receipt. This uses the existing validation and
+application logic. The inactive promotion commit now independently
+rechecks the committed UTXO, SMT, proof, and shielded evidence before
+spending the lease. A regression removes committed UTXOs after receipt
+issuance and requires the write to fail with readiness closed. The
+follow-up Actions run is pending.
+
 ## Next executable task
 
-Verify the focused and full CI for this exact source before binding
-production IBD and direct import adapters to the coordinator. The live
-promotion boundary, transport-to-typed write adapters, and integration
-with the production staging manager remain open. Activation and main
-integration remain gated.
+Start in `protocol/flows/src/ibd/flow.rs` at
+`sync_and_validate_pruning_proof`. Bind the typed defender proof receipt
+to the processor-owned session before applying it. Pin that permit across
+the proof, SMT, shielded, and UTXO workers and drain it before deleting
+a cancelled database. Build the staging state before calling
+`StagingConsensus::commit_verified`. The UTXO import/reset split is
+ready for that wiring. Keep the existing path until the complete
+authenticated adapter can be exercised behind an inactive gate.

@@ -1,5 +1,5 @@
 use itertools::Itertools;
-use kaspa_consensus_core::api::{ConsensusApi, DynConsensus};
+use kaspa_consensus_core::api::{ConsensusApi, DynConsensus, StagingPromotion, StagingPromotionError};
 use kaspa_core::{core::Core, debug, service::Service};
 use parking_lot::RwLock;
 use std::{collections::VecDeque, ops::Deref, sync::Arc, thread::JoinHandle};
@@ -212,6 +212,17 @@ impl StagingConsensus {
         Self { manager, staging, handles }
     }
 
+    /// Verify the receipt on the staging receiver before making it active.
+    /// Return the receiver on rejection so the caller can drain workers before cancellation.
+    pub fn commit_verified(self, promotion: StagingPromotion) -> Result<(), (Box<Self>, StagingPromotionError)> {
+        let result = self.staging.consensus.unguarded_session_blocking().authorize_staging_promotion(promotion);
+        if let Err(error) = result {
+            return Err((Box::new(self), error));
+        }
+        self.commit();
+        Ok(())
+    }
+
     pub fn commit(self) {
         let mut g = self.manager.inner.write();
         let prev = std::mem::replace(&mut g.current, self.staging);
@@ -244,5 +255,41 @@ impl Deref for StagingConsensus {
 
     fn deref(&self) -> &Self::Target {
         &self.staging.consensus
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StubConsensus;
+
+    impl ConsensusApi for StubConsensus {}
+
+    impl ConsensusCtl for StubConsensus {
+        fn start(&self) -> Vec<JoinHandle<()>> {
+            vec![]
+        }
+
+        fn stop(&self) {}
+
+        fn make_active(&self) {
+            panic!("an unauthorized staging receiver became active");
+        }
+    }
+
+    #[test]
+    fn authority_integration_manager_rejects_unsupported_promotion() {
+        let manager = Arc::new(ConsensusManager::from_consensus(Arc::new(StubConsensus)));
+        let receiver = Arc::new(StubConsensus);
+        let staging = StagingConsensus::new(
+            manager.clone(),
+            ConsensusInner::new(ConsensusInstance::new(SessionLock::new(), receiver.clone()), receiver),
+        );
+
+        let Err((staging, StagingPromotionError::Unsupported)) = staging.commit_verified(StagingPromotion::new(())) else {
+            panic!("unsupported receiver did not reject staging promotion");
+        };
+        assert!(Arc::ptr_eq(&staging.manager, &manager));
     }
 }

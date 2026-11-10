@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 /// Created by validating against the defending consensus before acquiring the
 /// receiver's pruning guards. An imported descriptor alone cannot mint it.
+#[derive(Clone)]
 pub(super) struct ValidatedImportProof {
     descriptor: PruningProofDescriptor,
-    headers: BlockHashSet,
+    headers: Arc<BlockHashSet>,
 }
 
 impl ValidatedImportProof {
@@ -43,7 +44,7 @@ impl ValidatedImportProof {
             }
             headers.insert(header.hash);
         }
-        Ok(Self { descriptor: PruningProofDescriptor::from_proof(proof, point, true), headers })
+        Ok(Self { descriptor: PruningProofDescriptor::from_proof(proof, point, true), headers: Arc::new(headers) })
     }
 
     /// Corroborate the authenticated proof against fresh receiver DB reads.
@@ -61,7 +62,7 @@ impl ValidatedImportProof {
         }
 
         let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
-        for hash in &self.headers {
+        for hash in self.headers.iter() {
             let header = headers.get_header(*hash)?;
             if header.hash != *hash || hashing::header::hash(&header) != *hash {
                 return Err(inconsistent("committed proof header does not match its authenticated hash"));
@@ -190,7 +191,12 @@ mod tests {
             },
             processes::ghostdag::ordering::SortableBlock,
         };
-        use kaspa_consensus_core::config::params::ForkActivation;
+        use kaspa_consensus_core::{
+            api::{StagingPromotion, StagingPromotionError},
+            config::params::ForkActivation,
+            muhash::MuHashExtensions,
+            tx::{ScriptPublicKey, TransactionOutpoint, UtxoEntry},
+        };
         use kaspa_database::{prelude::DeferredDbBatch, registry::DatabaseStorePrefixes as Prefix};
         use kaspa_muhash::MuHash;
         use rocksdb::WriteBatch;
@@ -207,7 +213,9 @@ mod tests {
         let processor = consensus.virtual_processor();
         let mut point_header = Header::from(&DEVNET_GENESIS);
         point_header.nonce = 100;
-        point_header.utxo_commitment = MuHash::new().finalize();
+        let outpoint = TransactionOutpoint::new(12.into(), 0);
+        let entry = UtxoEntry::new(10, ScriptPublicKey::from_vec(0, vec![0x51]), 1, false, None);
+        point_header.utxo_commitment = MuHash::from_utxo(&outpoint, &entry).finalize();
         point_header.finalize();
         let point = ReadinessPoint { hash: point_header.hash, index: 3 };
         let retention = ReadinessPoint { hash: 7.into(), index: 1 };
@@ -221,6 +229,8 @@ mod tests {
         let mut staging = StagingImport::begin(processor.clone()).unwrap();
         assert!(staging.finish(retention, &proof, &child).is_err());
         assert!(StagingImport::begin(processor.clone()).is_err());
+        let (_foreign_temp, foreign_db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let foreign = TestConsensus::with_db(foreign_db, &config, sender.clone());
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let components = [
             (
@@ -232,13 +242,6 @@ mod tests {
             ),
             (StagingComponent::Smt, vec![(Prefix::SmtSyncFlag, bincode::serialize(&true).unwrap())]),
             (StagingComponent::Shielded, vec![(Prefix::ShieldedSyncFlag, bincode::serialize(&true).unwrap())]),
-            (
-                StagingComponent::Utxo,
-                vec![
-                    (Prefix::PruningUtxosetPosition, bincode::serialize(&point.hash).unwrap()),
-                    (Prefix::PruningUtxosetSyncFlag, bincode::serialize(&true).unwrap()),
-                ],
-            ),
         ];
         for (component, rows) in components {
             let worker_db = db.clone();
@@ -258,12 +261,40 @@ mod tests {
             });
             assert!(processor.authority_lease().is_err());
         }
+        let chunk = vec![(outpoint, entry.clone())];
+        assert!(foreign.stage_phase6_pruning_utxo_chunk(&mut staging, chunk.clone()).is_err());
+        assert!(foreign.complete_phase6_pruning_utxos(&mut staging, point.hash).is_err());
+        assert!(staging.submit(StagingComponent::Utxo, true, || panic!("generic UTXO batch started")).is_err());
+        runtime.block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await }).unwrap().unwrap();
+        assert!(staging.finish(retention, &proof, &child).is_err());
+        runtime.block_on(async { consensus.complete_phase6_pruning_utxos(&mut staging, point.hash).unwrap().await }).unwrap().unwrap();
         let verified = staging.finish(retention, &proof, &child).unwrap();
         let sibling = processor.authority_lease().unwrap();
-        verified.promote().unwrap();
-        assert!(processor.commit_staging_promotion(sibling).is_err());
+
+        assert!(matches!(
+            consensus.authorize_staging_promotion(StagingPromotion::new(())),
+            Err(StagingPromotionError::InvalidReceipt)
+        ));
+        assert!(db.get(PROMOTION_KEY).unwrap().is_none());
+        consensus.authorize_staging_promotion(verified.into_promotion()).unwrap();
+        assert!(processor.commit_staging_promotion(sibling, &proof, &child).is_err());
         assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
         drop(staging);
+
+        let token = processor.begin_authority_import().unwrap();
+        let stale = processor.finish_authenticated_authority_import(token, retention, &proof, &child).unwrap();
+        let mut metadata = processor.pruning_meta_stores.write();
+        metadata.utxo_set.clear().unwrap();
+        drop(metadata);
+        assert!(processor.commit_staging_promotion(stale, &proof, &child).is_err());
+        assert!(DbBranchReadiness::new(db.clone()).closed_revision().unwrap().is_some());
+        let mut metadata = processor.pruning_meta_stores.write();
+        metadata.utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry))]).unwrap();
+        drop(metadata);
+        assert!(processor.authority_lease().is_err());
+        let token = processor.begin_authority_import().unwrap();
+        let reverified = processor.finish_authenticated_authority_import(token, retention, &proof, &child).unwrap();
+        processor.commit_staging_promotion(reverified, &proof, &child).unwrap();
 
         let tip_child = install_shielded_child(&db, child.hash(), 102);
         header_tip.set(SortableBlock::new(tip_child.hash(), tip_child.header.blue_work)).unwrap();

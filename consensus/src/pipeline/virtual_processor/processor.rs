@@ -2443,10 +2443,18 @@ impl VirtualStateProcessor {
     pub(super) fn commit_staging_promotion(
         &self,
         lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
     ) -> kaspa_database::prelude::StoreResult<()> {
         let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
         batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
-        self.authority_commit(lease, batch)
+        self.with_authority_point(|point| {
+            self.branch_authority.commit_rechecked(point, lease, batch, |db, point| {
+                super::import_readiness::verify_pruning_utxos(db, point)?;
+                self.verify_authority_smt(db, point)?;
+                self.verify_authenticated_staging(db, point, proof, child, None)
+            })
+        })
     }
 
     /// Apply a pruning UTXO import chunk through the session's worker permit.
@@ -2468,6 +2476,25 @@ impl VirtualStateProcessor {
             multiset.combine(&MuHash::from_utxo(outpoint, entry));
         }
         Ok(())
+    }
+
+    /// Write the completion rows only after hashing the committed UTXO set.
+    pub(super) fn complete_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        expected_point: Hash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        if hash != expected_point {
+            return Err(StoreError::DataInconsistency("staged UTXO pruning point changed".into()));
+        }
+        super::import_readiness::verify_pruning_utxos(&self.db, super::branch_readiness::ReadinessPoint { hash, index })?;
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.stage_utxoset_completion(&mut batch, hash)?;
+        operation.apply(&self.branch_authority, batch)
     }
 
     /// Complete an isolated receiver only after proof and shielded corroboration.
@@ -2554,14 +2581,17 @@ impl VirtualStateProcessor {
         verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
     ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
         self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
-            super::import_smt_readiness::verify_pruning_smt(
-                db,
-                point,
-                self.genesis.hash,
-                self.toccata_activation,
-                self.finality_depth,
-            )?;
+            self.verify_authority_smt(db, point)?;
             verify_remaining(db, point)
         })
+    }
+
+    fn verify_authority_smt(
+        &self,
+        db: &Arc<DB>,
+        point: super::branch_readiness::ReadinessPoint,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        super::import_smt_readiness::verify_pruning_smt(db, point, self.genesis.hash, self.toccata_activation, self.finality_depth)
+            .map(|_| ())
     }
 }
