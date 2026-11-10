@@ -2470,6 +2470,25 @@ impl VirtualStateProcessor {
         Ok(())
     }
 
+    /// Write the completion rows only after hashing the committed UTXO set.
+    pub(super) fn complete_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        expected_point: Hash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        if hash != expected_point {
+            return Err(StoreError::DataInconsistency("staged UTXO pruning point changed".into()));
+        }
+        super::import_readiness::verify_pruning_utxos(&self.db, super::branch_readiness::ReadinessPoint { hash, index })?;
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.stage_utxoset_completion(&mut batch, hash)?;
+        operation.apply(&self.branch_authority, batch)
+    }
+
     /// Complete an isolated receiver only after proof and shielded corroboration.
     /// The caller must quiesce header and virtual processing on this receiver.
     pub(super) fn finish_authenticated_authority_import(

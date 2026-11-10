@@ -9,6 +9,7 @@ use super::{
 };
 use crate::consensus::Consensus;
 use kaspa_consensus_core::{
+    api::{StagingPromotion, StagingPromotionError},
     block::Block,
     tx::{TransactionOutpoint, UtxoEntry},
 };
@@ -16,6 +17,7 @@ use kaspa_database::{
     prelude::{DeferredDbBatch, StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
 };
+use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -81,7 +83,7 @@ impl StagingComponent {
                 ShieldedDevAccrued,
                 ShieldedAnchorSourceScore,
             ],
-            Self::Utxo => &[PruningUtxosetPosition, PruningUtxosetSyncFlag],
+            Self::Utxo => &[],
         }
     }
 }
@@ -120,6 +122,9 @@ impl StagingImport {
         last_chunk: bool,
         build: impl FnOnce() -> StoreResult<DeferredDbBatch<'static>> + Send + 'static,
     ) -> StoreResult<JoinHandle<StoreResult<()>>> {
+        if component == StagingComponent::Utxo {
+            return Err(inconsistent("staging UTXO requires the typed import path"));
+        }
         self.submit_operation(component, last_chunk, move |processor, operation| {
             let prefixes: Vec<_> = component.write_prefixes().iter().copied().map(u8::from).collect();
             processor.apply_authorized_staging_batch(operation, &prefixes, build)
@@ -180,6 +185,16 @@ impl StagingImport {
 }
 
 impl Consensus {
+    pub(crate) fn authorize_phase6_staging_promotion(&self, promotion: StagingPromotion) -> Result<(), StagingPromotionError> {
+        let verified = promotion.downcast::<VerifiedStaging>()?;
+        if !Arc::ptr_eq(&self.virtual_processor, &verified.processor) {
+            return Err(StagingPromotionError::InvalidReceipt);
+        }
+        self.virtual_processor
+            .commit_staging_promotion(verified.lease)
+            .map_err(|error| StagingPromotionError::Rejected(error.to_string()))
+    }
+
     /// Inactive typed ingress for direct pruning UTXO chunks. The staging
     /// session remains the only path to the database write.
     pub(super) fn stage_phase6_pruning_utxo_chunk(
@@ -195,13 +210,24 @@ impl Consensus {
             processor.append_authorized_pruning_utxos(operation, &utxos, &mut MuHash::new())
         })
     }
+
+    pub(super) fn complete_phase6_pruning_utxos(
+        &self,
+        staging: &mut StagingImport,
+        point: Hash,
+    ) -> StoreResult<JoinHandle<StoreResult<()>>> {
+        if !Arc::ptr_eq(&self.virtual_processor, &staging.processor) {
+            return Err(inconsistent("UTXO completion does not belong to the staging processor"));
+        }
+        staging.submit_operation(StagingComponent::Utxo, true, move |processor, operation| {
+            processor.complete_authorized_pruning_utxos(operation, point)
+        })
+    }
 }
 
 impl VerifiedStaging {
-    /// Publish the inactive promotion record and replacement readiness
-    /// revision together. The processor rechecks the exact completion lease.
-    pub(super) fn promote(self) -> StoreResult<()> {
-        self.processor.commit_staging_promotion(self.lease)
+    pub(super) fn into_promotion(self) -> StagingPromotion {
+        StagingPromotion::new(self)
     }
 }
 

@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 8, 2026.
+Updated November 10, 2026.
 
 ## Validation stack
 
@@ -91,15 +91,31 @@ rejected batch. The staging and restart implementation remains unchanged.
 
 ## Typed UTXO adapter
 
-The [dated adapter report](docs/development/PHASE6_TYPED_PRUNING_UTXO_ADAPTER_2026-11-08.md) records the first adapter
-slice on the consensus owner. The inactive path now accepts typed UTXO
-chunks through the coordinator's permit. The generic UTXO batch path
-can only write completion metadata. Candidate CI is pending.
+[Draft PR #6](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/6)
+is stacked on PR #5. The original typed chunk source
+`2afec236ac42e03bdeaf21d06c0191a70bba99f7` passed all eight jobs in
+[run 42509613211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42509613211).
+Four focused regressions, 1,561 native workspace tests (25 skipped), and
+32 no-asm tests passed.
+
+## Owner-bound completion and promotion receiver
+
+The [November 10 report](docs/development/PHASE6_PROMOTION_RECEIVER_2026-11-10.md)
+records the continuation on the PR #6 branch. The typed UTXO completion
+worker verifies committed UTXO rows before publishing the position and
+stable flag in the same authority-checked batch. The consensus manager has
+a separate verified commit entry point. It asks the exact staging receiver
+to consume the completion receipt before swapping consensus. The real
+receipt issuer and receiver remain inactive test code pending production
+wiring. The new candidate's Actions run is pending.
 
 ## Next executable task
 
-Validate the typed adapter candidate, then forward IBD UTXO chunks into
-this same owner-bound path. Complete typed proof, SMT and shielded write
-adapters before moving the production promotion boundary behind verified
-completion. The existing IBD and direct import entry points remain active
-on their current paths until the inactive adapter work is ready.
+Start in `protocol/flows/src/ibd/flow.rs` at
+`sync_and_validate_pruning_proof`. Carry the defender's validated proof
+receipt into the staging receiver. Pin one processor-owned permit across
+the proof, SMT, shielded, and UTXO workers and drain it before deleting
+a cancelled database. Build the staging state before calling
+`StagingConsensus::commit_verified`. The UTXO import/reset split is
+ready for that wiring. Keep the existing path until the complete
+authenticated adapter can be exercised behind an inactive gate.

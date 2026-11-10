@@ -240,23 +240,8 @@ mod tests {
             ),
             (StagingComponent::Smt, vec![(Prefix::SmtSyncFlag, bincode::serialize(&true).unwrap())]),
             (StagingComponent::Shielded, vec![(Prefix::ShieldedSyncFlag, bincode::serialize(&true).unwrap())]),
-            (
-                StagingComponent::Utxo,
-                vec![
-                    (Prefix::PruningUtxosetPosition, bincode::serialize(&point.hash).unwrap()),
-                    (Prefix::PruningUtxosetSyncFlag, bincode::serialize(&true).unwrap()),
-                ],
-            ),
         ];
         for (component, rows) in components {
-            if component == StagingComponent::Utxo {
-                let chunk = vec![(outpoint, entry.clone())];
-                assert!(foreign.stage_phase6_pruning_utxo_chunk(&mut staging, chunk.clone()).is_err());
-                runtime
-                    .block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await })
-                    .unwrap()
-                    .unwrap();
-            }
             let worker_db = db.clone();
             runtime.block_on(async {
                 staging
@@ -274,9 +259,29 @@ mod tests {
             });
             assert!(processor.authority_lease().is_err());
         }
+        let chunk = vec![(outpoint, entry)];
+        assert!(foreign.stage_phase6_pruning_utxo_chunk(&mut staging, chunk.clone()).is_err());
+        assert!(foreign.complete_phase6_pruning_utxos(&mut staging, point.hash).is_err());
+        assert!(staging.submit(StagingComponent::Utxo, true, || panic!("generic UTXO batch started")).is_err());
+        runtime
+            .block_on(async { consensus.stage_phase6_pruning_utxo_chunk(&mut staging, chunk).unwrap().await })
+            .unwrap()
+            .unwrap();
+        assert!(staging.finish(retention, &proof, &child).is_err());
+        runtime
+            .block_on(async { consensus.complete_phase6_pruning_utxos(&mut staging, point.hash).unwrap().await })
+            .unwrap()
+            .unwrap();
         let verified = staging.finish(retention, &proof, &child).unwrap();
         let sibling = processor.authority_lease().unwrap();
-        verified.promote().unwrap();
+        use kaspa_consensus_core::api::{StagingPromotion, StagingPromotionError};
+
+        assert!(matches!(
+            consensus.authorize_staging_promotion(StagingPromotion::new(())),
+            Err(StagingPromotionError::InvalidReceipt)
+        ));
+        assert!(db.get(PROMOTION_KEY).unwrap().is_none());
+        consensus.authorize_staging_promotion(verified.into_promotion()).unwrap();
         assert!(processor.commit_staging_promotion(sibling).is_err());
         assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
         drop(staging);

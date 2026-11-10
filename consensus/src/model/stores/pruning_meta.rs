@@ -74,6 +74,16 @@ impl PruningMetaStores {
         self.utxoset_position_access.write(BatchDbWriter::new(batch), &pruning_utxoset_position)
     }
 
+    #[cfg(test)]
+    pub(crate) fn stage_utxoset_completion<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        point: Hash,
+    ) -> StoreResult<()> {
+        self.utxoset_position_access.stage_exclusive_write(batch, &point)?;
+        self.utxoset_stable_flag_access.stage_exclusive_write(batch, &true)
+    }
+
     /// Flip the sync flag in the same batch as your other writes
     pub fn set_pruning_utxoset_stable_flag(&mut self, batch: &mut WriteBatch, stable: bool) -> StoreResult<()> {
         self.utxoset_stable_flag_access.write(BatchDbWriter::new(batch), &stable)

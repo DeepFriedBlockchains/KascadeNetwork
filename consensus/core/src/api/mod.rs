@@ -1,6 +1,6 @@
 use futures_util::future::BoxFuture;
 use kaspa_muhash::MuHash;
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{
     BlockHashSet, BlueWorkType, ChainPath,
@@ -232,9 +232,37 @@ pub struct SeqCommitLaneProof {
     pub miner_payload_leaves: Vec<Hash>,
 }
 
+/// A single-use receipt carried from authenticated staging completion to its receiver.
+pub struct StagingPromotion(Box<dyn Any + Send>);
+
+impl StagingPromotion {
+    pub fn new<T: Any + Send>(receipt: T) -> Self {
+        Self(Box::new(receipt))
+    }
+
+    pub fn downcast<T: Any + Send>(self) -> Result<T, StagingPromotionError> {
+        self.0.downcast::<T>().map(|receipt| *receipt).map_err(|_| StagingPromotionError::InvalidReceipt)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StagingPromotionError {
+    #[error("authenticated staging promotion is unavailable")]
+    Unsupported,
+    #[error("invalid staging promotion receipt")]
+    InvalidReceipt,
+    #[error("staging promotion authority was rejected: {0}")]
+    Rejected(String),
+}
+
 /// Abstracts the consensus external API
 #[allow(unused_variables)]
 pub trait ConsensusApi: Send + Sync {
+    /// Consume the receiver's exact promotion lease before changing the active consensus.
+    fn authorize_staging_promotion(&self, _promotion: StagingPromotion) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
     fn build_block_template(
         &self,
         miner_data: MinerData,
