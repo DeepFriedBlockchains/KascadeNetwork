@@ -1,22 +1,22 @@
 pub(crate) mod bounds;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod branch_readiness;
 pub mod errors;
 pub(crate) mod fork_logger;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod import_operation;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod import_proof_readiness;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod import_readiness;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod import_shielded_readiness;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod import_smt_readiness;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod persistent_branch_authority;
 mod processor;
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 mod staging_import;
 mod utxo_inquirer;
 mod utxo_validation;

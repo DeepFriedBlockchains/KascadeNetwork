@@ -726,7 +726,71 @@ impl Consensus {
 }
 
 impl ConsensusApi for Consensus {
-    #[cfg(test)]
+    #[cfg(feature = "phase6-staging-preview")]
+    fn supports_verified_staging_import(&self) -> bool {
+        !self.config.process_genesis
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn begin_verified_staging_import(
+        &self,
+        proof: kaspa_consensus_core::api::ValidatedStagingPruningProof,
+    ) -> Result<kaspa_consensus_core::api::StagingImportSession, kaspa_consensus_core::api::StagingPromotionError> {
+        if self.config.process_genesis {
+            return Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported);
+        }
+        self.start_owned_staging_import(proof)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn apply_verified_staging_proof(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        trusted: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+        pruning_points: PruningPointsList,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        self.apply_owned_staging_proof(session, trusted, header_only_chain_segment, pruning_points)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn check_verified_staging_component(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        component: kaspa_consensus_core::api::StagingImportComponent,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        self.check_owned_staging_component(session, component, false)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn complete_verified_staging_component(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        component: kaspa_consensus_core::api::StagingImportComponent,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        self.check_owned_staging_component(session, component, true)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn append_verified_staging_utxos(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        utxos: &[(TransactionOutpoint, UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        self.append_owned_staging_utxos(session, utxos, multiset)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn finish_verified_staging_import(
+        &self,
+        session: kaspa_consensus_core::api::StagingImportSession,
+        child: &Block,
+    ) -> Result<kaspa_consensus_core::api::StagingPromotion, kaspa_consensus_core::api::StagingPromotionError> {
+        self.finish_owned_staging_import(session, child)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     fn authorize_staging_promotion(
         &self,
         promotion: kaspa_consensus_core::api::StagingPromotion,

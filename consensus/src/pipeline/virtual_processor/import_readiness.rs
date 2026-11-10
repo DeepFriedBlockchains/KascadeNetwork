@@ -96,16 +96,31 @@ pub(super) fn verify_pruning_utxos(db: &Arc<DB>, point: ReadinessPoint) -> Store
         return Err(inconsistent("committed pruning header does not hash to the import point"));
     }
 
-    let utxos = DbUtxoSetStore::new(db.clone(), CachePolicy::Empty, DatabaseStorePrefixes::PruningUtxoset.into());
+    if committed_utxo_multiset(db, DatabaseStorePrefixes::PruningUtxoset)?.finalize() != header.utxo_commitment {
+        return Err(inconsistent("committed pruning UTXO rows do not match the header commitment"));
+    }
+    Ok(())
+}
+
+pub(super) fn verify_virtual_utxos(db: &Arc<DB>, point: ReadinessPoint) -> StoreResult<()> {
+    let virtual_state = crate::model::stores::virtual_state::DbVirtualStateStore::read_committed(db.clone())?;
+    if virtual_state.parents.as_slice() != [point.hash] || virtual_state.ghostdag_data.selected_parent != point.hash {
+        return Err(inconsistent("committed virtual state is not based on the imported pruning point"));
+    }
+    if committed_utxo_multiset(db, DatabaseStorePrefixes::VirtualUtxoset)?.finalize() != virtual_state.multiset.clone().finalize() {
+        return Err(inconsistent("committed virtual UTXO rows do not match the virtual multiset"));
+    }
+    Ok(())
+}
+
+fn committed_utxo_multiset(db: &Arc<DB>, prefix: DatabaseStorePrefixes) -> StoreResult<MuHash> {
+    let utxos = DbUtxoSetStore::new(db.clone(), CachePolicy::Empty, prefix.into());
     let mut multiset = MuHash::new();
     for row in utxos.iterator() {
         let (outpoint, entry) = row.map_err(|error| StoreError::DataInconsistency(error.to_string()))?;
         multiset.combine(&MuHash::from_utxo(&outpoint, &entry));
     }
-    if multiset.finalize() != header.utxo_commitment {
-        return Err(inconsistent("committed pruning UTXO rows do not match the header commitment"));
-    }
-    Ok(())
+    Ok(multiset)
 }
 
 fn inconsistent(reason: &str) -> StoreError {

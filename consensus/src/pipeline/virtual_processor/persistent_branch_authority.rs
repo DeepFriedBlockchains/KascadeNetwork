@@ -204,6 +204,7 @@ impl PersistentBranchAuthority {
         Ok(self.issue_lease(&state, point, revision))
     }
 
+    #[cfg(test)]
     pub(super) fn lease(&self, point: ReadinessPoint) -> StoreResult<PersistentBranchLease> {
         let mut state = self.inner.state.lock();
         let revision = self.check_ready(&mut state, point)?;
@@ -221,6 +222,7 @@ impl PersistentBranchAuthority {
     }
 
     /// Commit the authorized write and its new READY revision in one sync batch.
+    #[cfg(test)]
     pub(super) fn commit(&self, point: ReadinessPoint, lease: PersistentBranchLease, batch: DeferredDbBatch<'_>) -> StoreResult<()> {
         self.commit_rechecked(point, lease, batch, |_, _| Ok(()))
     }

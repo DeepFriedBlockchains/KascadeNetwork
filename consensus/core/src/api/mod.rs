@@ -241,6 +241,32 @@ impl ValidatedStagingPruningProof {
     }
 }
 
+/// An exclusive import reservation issued by a staging receiver.
+pub struct StagingImportSession(Box<dyn Any + Send + Sync>);
+
+impl StagingImportSession {
+    pub fn new<T: Any + Send + Sync>(session: T) -> Self {
+        Self(Box::new(session))
+    }
+
+    pub fn downcast_ref<T: Any + Send + Sync>(&self) -> Result<&T, StagingPromotionError> {
+        self.0.downcast_ref().ok_or(StagingPromotionError::InvalidReceipt)
+    }
+
+    pub fn downcast<T: Any + Send + Sync>(self) -> Result<T, StagingPromotionError> {
+        self.0.downcast::<T>().map(|session| *session).map_err(|_| StagingPromotionError::InvalidReceipt)
+    }
+}
+
+/// Ordered phases of a verified staging import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StagingImportComponent {
+    Proof,
+    Smt,
+    Shielded,
+    Utxo,
+}
+
 /// A single-use receipt carried from authenticated staging completion to its receiver.
 pub struct StagingPromotion(Box<dyn Any + Send>);
 
@@ -267,6 +293,57 @@ pub enum StagingPromotionError {
 /// Abstracts the consensus external API
 #[allow(unused_variables)]
 pub trait ConsensusApi: Send + Sync {
+    fn supports_verified_staging_import(&self) -> bool {
+        false
+    }
+
+    fn begin_verified_staging_import(&self, _proof: ValidatedStagingPruningProof) -> Result<StagingImportSession, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn apply_verified_staging_proof(
+        &self,
+        _session: &StagingImportSession,
+        _trusted: &[TrustedBlock],
+        _header_only_chain_segment: &[Arc<Header>],
+        _pruning_points: PruningPointsList,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn check_verified_staging_component(
+        &self,
+        _session: &StagingImportSession,
+        _component: StagingImportComponent,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn complete_verified_staging_component(
+        &self,
+        _session: &StagingImportSession,
+        _component: StagingImportComponent,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn append_verified_staging_utxos(
+        &self,
+        _session: &StagingImportSession,
+        _utxos: &[(TransactionOutpoint, UtxoEntry)],
+        _multiset: &mut MuHash,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn finish_verified_staging_import(
+        &self,
+        _session: StagingImportSession,
+        _child: &Block,
+    ) -> Result<StagingPromotion, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
     /// Consume the receiver's exact promotion lease before changing the active consensus.
     fn authorize_staging_promotion(&self, _promotion: StagingPromotion) -> Result<(), StagingPromotionError> {
         Err(StagingPromotionError::Unsupported)

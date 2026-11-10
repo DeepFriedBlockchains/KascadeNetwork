@@ -4,6 +4,8 @@ use kaspa_core::{core::Core, debug, service::Service};
 use parking_lot::RwLock;
 use std::{collections::VecDeque, ops::Deref, sync::Arc, thread::JoinHandle};
 
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, oneshot};
+
 mod batch;
 mod session;
 
@@ -114,6 +116,7 @@ impl ManagerInner {
 pub struct ConsensusManager {
     factory: Arc<dyn ConsensusFactory>,
     inner: RwLock<ManagerInner>,
+    staging_gate: Arc<AsyncMutex<()>>,
 }
 
 impl ConsensusManager {
@@ -121,7 +124,7 @@ impl ConsensusManager {
 
     pub fn new(factory: Arc<dyn ConsensusFactory>) -> Self {
         let (consensus, ctl) = factory.new_active_consensus();
-        Self { factory, inner: RwLock::new(ManagerInner::new(consensus, ctl)) }
+        Self { factory, inner: RwLock::new(ManagerInner::new(consensus, ctl)), staging_gate: Default::default() }
     }
 
     /// Creates a consensus manager with a fixed consensus. Will panic if staging API is used. To be
@@ -131,6 +134,7 @@ impl ConsensusManager {
         Self {
             factory: Arc::new(MockFactory),
             inner: RwLock::new(ManagerInner::new(ConsensusInstance::new(SessionLock::new(), consensus), ctl)),
+            staging_gate: Default::default(),
         }
     }
 
@@ -141,6 +145,16 @@ impl ConsensusManager {
     pub fn new_staging_consensus(self: &Arc<Self>) -> StagingConsensus {
         let (consensus, ctl) = self.factory.new_staging_consensus();
         StagingConsensus::new(self.clone(), ConsensusInner::new(consensus, ctl))
+    }
+
+    pub async fn new_managed_staging_consensus(self: &Arc<Self>) -> ManagedStagingConsensus {
+        let gate = self.staging_gate.clone().lock_owned().await;
+        let (done, cancelled) = oneshot::channel();
+        let stage = self.new_staging_consensus();
+        ManagedStagingConsensus {
+            owner: StagingOwner(Some(Arc::new(StagingLifetime { stage: Some(stage), gate: Some(gate), done: Some(done) }))),
+            cancelled,
+        }
     }
 
     pub fn register_consensus_reset_handler(&self, handler: Arc<dyn ConsensusResetHandler>) {
@@ -197,6 +211,107 @@ impl Service for ConsensusManager {
 
     fn stop(self: Arc<Self>) {
         self.inner.read().current.ctl.clone().stop();
+    }
+}
+
+/// The staging DB and its factory slot outlive every worker proxy.
+pub struct ManagedStagingConsensus {
+    owner: StagingOwner,
+    cancelled: oneshot::Receiver<()>,
+}
+
+struct StagingOwner(Option<Arc<StagingLifetime>>);
+
+impl Drop for StagingOwner {
+    fn drop(&mut self) {
+        if let Some(lifetime) = self.0.as_ref() {
+            lifetime.stop();
+        }
+    }
+}
+
+struct StagingLifetime {
+    stage: Option<StagingConsensus>,
+    gate: Option<OwnedMutexGuard<()>>,
+    done: Option<oneshot::Sender<()>>,
+}
+
+impl StagingLifetime {
+    fn stop(&self) {
+        if let Some(stage) = &self.stage {
+            stage.staging.ctl.stop();
+        }
+    }
+}
+
+impl Drop for StagingLifetime {
+    fn drop(&mut self) {
+        if let Some(stage) = self.stage.take() {
+            let gate = self.gate.take();
+            let done = self.done.take();
+            std::thread::spawn(move || {
+                stage.cancel();
+                drop(gate);
+                if let Some(done) = done {
+                    let _ = done.send(());
+                }
+            });
+        }
+    }
+}
+
+impl ManagedStagingConsensus {
+    fn lifetime(&self) -> &Arc<StagingLifetime> {
+        self.owner.0.as_ref().expect("managed staging receiver is available")
+    }
+
+    fn stage(&self) -> &StagingConsensus {
+        self.lifetime().stage.as_ref().expect("managed staging receiver is available")
+    }
+
+    pub async fn session(&self) -> ConsensusProxy {
+        self.stage().session().await.with_staging_lifetime(self.lifetime().clone())
+    }
+
+    pub fn unguarded_session(&self) -> ConsensusProxy {
+        self.stage().unguarded_session().with_staging_lifetime(self.lifetime().clone())
+    }
+
+    pub async fn cancel(self) {
+        let Self { owner, cancelled } = self;
+        drop(owner);
+        let _ = cancelled.await;
+    }
+
+    pub async fn commit(mut self, promotion: Option<StagingPromotion>) -> Result<(), StagingPromotionError> {
+        let lifetime = self.owner.0.take().expect("managed staging receiver is available");
+        let mut lifetime = match Arc::try_unwrap(lifetime) {
+            Ok(lifetime) => lifetime,
+            Err(lifetime) => {
+                lifetime.stop();
+                drop(lifetime);
+                let _ = self.cancelled.await;
+                return Err(StagingPromotionError::Rejected("a staging worker still holds the receiver".into()));
+            }
+        };
+        spawn_blocking(move || {
+            let stage = lifetime.stage.take().expect("managed staging receiver is available");
+            if let Some(promotion) = promotion {
+                if let Err((stage, error)) = stage.commit_verified(promotion) {
+                    stage.cancel();
+                    return Err(error);
+                }
+            } else if stage.unguarded_session_blocking().supports_verified_staging_import() {
+                stage.cancel();
+                return Err(StagingPromotionError::InvalidReceipt);
+            } else {
+                stage.commit();
+            }
+            drop(lifetime);
+            Ok(())
+        })
+        .await
+        .map_err(|error| StagingPromotionError::Rejected(error.to_string()))?
     }
 }
 
@@ -276,6 +391,56 @@ mod tests {
         fn make_active(&self) {
             panic!("an unauthorized staging receiver became active");
         }
+    }
+
+    struct StagingTestFactory {
+        deleted: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl StagingTestFactory {
+        fn receiver() -> (ConsensusInstance, DynConsensusCtl) {
+            let receiver = Arc::new(StubConsensus);
+            (ConsensusInstance::new(SessionLock::new(), receiver.clone()), receiver)
+        }
+    }
+
+    impl ConsensusFactory for StagingTestFactory {
+        fn new_active_consensus(&self) -> (ConsensusInstance, DynConsensusCtl) {
+            Self::receiver()
+        }
+
+        fn new_staging_consensus(&self) -> (ConsensusInstance, DynConsensusCtl) {
+            Self::receiver()
+        }
+
+        fn close(&self) {}
+
+        fn delete_inactive_consensus_entries(&self) {}
+
+        fn delete_staging_entry(&self) {
+            self.deleted.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn authority_integration_managed_staging_waits_for_detached_receiver() {
+        use std::sync::atomic::Ordering;
+
+        let deleted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let manager = Arc::new(ConsensusManager::new(Arc::new(StagingTestFactory { deleted: deleted.clone() })));
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        runtime.block_on(async {
+            let stage = manager.new_managed_staging_consensus().await;
+            let session = stage.session().await;
+            let mut cancel = Box::pin(stage.cancel());
+            assert!(futures_util::poll!(cancel.as_mut()).is_pending());
+            assert!(!deleted.load(Ordering::SeqCst));
+            assert!(manager.staging_gate.try_lock().is_err());
+            drop(session);
+            cancel.await;
+            assert!(deleted.load(Ordering::SeqCst));
+            assert!(manager.staging_gate.try_lock().is_ok());
+        });
     }
 
     #[test]

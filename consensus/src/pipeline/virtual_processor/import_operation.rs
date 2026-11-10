@@ -7,7 +7,9 @@
 use super::persistent_branch_authority::{PersistentBranchAuthority, PersistentImportToken};
 use kaspa_database::prelude::{DeferredDbBatch, StoreResult};
 use std::sync::Arc;
-use tokio::{sync::Notify, task::JoinHandle};
+use tokio::sync::Notify;
+#[cfg(test)]
+use tokio::task::JoinHandle;
 
 /// The single coordinator that can issue operations and recover the token.
 pub(super) struct ImportWorkerSession {
@@ -44,6 +46,7 @@ impl ImportWorkerSession {
 
     /// Own the permit for the full blocking call, including closure capture
     /// destruction. The work can use database handles but cannot return one.
+    #[cfg(test)]
     pub(super) fn spawn_blocking(
         &mut self,
         work: impl FnOnce(&mut ImportOperation) -> StoreResult<()> + Send + 'static,
@@ -54,6 +57,7 @@ impl ImportWorkerSession {
 
     /// Cancel without publishing readiness. Staging cleanup can drop its
     /// database owner after this returns and then delete the database.
+    #[cfg(test)]
     pub(super) async fn cancel_and_wait(self) {
         while Arc::strong_count(&self.token) > 1 {
             self.released.notified().await;

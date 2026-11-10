@@ -134,7 +134,7 @@ pub struct VirtualStateProcessor {
 
     // DB
     db: Arc<DB>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     branch_authority: super::persistent_branch_authority::PersistentBranchAuthority,
 
     // Config
@@ -291,7 +291,7 @@ impl VirtualStateProcessor {
             mempool_mass_cofactors: params.mempool_block_mass_cofactors(),
             block_version: params.block_version(),
 
-            #[cfg(test)]
+            #[cfg(any(test, feature = "phase6-staging-preview"))]
             branch_authority: super::persistent_branch_authority::PersistentBranchAuthority::new(db.clone()),
             db,
             statuses_store: storage.statuses_store.clone(),
@@ -2389,7 +2389,7 @@ enum MergesetIncreaseResult {
     Rejected { new_candidate: Hash },
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "phase6-staging-preview"))]
 impl VirtualStateProcessor {
     /// Enter from a caller without an existing pruning session guard.
     fn with_authority_point<T>(
@@ -2412,12 +2412,14 @@ impl VirtualStateProcessor {
         self.branch_authority.begin_import()
     }
 
+    #[cfg(test)]
     pub(super) fn authority_lease(
         &self,
     ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
         self.with_authority_point(|point| self.branch_authority.lease(point))
     }
 
+    #[cfg(test)]
     pub(super) fn authority_commit(
         &self,
         lease: super::persistent_branch_authority::PersistentBranchLease,
@@ -2426,6 +2428,7 @@ impl VirtualStateProcessor {
         self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
     }
 
+    #[cfg(test)]
     pub(super) fn apply_authorized_staging_batch(
         &self,
         operation: &mut super::import_operation::ImportOperation,
@@ -2443,6 +2446,7 @@ impl VirtualStateProcessor {
     /// Legacy proof stores take their own point and virtual locks. Keep the
     /// worker and pruning guard pinned, and never hold the authority mutex
     /// across the legacy writer.
+    #[cfg(test)]
     pub(super) fn apply_authorized_pruning_proof(
         &self,
         operation: &mut super::import_operation::ImportOperation,
@@ -2450,6 +2454,16 @@ impl VirtualStateProcessor {
         apply: impl FnOnce() -> kaspa_database::prelude::StoreResult<()>,
     ) -> kaspa_database::prelude::StoreResult<()> {
         let _session = self.pruning_lock.blocking_read();
+        self.apply_guarded_staging_proof(operation, proof, apply)
+    }
+
+    /// The production IBD proxy holds the receiver's pruning read guard.
+    pub(super) fn apply_guarded_staging_proof(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        apply: impl FnOnce() -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
         operation.verify(&self.branch_authority)?;
         apply()?;
         let _pruning = self.pruning_point_store.read();
@@ -2458,11 +2472,35 @@ impl VirtualStateProcessor {
         operation.verify(&self.branch_authority)
     }
 
+    pub(super) fn check_staging_operation(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        operation.verify(&self.branch_authority)
+    }
+
+    pub(super) fn staging_import_point(&self) -> kaspa_database::prelude::StoreResult<super::branch_readiness::ReadinessPoint> {
+        let _pruning = self.pruning_point_store.read();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        Ok(super::branch_readiness::ReadinessPoint { hash, index })
+    }
+
+    #[cfg(test)]
     pub(super) fn commit_staging_promotion(
         &self,
         lease: super::persistent_branch_authority::PersistentBranchLease,
         proof: &super::import_proof_readiness::ValidatedImportProof,
         child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.commit_staging_promotion_checked(lease, proof, child, false)
+    }
+
+    pub(super) fn commit_staging_promotion_checked(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        verify_virtual: bool,
     ) -> kaspa_database::prelude::StoreResult<()> {
         let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
         batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
@@ -2470,13 +2508,28 @@ impl VirtualStateProcessor {
             self.branch_authority.commit_rechecked(point, lease, batch, |db, point| {
                 super::import_readiness::verify_pruning_utxos(db, point)?;
                 self.verify_authority_smt(db, point)?;
-                self.verify_authenticated_staging(db, point, proof, child, None)
+                self.verify_authenticated_staging(db, point, proof, child, None)?;
+                if verify_virtual {
+                    self.verify_staging_virtual_utxos(db, point)?;
+                }
+                Ok(())
             })
         })
     }
 
     /// Apply a pruning UTXO import chunk through the session's worker permit.
+    #[cfg(test)]
     pub(super) fn append_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        self.append_guarded_staging_utxos(operation, utxos, multiset)
+    }
+
+    pub(super) fn append_guarded_staging_utxos(
         &self,
         operation: &mut super::import_operation::ImportOperation,
         utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
@@ -2484,7 +2537,6 @@ impl VirtualStateProcessor {
     ) -> kaspa_database::prelude::StoreResult<()> {
         use kaspa_consensus_core::muhash::MuHashExtensions;
 
-        let _session = self.pruning_lock.blocking_read();
         let _pruning = self.pruning_point_store.read();
         let metadata = self.pruning_meta_stores.write();
         let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
@@ -2497,6 +2549,7 @@ impl VirtualStateProcessor {
     }
 
     /// Write the completion rows only after hashing the committed UTXO set.
+    #[cfg(test)]
     pub(super) fn complete_authorized_pruning_utxos(
         &self,
         operation: &mut super::import_operation::ImportOperation,
@@ -2515,8 +2568,35 @@ impl VirtualStateProcessor {
         operation.apply(&self.branch_authority, batch)
     }
 
+    pub(super) fn finish_verified_ibd_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| {
+            self.finish_authority_import_at(token, point, point, |db, point| {
+                self.verify_authenticated_staging(db, point, proof, child, None)?;
+                self.verify_staging_virtual_utxos(db, point)
+            })
+        })
+    }
+
+    fn verify_staging_virtual_utxos(
+        &self,
+        db: &Arc<DB>,
+        point: super::branch_readiness::ReadinessPoint,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _virtual = self
+            .virtual_stores
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during staging verification".into()))?;
+        super::import_readiness::verify_virtual_utxos(db, point)
+    }
+
     /// Complete an isolated receiver only after proof and shielded corroboration.
     /// The caller must quiesce header and virtual processing on this receiver.
+    #[cfg(test)]
     pub(super) fn finish_authenticated_authority_import(
         &self,
         token: super::persistent_branch_authority::PersistentImportToken,
@@ -2529,6 +2609,7 @@ impl VirtualStateProcessor {
 
     /// Recover an opened database against its committed selected chain. Busy
     /// virtual or chain locks fail closed to avoid reversing the live order.
+    #[cfg(test)]
     pub(super) fn recover_authenticated_staging(
         &self,
         retention: super::branch_readiness::ReadinessPoint,
@@ -2582,6 +2663,7 @@ impl VirtualStateProcessor {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn finish_authority_import(
         &self,
         token: super::persistent_branch_authority::PersistentImportToken,

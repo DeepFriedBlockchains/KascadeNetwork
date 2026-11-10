@@ -73,6 +73,7 @@ name = "check_scripts"
 harness = false
 
 [features]
+phase6-staging-preview = []
 default = ["shielded-circuit"]
 html_reports = []
 devnet-prealloc = ["kaspa-consensus-core/devnet-prealloc"]

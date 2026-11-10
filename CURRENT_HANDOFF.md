@@ -143,17 +143,32 @@ The coordinator-specific entry point remains inactive. The initial proof candida
 [run 42897872282](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42897872282)
 before the streaming follow-up.
 
-## Next executable task
-
-Validate the new proof worker against the real pruning proof validator
-and receiver. Then pass the owned coordinator through
-`sync_and_validate_pruning_proof` and into the SMT and shielded streaming
-workers. Keep the detached-worker permit and pruning guard alive until
-the worker exits. Complete UTXO finalization and route the completed
-receipt through `StagingConsensus::commit_verified` before replacing
-legacy IBD promotion.
-
 The streaming follow-up also drains the SMT and shielded writer on a
 stream error before returning to the staging caller. A focused test
-covers error propagation only after worker release. Combined CI is
-pending.
+covers error propagation only after worker release. Combined CI is in progress.
+
+The combined source is `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` on
+`feature/phase6-owned-proof-import-20261110`. Its exact validation is
+[run 42898217206](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42898217206).
+The unchanged PR #6 baseline
+[run 42896198192](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42896198192)
+passed all eight jobs at `42476e2661b5e579f665407d18352a36af09c301`.
+It passed six focused regressions, 1,563 native workspace tests
+(25 skipped), and 32 no-asm tests. Combined run 42898217206 passed all eight jobs.
+
+## Production IBD preview
+
+See [the dated development report](docs/development/PHASE6_PRODUCTION_IMPORT_PREVIEW_2026-11-10.md). The continuation adds a
+default-off `kaspa-consensus/phase6-staging-preview` feature for an
+isolated staging receiver. It admits the exact defender-accepted proof
+before writes, carries the same reservation through production IBD
+workers, and verifies durable virtual UTXOs before verified promotion.
+Candidate Actions validation is pending.
+
+## Next executable task
+
+Run the complete preview regression matrix. Exercise a full peer-driven
+preview with a real staging manager and verify successful promotion,
+cancellation during each stream, and reopen after interruption.
+Review the supported preview builds before making any decision about
+replacing the default promotion path.
