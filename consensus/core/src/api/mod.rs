@@ -858,6 +858,11 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// Use only while the receiver's pruning read guard is held.
+    fn is_chain_ancestor_of_guarded(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
+        self.is_chain_ancestor_of(low, high)
+    }
+
     fn get_hashes_between(&self, low: Hash, high: Hash, max_blocks: usize) -> ConsensusResult<(Vec<Hash>, Hash)> {
         unimplemented!()
     }

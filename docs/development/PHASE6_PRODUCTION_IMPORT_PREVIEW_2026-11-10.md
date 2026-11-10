@@ -39,3 +39,7 @@ staging lifecycle before joining workers and removing the staging DB.
 passed Check and reported a formatting difference in managed staging.
 The next source also pins the virtual read guard through the durable
 write and requires committed UTXO-valid status at the pruning point.
+
+The shielded commitment child lookup now reuses the proxy's existing
+pruning read guard. The unguarded receiver path still acquires its own
+guard. A focused regression checks both proxy paths.

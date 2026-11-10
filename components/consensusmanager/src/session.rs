@@ -147,7 +147,7 @@ impl Deref for ConsensusSessionBlocking<'_> {
 /// Please note - you must use [`ConsensusProxy`] type alias instead of this struct.
 #[derive(Clone)]
 pub struct ConsensusSessionOwned {
-    _session_guard: Option<SessionOwnedReadGuard>,
+    session_guard: Option<SessionOwnedReadGuard>,
     consensus: DynConsensus,
     staging_import: Option<Arc<StagingImportSession>>,
     staging_lifetime: Option<Arc<dyn Send + Sync>>,
@@ -155,11 +155,11 @@ pub struct ConsensusSessionOwned {
 
 impl ConsensusSessionOwned {
     pub fn new(session_guard: SessionOwnedReadGuard, consensus: DynConsensus) -> Self {
-        Self { _session_guard: Some(session_guard), consensus, staging_import: None, staging_lifetime: None }
+        Self { session_guard: Some(session_guard), consensus, staging_import: None, staging_lifetime: None }
     }
 
-    pub fn new_without_session_guard(consensus: DynConsensus) -> Self {
-        Self { _session_guard: None, consensus, staging_import: None, staging_lifetime: None }
+    pub fn new_withoutsession_guard(consensus: DynConsensus) -> Self {
+        Self { session_guard: None, consensus, staging_import: None, staging_lifetime: None }
     }
 
     pub(crate) fn with_staging_lifetime(mut self, lifetime: Arc<dyn Send + Sync>) -> Self {
@@ -434,7 +434,12 @@ impl ConsensusSessionOwned {
     }
 
     pub async fn async_is_chain_ancestor_of(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
-        self.clone().spawn_blocking(move |c| c.is_chain_ancestor_of(low, high)).await
+        let guarded = self.session_guard.is_some();
+        self.clone()
+            .spawn_blocking(move |c| {
+                if guarded { c.is_chain_ancestor_of_guarded(low, high) } else { c.is_chain_ancestor_of(low, high) }
+            })
+            .await
     }
 
     pub async fn async_get_hashes_between(&self, low: Hash, high: Hash, max_blocks: usize) -> ConsensusResult<(Vec<Hash>, Hash)> {
@@ -762,7 +767,22 @@ mod tests {
 
     struct StubConsensus;
 
-    impl ConsensusApi for StubConsensus {}
+    impl ConsensusApi for StubConsensus {
+        fn is_chain_ancestor_of(&self, _low: Hash, _high: Hash) -> ConsensusResult<bool> {
+            Ok(false)
+        }
+
+        fn is_chain_ancestor_of_guarded(&self, _low: Hash, _high: Hash) -> ConsensusResult<bool> {
+            Ok(true)
+        }
+    }
+
+    #[tokio::test]
+    async fn authority_integration_staging_ancestry_reuses_existing_pruning_guard() {
+        let receiver = ConsensusInstance::new(SessionLock::new(), Arc::new(StubConsensus));
+        assert!(receiver.session().await.async_is_chain_ancestor_of(1.into(), 2.into()).await.unwrap());
+        assert!(!receiver.unguarded_session().async_is_chain_ancestor_of(1.into(), 2.into()).await.unwrap());
+    }
 
     #[tokio::test]
     async fn cancelled_wait_keeps_pruning_guard_until_blocking_callback_returns() {

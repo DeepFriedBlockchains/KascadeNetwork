@@ -1988,6 +1988,10 @@ impl ConsensusApi for Consensus {
 
     fn is_chain_ancestor_of(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
         let _guard = self.pruning_lock.blocking_read();
+        self.is_chain_ancestor_of_guarded(low, high)
+    }
+
+    fn is_chain_ancestor_of_guarded(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
         self.validate_block_exists(low)?;
         self.validate_block_exists(high)?;
         Ok(self.services.reachability_service.is_chain_ancestor_of(low, high))
