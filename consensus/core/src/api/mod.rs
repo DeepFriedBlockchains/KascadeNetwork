@@ -232,6 +232,15 @@ pub struct SeqCommitLaneProof {
     pub miner_payload_leaves: Vec<Hash>,
 }
 
+/// The exact pruning proof accepted by the defending consensus.
+pub struct ValidatedStagingPruningProof(PruningPointProof);
+
+impl ValidatedStagingPruningProof {
+    pub fn proof(&self) -> &PruningPointProof {
+        &self.0
+    }
+}
+
 /// A single-use receipt carried from authenticated staging completion to its receiver.
 pub struct StagingPromotion(Box<dyn Any + Send>);
 
@@ -464,6 +473,24 @@ pub trait ConsensusApi: Send + Sync {
 
     fn validate_pruning_proof(&self, proof: &PruningPointProof, proof_metadata: &PruningProofMetadata) -> PruningImportResult<()> {
         unimplemented!()
+    }
+
+    fn validate_staging_pruning_proof(
+        &self,
+        proof: PruningPointProof,
+        metadata: &PruningProofMetadata,
+    ) -> PruningImportResult<ValidatedStagingPruningProof> {
+        self.validate_pruning_proof(&proof, metadata)?;
+        Ok(ValidatedStagingPruningProof(proof))
+    }
+
+    fn apply_staging_pruning_proof(
+        &self,
+        proof: ValidatedStagingPruningProof,
+        trusted_set: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+    ) -> PruningImportResult<()> {
+        self.apply_pruning_proof(proof.0, trusted_set, header_only_chain_segment)
     }
 
     fn apply_pruning_proof(
@@ -949,3 +976,37 @@ pub trait ConsensusApi: Send + Sync {
 }
 
 pub type DynConsensus = Arc<dyn ConsensusApi>;
+
+#[cfg(test)]
+mod staging_proof_tests {
+    use super::*;
+    use crate::{config::genesis::DEVNET_GENESIS, errors::pruning::PruningImportError};
+
+    struct ProofEndpoint(Arc<Header>);
+
+    impl ConsensusApi for ProofEndpoint {
+        fn validate_pruning_proof(&self, proof: &PruningPointProof, _: &PruningProofMetadata) -> PruningImportResult<()> {
+            if proof.first().and_then(|level| level.last()).is_some_and(|header| Arc::ptr_eq(header, &self.0)) {
+                Ok(())
+            } else {
+                Err(PruningImportError::PruningProofNotEnoughHeaders)
+            }
+        }
+
+        fn apply_pruning_proof(&self, proof: PruningPointProof, _: &[TrustedBlock], _: &[Arc<Header>]) -> PruningImportResult<()> {
+            assert!(Arc::ptr_eq(&proof[0][0], &self.0));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn authority_integration_ibd_carries_defender_accepted_proof() {
+        let header = Arc::new(Header::from(&DEVNET_GENESIS));
+        let metadata = PruningProofMetadata::new(header.blue_work);
+        let defender = ProofEndpoint(header.clone());
+        let receiver = ProofEndpoint(header.clone());
+        assert!(defender.validate_staging_pruning_proof(vec![], &metadata).is_err());
+        let validated = defender.validate_staging_pruning_proof(vec![vec![header]], &metadata).unwrap();
+        receiver.apply_staging_pruning_proof(validated, &[], &[]).unwrap();
+    }
+}

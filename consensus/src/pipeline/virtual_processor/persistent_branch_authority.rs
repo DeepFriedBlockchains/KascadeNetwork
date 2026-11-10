@@ -221,7 +221,19 @@ impl PersistentBranchAuthority {
         &self,
         point: ReadinessPoint,
         lease: PersistentBranchLease,
+        batch: DeferredDbBatch<'_>,
+    ) -> StoreResult<()> {
+        self.commit_rechecked(point, lease, batch, |_, _| Ok(()))
+    }
+
+    /// Corroborate promotion-specific evidence before writing under the same
+    /// authority and pruning guards. An evidence failure revokes readiness.
+    pub(super) fn commit_rechecked(
+        &self,
+        point: ReadinessPoint,
+        lease: PersistentBranchLease,
         mut batch: DeferredDbBatch<'_>,
+        verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
     ) -> StoreResult<()> {
         let mut state = self.inner.state.lock();
         if !Arc::ptr_eq(&self.inner, &lease.inner)
@@ -235,9 +247,11 @@ impl PersistentBranchAuthority {
         if self.check_ready(&mut state, point)? != lease.revision || lease.point != point {
             return Err(rejected());
         }
+        let verification = verify(&self.db, point);
         let mut verified = state.verified.take().ok_or_else(rejected)?;
         state.generation = Arc::new(());
         self.readiness.close_revision_sync()?;
+        verification?;
         verified.revision = self.readiness.stage_ready(&mut batch, point)?;
         batch.commit()?;
         state.verified = Some(verified);

@@ -615,10 +615,9 @@ impl IbdFlow {
         let consensus = self.ctx.consensus().session().await;
 
         // The proof is validated in the context of current consensus
-        let proof =
-            consensus.clone().spawn_blocking(move |c| c.validate_pruning_proof(&proof, &proof_metadata).map(|()| proof)).await?;
+        let proof = consensus.clone().spawn_blocking(move |c| c.validate_staging_pruning_proof(proof, &proof_metadata)).await?;
 
-        let proof_pruning_point_header = proof[0].last().expect("was just ensured by validation");
+        let proof_pruning_point_header = proof.proof()[0].last().expect("was just ensured by validation");
         let proof_pruning_point = proof_pruning_point_header.hash;
 
         if proof_pruning_point == self.ctx.config.genesis.hash {
@@ -663,7 +662,7 @@ impl IbdFlow {
         {
             // Sanity check for consistency between past pruning points and the headers proof
             let pruning_points_set: BlockHashSet = pruning_points.iter().map(|h| h.hash).collect();
-            for level in proof.iter() {
+            for level in proof.proof() {
                 if let Some(root) = level.first()
                     && root.hash != self.ctx.config.genesis.hash
                     && !pruning_points_set.contains(&root.pruning_point)
@@ -754,8 +753,8 @@ impl IbdFlow {
             trusted_set = staging
                 .clone()
                 .spawn_blocking(move |c| {
-                    let ref_proof = proof.clone();
-                    c.apply_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
+                    let ref_proof = proof.proof().clone();
+                    c.apply_staging_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
                     c.import_pruning_points(pruning_points)?;
 
                     info!("Building the proof which was just applied (sanity test)");
@@ -786,7 +785,7 @@ impl IbdFlow {
             trusted_set = staging
                 .clone()
                 .spawn_blocking(move |c| {
-                    c.apply_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
+                    c.apply_staging_pruning_proof(proof, &trusted_set, &header_only_chain_segment)?;
                     c.import_pruning_points(pruning_points)?;
                     Result::<_, ProtocolError>::Ok(trusted_set)
                 })

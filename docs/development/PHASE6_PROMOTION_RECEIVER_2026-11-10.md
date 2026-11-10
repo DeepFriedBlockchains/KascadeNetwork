@@ -31,7 +31,28 @@ The existing IBD path still uses the legacy ordering. Production proof,
 SMT, shielded and UTXO adapter wiring and end-to-end promotion remain
 open. This branch does not activate Phase 6 or alter consensus rules.
 
-New candidate CI is pending. Continue at the proof receipt handoff from
+Candidate `bc393eae2d9bd03df2f684d06e53ec78e865da60` triggered
+[run 42894808941](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42894808941),
+which reported two formatting differences. Formatting passed on
+`72af6c818be80c8a0365036e23c4744da8b4bf94` in
+[run 42895086028](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895086028).
+Check and strict Clippy also passed. The full workspace result was
+pending when the follow-up source was prepared. Continue at the proof receipt handoff from
 the IBD defender to the staging receiver, then carry the same permit
 through the component workers before routing IBD through the verified
 commit entry point.
+
+## Follow-up
+
+The IBD proof path now receives an opaque proof receipt from the defending
+consensus and hands that exact proof to the staging receiver in both
+normal and sanity-check mode. The underlying validation and application
+methods use the existing rules. The focused test verifies that a rejected
+proof produces no receipt and the receiver receives the accepted header.
+
+The inactive promotion receipt retains the authenticated proof and
+shielded child. Under the authority and pruning guards, promotion rechecks
+the committed proof, SMT, shielded, and UTXO data. The descendant fixture
+removes a committed UTXO after lease issuance, verifies that promotion
+fails closed, and verifies that restoring the row alone cannot revive
+authority. Follow-up Actions results are pending.

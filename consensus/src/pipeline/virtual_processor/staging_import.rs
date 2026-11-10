@@ -105,6 +105,8 @@ pub(super) struct StagingImport {
 pub(super) struct VerifiedStaging {
     processor: Arc<VirtualStateProcessor>,
     lease: PersistentBranchLease,
+    proof: ValidatedImportProof,
+    child: Block,
 }
 
 impl StagingImport {
@@ -180,7 +182,7 @@ impl StagingImport {
             }
         };
         let lease = self.processor.finish_authenticated_authority_import(token, retention, proof, child)?;
-        Ok(VerifiedStaging { processor: self.processor.clone(), lease })
+        Ok(VerifiedStaging { processor: self.processor.clone(), lease, proof: proof.clone(), child: child.clone() })
     }
 }
 
@@ -191,7 +193,7 @@ impl Consensus {
             return Err(StagingPromotionError::InvalidReceipt);
         }
         self.virtual_processor
-            .commit_staging_promotion(verified.lease)
+            .commit_staging_promotion(verified.lease, &verified.proof, &verified.child)
             .map_err(|error| StagingPromotionError::Rejected(error.to_string()))
     }
 

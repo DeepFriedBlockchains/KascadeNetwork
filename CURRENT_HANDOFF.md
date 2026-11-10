@@ -107,13 +107,29 @@ stable flag in the same authority-checked batch. The consensus manager has
 a separate verified commit entry point. It asks the exact staging receiver
 to consume the completion receipt before swapping consensus. The real
 receipt issuer and receiver remain inactive test code pending production
-wiring. The new candidate's Actions run is pending.
+wiring. The initial source `bc393eae2d9bd03df2f684d06e53ec78e865da60` reached
+[run 42894808941](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42894808941).
+Formatting reported two line wraps in the regression test. The correction
+`72af6c818be80c8a0365036e23c4744da8b4bf94` passed formatting in
+[run 42895086028](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42895086028).
+Check and strict Clippy also passed. The full workspace result was
+pending when the follow-up source was prepared.
+
+## IBD proof receipt and promotion recheck
+
+IBD now passes the exact proof accepted by the defender to the staging
+receiver in a typed receipt. This uses the existing validation and
+application logic. The inactive promotion commit now independently
+rechecks the committed UTXO, SMT, proof, and shielded evidence before
+spending the lease. A regression removes committed UTXOs after receipt
+issuance and requires the write to fail with readiness closed. The
+follow-up Actions run is pending.
 
 ## Next executable task
 
 Start in `protocol/flows/src/ibd/flow.rs` at
-`sync_and_validate_pruning_proof`. Carry the defender's validated proof
-receipt into the staging receiver. Pin one processor-owned permit across
+`sync_and_validate_pruning_proof`. Bind the typed defender proof receipt
+to the processor-owned session before applying it. Pin that permit across
 the proof, SMT, shielded, and UTXO workers and drain it before deleting
 a cancelled database. Build the staging state before calling
 `StagingConsensus::commit_verified`. The UTXO import/reset split is
