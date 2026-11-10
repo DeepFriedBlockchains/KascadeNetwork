@@ -160,23 +160,25 @@ It passed six focused regressions, 1,563 native workspace tests
 
 See [the dated development report](docs/development/PHASE6_PRODUCTION_IMPORT_PREVIEW_2026-11-10.md). The continuation adds a
 default-off `kaspa-consensus/phase6-staging-preview` feature for an
-isolated staging receiver. It admits the exact defender-accepted proof
+isolated Simnet staging receiver. It admits the exact defender-accepted proof
 before writes, carries the same reservation through production IBD
 workers, and verifies durable virtual UTXOs before verified promotion.
 [Draft PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
-is stacked on `feature/phase6-owned-proof-import-20261110`.
-The exact source is `20db28f7dbd8e228d695202f6129fbbc2fd0586a` on
-`feature/phase6-production-import-preview-20261110`. Authoritative
-[PR run 42908550005](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42908550005)
-is pending. Its same-SHA push run 42908537162 was superseded.
-The green parent passed eight focused tests, 1,565 workspace tests
-(25 skipped), and 32 no-asm tests.
+is stacked on the green `feature/phase6-owned-proof-import-20261110`
+branch at `ecf0aacafa9cfc3028eb363021c5aebf733c62e1`. The PR head is
+`ebcb3ce00043b0d3f73a2ee7508f0cc68a363a69` on `feature/phase6-production-import-preview-20261110`.
+The authoritative [run 42909699012](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42909699012)
+is pending. The same-SHA push run 42909689791 was superseded. The green
+parent passed eight focused regressions, 1,565 workspace tests (25
+skipped), and 32 no-asm tests in run 42898217206.
 
 ## Next executable task
 
-Check the two-daemon shielded preview test in run 42908550005 first.
-If green, extend it to cancel during each stream and reopen after
-interruption. The same focused job also covers the managed staging
-drain and missing or drifted virtual UTXO evidence.
+Check the focused two-daemon Simnet preview test
+`authority_integration_production_preview_promotes_shielded_ibd` in
+run 42909699012. If it passes, extend the peer harness with interruption
+during each state stream and restart before promotion. The focused suite
+also covers manager drain, receipt rejection, stale durable authority,
+and incomplete virtual UTXOs.
 Review the supported preview builds before making any decision about
 replacing the default promotion path.
