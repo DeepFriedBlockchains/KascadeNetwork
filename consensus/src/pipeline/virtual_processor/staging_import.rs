@@ -26,6 +26,7 @@ use kaspa_database::{
     prelude::{StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
 };
+#[cfg(test)]
 use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
 use parking_lot::Mutex;

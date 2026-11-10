@@ -436,9 +436,11 @@ impl ConsensusSessionOwned {
     pub async fn async_is_chain_ancestor_of(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
         let guarded = self.session_guard.is_some();
         self.clone()
-            .spawn_blocking(move |c| {
-                if guarded { c.is_chain_ancestor_of_guarded(low, high) } else { c.is_chain_ancestor_of(low, high) }
-            })
+            .spawn_blocking(
+                move |c| {
+                    if guarded { c.is_chain_ancestor_of_guarded(low, high) } else { c.is_chain_ancestor_of(low, high) }
+                },
+            )
             .await
     }
 

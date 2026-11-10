@@ -160,7 +160,7 @@ It passed six focused regressions, 1,563 native workspace tests
 
 See [the dated development report](docs/development/PHASE6_PRODUCTION_IMPORT_PREVIEW_2026-11-10.md). The continuation adds a
 default-off `kaspa-consensus/phase6-staging-preview` feature for an
-isolated staging receiver. It admits the exact defender-accepted proof
+isolated Simnet staging receiver. It admits the exact defender-accepted proof
 before writes, carries the same reservation through production IBD
 workers, and verifies durable virtual UTXOs before verified promotion.
 Candidate Actions validation is pending.

@@ -6,7 +6,7 @@ The starting branch `feature/phase6-owned-proof-import-20261110` at
 `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` passed all eight jobs in
 [run 42898217206](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42898217206).
 
-The default-off `kaspa-consensus/phase6-staging-preview` feature connects
+The default-off `kaspa-consensus/phase6-staging-preview` feature limits the preview to Simnet staging receivers and connects
 receiver admission before the production proof writer. Trusted bodies,
 headers, SMT, shielded and UTXO work retain that import reservation
 through their receiver proxy. The managed staging lifecycle retains the
@@ -43,3 +43,7 @@ write and requires committed UTXO-valid status at the pruning point.
 The shielded commitment child lookup now reuses the proxy's existing
 pruning read guard. The unguarded receiver path still acquires its own
 guard. A focused regression checks both proxy paths.
+
+Run 42909011971 reported a test-only Hash import in the feature build.
+Run 42909275640 reported a line wrap in the guarded ancestry call.
+This revision fixes both and restricts preview selection to Simnet.

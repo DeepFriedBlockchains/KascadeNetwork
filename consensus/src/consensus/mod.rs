@@ -726,9 +726,9 @@ impl Consensus {
 }
 
 impl ConsensusApi for Consensus {
-    #[cfg(feature = "phase6-staging-preview")]
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     fn supports_verified_staging_import(&self) -> bool {
-        !self.config.process_genesis
+        !self.config.process_genesis && self.config.params.net.network_type == kaspa_consensus_core::network::NetworkType::Simnet
     }
 
     #[cfg(any(test, feature = "phase6-staging-preview"))]
@@ -736,7 +736,7 @@ impl ConsensusApi for Consensus {
         &self,
         proof: kaspa_consensus_core::api::ValidatedStagingPruningProof,
     ) -> Result<kaspa_consensus_core::api::StagingImportSession, kaspa_consensus_core::api::StagingPromotionError> {
-        if self.config.process_genesis {
+        if !self.supports_verified_staging_import() {
             return Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported);
         }
         self.start_owned_staging_import(proof)
