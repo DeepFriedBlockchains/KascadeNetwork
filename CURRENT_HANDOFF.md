@@ -168,7 +168,9 @@ is stacked on the green `feature/phase6-owned-proof-import-20261110`
 branch at `ecf0aacafa9cfc3028eb363021c5aebf733c62e1`. The PR head is
 `ebcb3ce00043b0d3f73a2ee7508f0cc68a363a69` on `feature/phase6-production-import-preview-20261110`.
 The authoritative [run 42909699012](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42909699012)
-is pending. The same-SHA push run 42909689791 was superseded. The green
+has passed Check, formatting and strict Clippy, Check WASM32, and
+Check no_std. Test Suite, Test WASM32, Linux release and the WASM SDK
+build are still running. The same-SHA push run 42909689791 was superseded. The green
 parent passed eight focused regressions, 1,565 workspace tests (25
 skipped), and 32 no-asm tests in run 42898217206.
 
