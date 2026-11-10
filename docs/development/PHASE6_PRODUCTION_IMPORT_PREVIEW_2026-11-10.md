@@ -45,5 +45,6 @@ pruning read guard. The unguarded receiver path still acquires its own
 guard. A focused regression checks both proxy paths.
 
 Run 42909011971 reported a test-only Hash import in the feature build.
-Run 42909275640 reported a line wrap in the guarded ancestry call.
-This revision fixes both and restricts preview selection to Simnet.
+Run 42909275640 reported a line wrap and an accidental rename of the
+unguarded session constructor. The follow-ups fix these issues and
+restrict preview selection to Simnet.

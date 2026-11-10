@@ -158,7 +158,7 @@ impl ConsensusSessionOwned {
         Self { session_guard: Some(session_guard), consensus, staging_import: None, staging_lifetime: None }
     }
 
-    pub fn new_withoutsession_guard(consensus: DynConsensus) -> Self {
+    pub fn new_without_session_guard(consensus: DynConsensus) -> Self {
         Self { session_guard: None, consensus, staging_import: None, staging_lifetime: None }
     }
 
