@@ -1276,16 +1276,38 @@ async fn daemon_ibd_smt_state_sync_test() {
 ///      is exactly the wedge the fix removes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn daemon_ibd_shielded_state_sync_test() {
-    run_shielded_ibd(false).await;
+    run_shielded_ibd(false, None, false).await;
 }
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_production_preview_promotes_shielded_ibd() {
-    run_shielded_ibd(true).await;
+    run_shielded_ibd(true, None, false).await;
 }
 
-async fn run_shielded_ibd(require_verified: bool) {
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_cancels_interrupted_smt_peer() {
+    run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Smt), false).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_cancels_interrupted_shielded_peer() {
+    run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Shielded), false).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_restarts_after_interrupted_utxo_peer() {
+    run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true).await;
+}
+
+async fn run_shielded_ibd(
+    require_verified: bool,
+    interruption: Option<kaspa_consensus_core::api::StagingImportComponent>,
+    restart_receiver: bool,
+) {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_rpc_core=debug");
 
@@ -1364,7 +1386,12 @@ async fn run_shielded_ibd(require_verified: bool) {
     let mut kaspad2 = Daemon::new_random_with_args(args, total_fd_limit);
     let rpc_client2 = kaspad2.start().await;
 
-    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+    #[cfg(feature = "phase6-staging-preview")]
+    let mut pause = interruption.map(kaspa_p2p_flows::ibd::import_interruption::pause_transfer);
+    #[cfg(not(feature = "phase6-staging-preview"))]
+    let _ = (interruption, restart_receiver);
+
+    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), interruption.is_none()).await.unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
         50,
@@ -1376,6 +1403,59 @@ async fn run_shielded_ibd(require_verified: bool) {
         "the nodes did not connect to each other",
     )
     .await;
+
+    #[cfg(feature = "phase6-staging-preview")]
+    let rpc_client2 = if let Some(mut pause) = pause.take() {
+        let mut rpc_client2 = rpc_client2;
+        tokio::time::timeout(Duration::from_secs(30), pause.wait_until_paused()).await.expect("state transfer did not reach the gate");
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        assert!(manager.is_staging_import_pending(), "receiver released its reservation during the transfer");
+        assert!(!manager.consensus().unguarded_session_blocking().supports_verified_staging_import());
+        assert_eq!(rpc_client2.get_block_dag_info().await.unwrap().pruning_point_hash, SIMNET_GENESIS.hash);
+
+        rpc_client2.ban("127.0.0.1".parse().unwrap()).await.unwrap();
+        pause.release();
+        drop(pause);
+        let drain_manager = manager.clone();
+        wait_for(
+            50,
+            200,
+            move || {
+                let manager = drain_manager.clone();
+                Box::pin(async move { !manager.is_staging_import_pending() })
+            },
+            "cancelled peer import did not drain and release its reservation",
+        )
+        .await;
+        assert!(!manager.consensus().unguarded_session_blocking().supports_verified_staging_import());
+        assert_eq!(rpc_client2.get_block_dag_info().await.unwrap().pruning_point_hash, SIMNET_GENESIS.hash);
+        drop(manager);
+
+        if restart_receiver {
+            rpc_client2.disconnect().await.unwrap();
+            drop(rpc_client2);
+            kaspad2 = kaspad2.restart(total_fd_limit);
+            let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+            let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+            assert!(!manager.is_staging_import_pending());
+            let active = manager.consensus();
+            assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
+            assert!(!active.unguarded_session_blocking().supports_verified_staging_import());
+            assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
+            drop(active);
+            drop(manager);
+            rpc_client2 = kaspad2.start().await;
+        }
+        let peer_ip = "127.0.0.1".parse().unwrap();
+        if rpc_client2.get_peer_addresses().await.unwrap().banned_addresses.contains(&peer_ip) {
+            rpc_client2.unban(peer_ip).await.unwrap();
+        }
+        rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+        rpc_client2
+    } else {
+        rpc_client2
+    };
 
     // Phase 3: wait for IBD (including the shielded-state stream) to complete.
     let sync_check = rpc_client2.clone();
@@ -1399,10 +1479,10 @@ async fn run_shielded_ibd(require_verified: bool) {
     if require_verified {
         let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
-        assert!(
-            manager.consensus().unguarded_session_blocking().supports_verified_staging_import(),
-            "IBD did not promote a receiver that requires a verified receipt"
-        );
+        let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        assert!(session.has_verified_staging_promotion().unwrap(), "IBD did not commit a verified promotion record");
+        assert!(!session.supports_verified_staging_import(), "active consensus retained the staging receiver role");
     }
 
     // Assertion 2: the seeded frontier byte-matches the syncer's at the pruning point.

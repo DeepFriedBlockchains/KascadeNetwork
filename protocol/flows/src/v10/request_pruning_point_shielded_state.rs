@@ -66,6 +66,9 @@ impl RequestPruningPointShieldedStateFlow {
             return Ok(());
         };
 
+        #[cfg(feature = "test-staging-interruption")]
+        crate::ibd::import_interruption::pause_sender(kaspa_consensus_core::api::StagingImportComponent::Shielded).await;
+
         self.router.enqueue(make_message!(Payload::ShieldedMetadata, ShieldedMetadataMessage { data, nullifier_count })).await?;
 
         if nullifier_count == 0 {

@@ -297,6 +297,12 @@ pub trait ConsensusApi: Send + Sync {
         false
     }
 
+    /// Report a durable record of verified promotion. This does not issue
+    /// authority or restore an import reservation after reopening.
+    fn has_verified_staging_promotion(&self) -> Result<bool, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
     fn begin_verified_staging_import(
         &self,
         _proof: ValidatedStagingPruningProof,

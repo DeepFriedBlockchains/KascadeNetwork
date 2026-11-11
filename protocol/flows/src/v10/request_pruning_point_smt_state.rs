@@ -69,6 +69,9 @@ impl RequestPruningPointSmtStateFlow {
             .enqueue(make_message!(Payload::SmtMetadata, SmtMetadataMessage { data: md_bytes, active_lanes_count: expected_count }))
             .await?;
 
+        #[cfg(feature = "test-staging-interruption")]
+        crate::ibd::import_interruption::pause_sender(kaspa_consensus_core::api::StagingImportComponent::Smt).await;
+
         if expected_count == 0 {
             debug!("Finished sending SMT state for pruning point {}: 0 lanes", expected_pp);
             return Ok(());

@@ -95,6 +95,9 @@ impl RequestPruningPointUtxoSetFlow {
     }
 
     async fn send_done_message(&mut self, expected_pp: Hash) -> Result<(), ProtocolError> {
+        #[cfg(feature = "test-staging-interruption")]
+        crate::ibd::import_interruption::pause_sender(kaspa_consensus_core::api::StagingImportComponent::Utxo).await;
+
         debug!("Finished sending UTXOs for pruning point {}", expected_pp);
         self.router.enqueue(make_message!(Payload::DonePruningPointUtxoSetChunks, DonePruningPointUtxoSetChunksMessage {})).await?;
         Ok(())
