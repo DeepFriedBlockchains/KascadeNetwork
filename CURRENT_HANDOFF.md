@@ -277,3 +277,11 @@ observed counts from the completed job logs before reporting a pass.
 Next, retrieve this exact source/run, fix actual native failures and
 complete all eight jobs. Do not restart fixture/provenance recovery,
 descriptor work, or the completed PR #8 regressions.
+
+## Focused native result
+
+Run 43068789717 completed the focused authority integration step successfully.
+All six new payload/cancellation/SIGKILL-recovery cases are included in that
+filter. The regular workspace suite is now running. Seven other jobs passed.
+Exact test counts will be copied from the completed native job log. Full
+eight-job validation remains pending; keep source `110d1625763c9fecd2cf2a226e5e7fb25add99bf` unchanged while it runs.
