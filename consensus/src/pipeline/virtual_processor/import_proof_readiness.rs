@@ -209,18 +209,22 @@ mod tests {
         let processor = consensus.virtual_processor();
         let mut header = Header::from(&DEVNET_GENESIS);
         header.finalize();
-        let point = ReadinessPoint { hash: header.hash, index: 0 };
+        let point = ReadinessPoint { hash: header.hash, index: 3 };
         let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header.clone())]]).unwrap();
         DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(header), 0).unwrap();
-        install_point(&db, point, point);
+        install_point(&db, point, ReadinessPoint { hash: 7.into(), index: 1 });
         DbPruningStore::new(db.clone()).set_pruning_proof_descriptor(proof.descriptor.clone()).unwrap();
         let child = install_shielded_child(&db, point.hash, 201);
         DbHeadersSelectedTipStore::new(db.clone()).set(SortableBlock::new(child.hash(), child.header.blue_work)).unwrap();
         DbStatusesStore::new(db.clone(), CachePolicy::Empty).set(point.hash, StatusUTXOValid).unwrap();
         let mut batch = WriteBatch::default();
+        let mut pruning = DbPruningStore::new(db.clone());
+        pruning.set_retention_checkpoint(&mut batch, point.hash).unwrap();
+        pruning.set_retention_period_root(&mut batch, point.hash).unwrap();
         DbSelectedChainStore::new(db.clone(), CachePolicy::Empty).init_with_pruning_point(&mut batch, point.hash).unwrap();
         stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
         db.write(batch).unwrap();
+        drop(pruning);
         processor
             .virtual_stores
             .write()
