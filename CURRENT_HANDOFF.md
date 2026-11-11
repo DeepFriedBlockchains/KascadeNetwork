@@ -250,17 +250,76 @@ All six new regressions passed with their safety assertions retained.
 See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
 This documentation-only continuation changes no tested implementation.
 
+## Active receiver admission candidate
+
+The next branch is
+`feature/phase6-active-admission-regression-20261111`, stacked on
+the validated PR #9 documentation head
+`9599133be7737b8006cab373d9a99d8fe9bafff8`.
+See [the dated report](docs/development/PHASE6_ACTIVE_ADMISSION_2026-11-11.md).
+The production test harness retains genuinely validated proof receipts
+and calls the actual admission API on ordinary active receivers before
+import and after promotion, requiring `Unsupported`. Restart cases
+exercise the same boundary on reopened active receivers. This adds
+tests without changing production authority behavior.
+
 ## Next executable task
 
-Extend the production preview tests to retain a genuinely validated
-proof receipt across import/promotion. Call
-`begin_verified_staging_import` on the ordinary active receiver before
-import and after promotion, requiring `Unsupported` and unchanged
-promotion/role state. Reuse the new restart cases to cover the same
-admission boundary after reopening. Use a feature branch stacked on
-PR #9 and validate it independently.
+Read the new candidate PR head and Actions run. Source and run IDs
+are recorded in its PR description after push. Require focused and
+full eight-job validation; do not repeat PR #9's completed payload or
+crash investigation. After green validation, add tampered nonempty
+nullifier stream rejection and fresh retry coverage. Bounded-memory
+shielded ingestion remains a separate implementation item.
 
 All development uses GitHub and GitHub Actions. The preview remains
 default-off and Simnet-only. PRs #1–#9 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
+
+## Exact handoff checkpoint
+
+Current implementation: `509e54b5af6a686b24086eea30fe97e8dc02af23`.
+Branch: `feature/phase6-active-admission-regression-20261111`.
+Draft PR: [#10](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/10).
+Authoritative [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692)
+is in progress. Push run 43076078613 was superseded.
+Formatting passed; Test WASM32, Check WASM32 and Check no_std passed.
+Check, strict Clippy, native Test Suite and Linux/WASM SDK release
+builds were pending when this checkpoint was committed. No focused or
+full native pass is claimed for this candidate. Native job ID is
+130718919553. This Markdown-only continuation changes no implementation
+and intentionally leaves that exact source run in progress.
+
+PR #9 is complete at implementation
+`110d1625763c9fecd2cf2a226e5e7fb25add99bf`, documentation head
+`9599133be7737b8006cab373d9a99d8fe9bafff8`, run 43068789717,
+all eight jobs passed. Counts are 21 focused, 1,568 regular workspace
+with 25 existing skips, and 32 no-asm tests.
+
+Next executable task: fetch PR #10's latest head and run 43076086692.
+Fix actual failures in the retained-receipt admission regression, then
+require all eight jobs. Preserve `Unsupported`, the real proof
+validation, closed-role, promotion-record, cancellation and restart
+assertions. Do not repeat the completed PR #9 payload or crash work.
+No owner decision blocks continued testing. Merge, release and
+consensus activation remain unauthorized.
+
+## Final session checkpoint
+
+Implementation `509e54b5af6a686b24086eea30fe97e8dc02af23` remains
+under [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692).
+Formatting, strict Clippy, Check, Test WASM32, Check WASM32 and
+Check no_std and WASM SDK release passed. Six jobs have completed
+successfully; native Test Suite and Linux release remain pending. The native job is 130718919553. No new native
+pass is claimed for PR #10. Markdown-only handoff commits do not change
+the validating implementation.
+
+The next session should verify all eight jobs of that exact run.
+If native tests fail, inspect the retained real proof validation and
+actual admission rejection in `run_payload_ibd_at`; preserve
+`Unsupported`, durable-promotion and closed-role assertions.
+PR #9's real payload, cancellation and SIGKILL cases are complete and
+passed; do not reimplement them. After PR #10 turns green, continue
+tampered nonempty nullifier stream rejection and authenticated retry.
+No owner decision is needed for continued tests.
