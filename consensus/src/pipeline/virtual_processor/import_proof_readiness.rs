@@ -181,7 +181,11 @@ mod tests {
 
     #[test]
     fn authority_integration_reopen_before_promotion_rejects_incomplete_evidence() {
-        use super::super::{branch_readiness::DbBranchReadiness, import_readiness::tests::{install_point, stage_explicit_evidence}, staging_import::PROMOTION_KEY};
+        use super::super::{
+            branch_readiness::DbBranchReadiness,
+            import_readiness::tests::{install_point, stage_explicit_evidence},
+            staging_import::PROMOTION_KEY,
+        };
         use crate::model::stores::{
             ghostdag::GhostdagData,
             headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
@@ -217,11 +221,16 @@ mod tests {
         DbSelectedChainStore::new(db.clone(), CachePolicy::Empty).init_with_pruning_point(&mut batch, point.hash).unwrap();
         stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
         db.write(batch).unwrap();
-        processor.virtual_stores.write().state.set(Arc::new(VirtualState {
-            parents: vec![point.hash],
-            ghostdag_data: GhostdagData::new_with_selected_parent(point.hash, 5),
-            ..Default::default()
-        })).unwrap();
+        processor
+            .virtual_stores
+            .write()
+            .state
+            .set(Arc::new(VirtualState {
+                parents: vec![point.hash],
+                ghostdag_data: GhostdagData::new_with_selected_parent(point.hash, 5),
+                ..Default::default()
+            }))
+            .unwrap();
 
         let token = processor.begin_authority_import().unwrap();
         let unspent = processor.finish_verified_ibd_import(token, &proof, &child).unwrap();
