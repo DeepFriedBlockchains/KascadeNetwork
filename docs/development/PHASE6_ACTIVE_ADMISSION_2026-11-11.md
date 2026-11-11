@@ -87,8 +87,8 @@ consensus activation remain unauthorized.
 Implementation `509e54b5af6a686b24086eea30fe97e8dc02af23` remains
 under [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692).
 Formatting, strict Clippy, Check, Test WASM32, Check WASM32 and
-Check no_std passed. Native Test Suite, Linux release and WASM SDK
-release remain pending. The native job is 130718919553. No new native
+Check no_std and WASM SDK release passed. Six jobs have completed
+successfully; native Test Suite and Linux release remain pending. The native job is 130718919553. No new native
 pass is claimed for PR #10. Markdown-only handoff commits do not change
 the validating implementation.
 
