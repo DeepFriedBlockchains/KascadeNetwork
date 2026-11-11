@@ -1,29 +1,37 @@
 //! Inactive staging import coordination for a single processor-owned session.
 
+#[cfg(test)]
+use super::branch_readiness::ReadinessPoint;
 use super::{
     VirtualStateProcessor,
-    branch_readiness::ReadinessPoint,
     import_operation::{ImportOperation, ImportWorkerSession},
     import_proof_readiness::ValidatedImportProof,
     persistent_branch_authority::PersistentBranchLease,
 };
 use crate::consensus::Consensus;
 use kaspa_consensus_core::{
-    api::{ConsensusApi, StagingPromotion, StagingPromotionError, ValidatedStagingPruningProof},
+    api::{
+        ConsensusApi, StagingImportComponent, StagingImportSession, StagingPromotion, StagingPromotionError,
+        ValidatedStagingPruningProof,
+    },
     block::Block,
     header::Header,
     pruning::PruningPointsList,
     trusted::TrustedBlock,
     tx::{TransactionOutpoint, UtxoEntry},
 };
+#[cfg(test)]
+use kaspa_database::prelude::DeferredDbBatch;
 use kaspa_database::{
-    prelude::{DeferredDbBatch, StoreError, StoreResult},
+    prelude::{StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
 };
+#[cfg(test)]
 use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
 use parking_lot::Mutex;
 use std::sync::Arc;
+#[cfg(test)]
 use tokio::task::JoinHandle;
 
 pub(super) const PROMOTION_KEY: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, b'P'];
@@ -47,6 +55,7 @@ impl StagingComponent {
         }
     }
 
+    #[cfg(test)]
     fn write_prefixes(self) -> &'static [DatabaseStorePrefixes] {
         use DatabaseStorePrefixes::*;
         match self {
@@ -112,9 +121,20 @@ pub(super) struct VerifiedStaging {
     lease: PersistentBranchLease,
     proof: ValidatedImportProof,
     child: Block,
+    verify_virtual: bool,
 }
 
 impl StagingImport {
+    fn start_guarded_operation(&mut self, component: StagingComponent) -> StoreResult<ImportOperation> {
+        if *self.progress.lock() != StagingProgress::Writing(component) {
+            return Err(inconsistent("staging component is out of order or the session has failed"));
+        }
+        self.session
+            .as_mut()
+            .and_then(ImportWorkerSession::try_start)
+            .ok_or_else(|| inconsistent("staging session has ended or a worker still holds its permit"))
+    }
+
     fn begin(
         processor: Arc<VirtualStateProcessor>,
         proof: ValidatedImportProof,
@@ -125,12 +145,14 @@ impl StagingImport {
         Ok(Self { processor, session: Some(session), proof, unapplied_proof, progress })
     }
 
+    #[cfg(test)]
     pub(super) fn begin_fixture(processor: Arc<VirtualStateProcessor>, proof: ValidatedImportProof) -> StoreResult<Self> {
         Self::begin(processor, proof, None)
     }
 
     /// Build the component batch on the blocking worker. Each successful
     /// batch leaves durable readiness closed, including the final chunk.
+    #[cfg(test)]
     pub(super) fn submit(
         &mut self,
         component: StagingComponent,
@@ -149,6 +171,7 @@ impl StagingImport {
         })
     }
 
+    #[cfg(test)]
     fn submit_operation(
         &mut self,
         component: StagingComponent,
@@ -174,12 +197,14 @@ impl StagingImport {
             .ok_or_else(|| inconsistent("a staging worker still holds the import permit"))
     }
 
+    #[cfg(test)]
     pub(super) async fn cancel(self) {
         if let Some(session) = self.session {
             session.cancel_and_wait().await;
         }
     }
 
+    #[cfg(test)]
     pub(super) fn finish(&mut self, retention: ReadinessPoint, child: &Block) -> StoreResult<VerifiedStaging> {
         if *self.progress.lock() != StagingProgress::Verify {
             return Err(inconsistent("staging import is incomplete"));
@@ -193,11 +218,117 @@ impl StagingImport {
             }
         };
         let lease = self.processor.finish_authenticated_authority_import(token, retention, &self.proof, child)?;
-        Ok(VerifiedStaging { processor: self.processor.clone(), lease, proof: self.proof.clone(), child: child.clone() })
+        Ok(VerifiedStaging {
+            processor: self.processor.clone(),
+            lease,
+            proof: self.proof.clone(),
+            child: child.clone(),
+            verify_virtual: false,
+        })
     }
 }
 
 impl Consensus {
+    pub(crate) fn start_owned_staging_import(
+        &self,
+        receipt: ValidatedStagingPruningProof,
+    ) -> Result<StagingImportSession, StagingPromotionError> {
+        self.begin_phase6_staging_import(receipt).map(|import| StagingImportSession::new(Mutex::new(import))).map_err(rejected)
+    }
+
+    fn owned_staging_import<'a>(
+        &self,
+        session: &'a StagingImportSession,
+    ) -> Result<parking_lot::MutexGuard<'a, StagingImport>, StagingPromotionError> {
+        let import = session.downcast_ref::<Mutex<StagingImport>>()?.lock();
+        if !Arc::ptr_eq(&self.virtual_processor, &import.processor) {
+            return Err(StagingPromotionError::InvalidReceipt);
+        }
+        Ok(import)
+    }
+
+    pub(crate) fn apply_owned_staging_proof(
+        &self,
+        session: &StagingImportSession,
+        trusted: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+        pruning_points: PruningPointsList,
+    ) -> Result<(), StagingPromotionError> {
+        let mut import = self.owned_staging_import(session)?;
+        if pruning_points.last().map(|header| header.hash) != Some(import.proof.pruning_point()) {
+            return Err(rejected(inconsistent("pruning history does not match the authenticated staging proof")));
+        }
+        let mut operation = import.start_guarded_operation(StagingComponent::Proof).map_err(rejected)?;
+        let receipt = import.unapplied_proof.take().ok_or_else(|| rejected(inconsistent("no unapplied staging proof")))?;
+        *import.progress.lock() = StagingProgress::Failed;
+        self.virtual_processor
+            .apply_guarded_staging_proof(&mut operation, &import.proof, || {
+                self.apply_staging_pruning_proof_and_history(receipt, trusted, header_only_chain_segment, pruning_points)
+                    .map_err(|error| StoreError::DataInconsistency(error.to_string()))
+            })
+            .map_err(rejected)?;
+        *import.progress.lock() = StagingProgress::Writing(StagingComponent::Proof);
+        Ok(())
+    }
+
+    pub(crate) fn check_owned_staging_component(
+        &self,
+        session: &StagingImportSession,
+        component: StagingImportComponent,
+        complete: bool,
+    ) -> Result<(), StagingPromotionError> {
+        let mut import = self.owned_staging_import(session)?;
+        let component = match component {
+            StagingImportComponent::Proof => StagingComponent::Proof,
+            StagingImportComponent::Smt => StagingComponent::Smt,
+            StagingImportComponent::Shielded => StagingComponent::Shielded,
+            StagingImportComponent::Utxo => StagingComponent::Utxo,
+        };
+        if import.unapplied_proof.is_some() {
+            return Err(rejected(inconsistent("the authenticated staging proof has not been applied")));
+        }
+        let mut operation = import.start_guarded_operation(component).map_err(rejected)?;
+        self.virtual_processor.check_staging_operation(&mut operation).map_err(rejected)?;
+        let point = self.virtual_processor.staging_import_point().map_err(rejected)?;
+        if point.hash != import.proof.pruning_point() {
+            return Err(rejected(inconsistent("staging pruning point changed during import")));
+        }
+        if complete {
+            *import.progress.lock() = component.next();
+        }
+        Ok(())
+    }
+
+    pub(crate) fn append_owned_staging_utxos(
+        &self,
+        session: &StagingImportSession,
+        utxos: &[(TransactionOutpoint, UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> Result<(), StagingPromotionError> {
+        let mut import = self.owned_staging_import(session)?;
+        let mut operation = import.start_guarded_operation(StagingComponent::Utxo).map_err(rejected)?;
+        self.virtual_processor.append_guarded_staging_utxos(&mut operation, utxos, multiset).map_err(rejected)
+    }
+
+    pub(crate) fn finish_owned_staging_import(
+        &self,
+        session: StagingImportSession,
+        child: &Block,
+    ) -> Result<StagingPromotion, StagingPromotionError> {
+        let mut import = session.downcast::<Mutex<StagingImport>>()?.into_inner();
+        if !Arc::ptr_eq(&self.virtual_processor, &import.processor) {
+            return Err(StagingPromotionError::InvalidReceipt);
+        }
+        if *import.progress.lock() != StagingProgress::Verify {
+            return Err(rejected(inconsistent("staging import is incomplete")));
+        }
+        let session = import.session.take().ok_or_else(|| rejected(inconsistent("staging session has ended")))?;
+        let token = session.try_finish().map_err(|_| rejected(inconsistent("a staging worker still holds the import permit")))?;
+        let lease = self.virtual_processor.finish_verified_ibd_import(token, &import.proof, child).map_err(rejected)?;
+        Ok(VerifiedStaging { processor: import.processor, lease, proof: import.proof, child: child.clone(), verify_virtual: true }
+            .into_promotion())
+    }
+
     pub(super) fn begin_phase6_staging_import(&self, receipt: ValidatedStagingPruningProof) -> StoreResult<StagingImport> {
         let proof = ValidatedImportProof::from_receipt(&receipt)?;
         StagingImport::begin(self.virtual_processor.clone(), proof, Some(receipt))
@@ -205,6 +336,7 @@ impl Consensus {
 
     /// Apply the bound proof and pruning history. Trusted-body processing
     /// and the remaining staging components still have to complete.
+    #[cfg(test)]
     pub(super) fn stage_phase6_pruning_proof(
         self: &Arc<Self>,
         staging: &mut StagingImport,
@@ -240,12 +372,13 @@ impl Consensus {
             return Err(StagingPromotionError::InvalidReceipt);
         }
         self.virtual_processor
-            .commit_staging_promotion(verified.lease, &verified.proof, &verified.child)
+            .commit_staging_promotion_checked(verified.lease, &verified.proof, &verified.child, verified.verify_virtual)
             .map_err(|error| StagingPromotionError::Rejected(error.to_string()))
     }
 
     /// Inactive typed ingress for direct pruning UTXO chunks. The staging
     /// session remains the only path to the database write.
+    #[cfg(test)]
     pub(super) fn stage_phase6_pruning_utxo_chunk(
         &self,
         staging: &mut StagingImport,
@@ -260,6 +393,7 @@ impl Consensus {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn complete_phase6_pruning_utxos(
         &self,
         staging: &mut StagingImport,
@@ -278,6 +412,10 @@ impl VerifiedStaging {
     pub(super) fn into_promotion(self) -> StagingPromotion {
         StagingPromotion::new(self)
     }
+}
+
+fn rejected(error: StoreError) -> StagingPromotionError {
+    StagingPromotionError::Rejected(error.to_string())
 }
 
 fn inconsistent(reason: &str) -> StoreError {
@@ -338,7 +476,17 @@ mod tests {
         runtime.block_on(async {
             receiver.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![header]).unwrap().await.unwrap().unwrap();
         });
-        assert!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().is_some());
+        let descriptor_before = db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().unwrap();
+        let rebuilt = receiver.get_staging_pruning_point_proof();
+        assert_eq!(rebuilt.len(), proof.len());
+        for (actual, expected) in rebuilt.iter().zip(proof.iter()) {
+            let actual: kaspa_consensus_core::BlockHashSet = actual.iter().map(|header| header.hash).collect();
+            let expected: kaspa_consensus_core::BlockHashSet = expected.iter().map(|header| header.hash).collect();
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().unwrap(), descriptor_before);
+        let point = receiver.virtual_processor().staging_import_point().unwrap();
+        staging.proof.verify_committed(&db, point).unwrap();
         assert!(readiness.closed_revision().unwrap().is_some());
         assert!(db.get(PROMOTION_KEY).unwrap().is_none());
         runtime.block_on(staging.cancel());

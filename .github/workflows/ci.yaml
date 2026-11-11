@@ -32,7 +32,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        run: cargo check --tests --workspace --benches
+        run: cargo check --tests --workspace --benches --features kaspa-testing-integration/phase6-staging-preview
 
   test:
     name: Test Suite
@@ -114,7 +114,7 @@ jobs:
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
       - name: Run Phase 6 authority integration regressions
-        run: cargo nextest run --workspace -E 'test(authority_integration_)'
+        run: cargo nextest run --workspace --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_)'
 
       - name: Run cargo test regular features
         run: cargo nextest run --workspace --no-fail-fast
@@ -208,7 +208,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy --workspace --tests --benches --examples -- -D warnings
+        run: cargo clippy --workspace --tests --benches --examples --features kaspa-testing-integration/phase6-staging-preview -- -D warnings
 
   check-no-std:
     name: Check no_std

@@ -411,6 +411,11 @@ impl PruningProofManager {
         proof
     }
 
+    pub fn get_staging_pruning_point_proof(&self) -> Arc<PruningPointProof> {
+        let point = self.pruning_point_store.read().pruning_point().unwrap();
+        Arc::new(self.reconstruct_pruning_point_proof(point).0)
+    }
+
     pub fn get_pruning_point_anticone_and_trusted_data(&self) -> ConsensusResult<Arc<PruningPointTrustedData>> {
         let pp = self.pruning_point_store.read().pruning_point().unwrap();
         if pp == self.genesis_hash {

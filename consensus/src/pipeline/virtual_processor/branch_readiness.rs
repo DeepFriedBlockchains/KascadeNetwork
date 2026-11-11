@@ -53,6 +53,7 @@ impl DbBranchReadiness {
 
     /// Reads committed bytes every time. Absence never migrates to readiness.
     /// A ready marker at a different hash OR index does not authorize this point.
+    #[cfg(test)]
     pub(super) fn is_ready(&self, point: ReadinessPoint) -> StoreResult<bool> {
         Ok(self.ready_revision(point)?.is_some())
     }
@@ -87,6 +88,7 @@ impl DbBranchReadiness {
 
     /// Must succeed before the first import mutation. An error must leave the
     /// processor's in-memory authority closed and prevent starting the import.
+    #[cfg(test)]
     #[cfg(test)]
     pub(super) fn close_sync(&self) -> StoreResult<()> {
         self.close_revision_sync().map(|_| ())

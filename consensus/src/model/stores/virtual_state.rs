@@ -244,7 +244,7 @@ impl DbVirtualStateStore {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     pub(crate) fn read_committed(db: Arc<DB>) -> StoreResult<Arc<VirtualState>> {
         Self::access(db).read()
     }

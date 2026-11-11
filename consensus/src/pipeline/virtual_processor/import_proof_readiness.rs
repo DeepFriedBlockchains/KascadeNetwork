@@ -1,19 +1,15 @@
 //! Evidence from the existing pruning proof validator for inactive import completion.
 
 use super::branch_readiness::ReadinessPoint;
-use crate::{
-    consensus::Consensus,
-    model::stores::{
-        headers::{DbHeadersStore, HeaderStoreReader},
-        pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
-    },
+#[cfg(test)]
+use crate::consensus::Consensus;
+use crate::model::stores::{
+    headers::{DbHeadersStore, HeaderStoreReader},
+    pruning::{DbPruningStore, PruningProofDescriptor, PruningStoreReader},
 };
-use kaspa_consensus_core::{
-    BlockHashSet,
-    api::{ConsensusApi, ValidatedStagingPruningProof},
-    hashing,
-    pruning::{PruningPointProof, PruningProofMetadata},
-};
+use kaspa_consensus_core::{BlockHashSet, api::ValidatedStagingPruningProof, hashing, pruning::PruningPointProof};
+#[cfg(test)]
+use kaspa_consensus_core::{api::ConsensusApi, pruning::PruningProofMetadata};
 use kaspa_database::prelude::{CachePolicy, DB, StoreError, StoreResult};
 use std::sync::Arc;
 
@@ -26,6 +22,7 @@ pub(super) struct ValidatedImportProof {
 }
 
 impl ValidatedImportProof {
+    #[cfg(test)]
     pub(super) fn authenticate(defender: &Consensus, proof: &PruningPointProof, metadata: &PruningProofMetadata) -> StoreResult<Self> {
         let evidence = Self::capture_validated(proof)?;
         defender.validate_pruning_proof(proof, metadata).map_err(|err| StoreError::DataInconsistency(err.to_string()))?;
@@ -195,12 +192,14 @@ mod tests {
                 headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
                 selected_chain::{DbSelectedChainStore, SelectedChainStore},
                 shielded::DbNullifierDiffStore,
+                statuses::{DbStatusesStore, StatusesStore},
                 virtual_state::{VirtualState, VirtualStateStore},
             },
             processes::ghostdag::ordering::SortableBlock,
         };
         use kaspa_consensus_core::{
             api::{StagingPromotion, StagingPromotionError},
+            blockstatus::BlockStatus::StatusUTXOValid,
             config::params::ForkActivation,
             muhash::MuHashExtensions,
             tx::{ScriptPublicKey, TransactionOutpoint, UtxoEntry},
@@ -297,13 +296,49 @@ mod tests {
         assert!(processor.commit_staging_promotion(stale, &proof, &child).is_err());
         assert!(DbBranchReadiness::new(db.clone()).closed_revision().unwrap().is_some());
         let mut metadata = processor.pruning_meta_stores.write();
-        metadata.utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry))]).unwrap();
+        metadata.utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry.clone()))]).unwrap();
         drop(metadata);
         assert!(processor.authority_lease().is_err());
         let token = processor.begin_authority_import().unwrap();
         let reverified = processor.finish_authenticated_authority_import(token, retention, &proof, &child).unwrap();
         processor.commit_staging_promotion(reverified, &proof, &child).unwrap();
 
+        // The IBD receipt also requires the finalized virtual UTXO set.
+        let write_retention = |hash| {
+            let mut pruning = DbPruningStore::new(db.clone());
+            let mut batch = WriteBatch::default();
+            pruning.set_retention_checkpoint(&mut batch, hash).unwrap();
+            pruning.set_retention_period_root(&mut batch, hash).unwrap();
+            db.write(batch).unwrap();
+        };
+        write_retention(point.hash);
+        DbStatusesStore::new(db.clone(), CachePolicy::Empty).set(point.hash, StatusUTXOValid).unwrap();
+        let token = processor.begin_authority_import().unwrap();
+        assert!(processor.finish_verified_ibd_import(token, &proof, &child).is_err());
+        assert!(processor.authority_lease().is_err());
+
+        let state = VirtualState {
+            parents: vec![point.hash],
+            ghostdag_data: GhostdagData::new_with_selected_parent(point.hash, 5),
+            multiset: MuHash::from_utxo(&outpoint, &entry),
+            ..Default::default()
+        };
+        let mut virtual_write = processor.virtual_stores.write();
+        virtual_write.state.set(Arc::new(state)).unwrap();
+        virtual_write.utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry.clone()))]).unwrap();
+        drop(virtual_write);
+        let token = processor.begin_authority_import().unwrap();
+        let receipt = processor.finish_verified_ibd_import(token, &proof, &child).unwrap();
+        processor.virtual_stores.write().utxo_set.clear().unwrap();
+        assert!(processor.commit_staging_promotion_checked(receipt, &proof, &child, true).is_err());
+        assert!(processor.authority_lease().is_err());
+
+        processor.virtual_stores.write().utxo_set.write_from_iterator_without_cache([(outpoint, Arc::new(entry))]).unwrap();
+        let token = processor.begin_authority_import().unwrap();
+        let receipt = processor.finish_verified_ibd_import(token, &proof, &child).unwrap();
+        processor.commit_staging_promotion_checked(receipt, &proof, &child, true).unwrap();
+
+        write_retention(retention.hash);
         let tip_child = install_shielded_child(&db, child.hash(), 102);
         header_tip.set(SortableBlock::new(tip_child.hash(), tip_child.header.blue_work)).unwrap();
         let mut chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);

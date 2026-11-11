@@ -1276,6 +1276,16 @@ async fn daemon_ibd_smt_state_sync_test() {
 ///      is exactly the wedge the fix removes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn daemon_ibd_shielded_state_sync_test() {
+    run_shielded_ibd(false).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_production_preview_promotes_shielded_ibd() {
+    run_shielded_ibd(true).await;
+}
+
+async fn run_shielded_ibd(require_verified: bool) {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_rpc_core=debug");
 
@@ -1385,6 +1395,15 @@ async fn daemon_ibd_shielded_state_sync_test() {
         "syncee did not complete shielded-era IBD within timeout (suspected sync_new_shielded_state stall or shielded wedge)",
     )
     .await;
+
+    if require_verified {
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        assert!(
+            manager.consensus().unguarded_session_blocking().supports_verified_staging_import(),
+            "IBD did not promote a receiver that requires a verified receipt"
+        );
+    }
 
     // Assertion 2: the seeded frontier byte-matches the syncer's at the pruning point.
     let syncee_tree = rpc_client2.get_shielded_tree_state(Some(target_pruning_point)).await.unwrap();

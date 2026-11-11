@@ -111,7 +111,7 @@ impl DbUtxoSetStore {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     pub(crate) fn stage_import_chunk<'a>(
         &'a self,
         batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,

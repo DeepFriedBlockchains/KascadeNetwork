@@ -7,7 +7,7 @@ use futures::future::{Either, join_all, select, try_join_all};
 use itertools::Itertools;
 use kaspa_consensus_core::{
     BlockHashSet,
-    api::{BlockValidationFuture, ShieldedHistoryVerdict},
+    api::{BlockValidationFuture, ShieldedHistoryVerdict, StagingImportComponent, StagingImportSession, StagingPromotion},
     block::Block,
     config::params::{ForkActivation, Params},
     errors::pruning::PruningImportResult,
@@ -16,7 +16,7 @@ use kaspa_consensus_core::{
     trusted::TrustedBlock,
     tx::Transaction,
 };
-use kaspa_consensusmanager::{ConsensusProxy, StagingConsensus, spawn_blocking};
+use kaspa_consensusmanager::{ConsensusProxy, ManagedStagingConsensus, spawn_blocking};
 use kaspa_core::{debug, info, time::unix_now, warn};
 use kaspa_hashes::Hash;
 use kaspa_muhash::MuHash;
@@ -278,29 +278,26 @@ impl IbdFlow {
             }
             IbdType::DownloadHeadersProof => {
                 drop(session); // Avoid holding the previous consensus throughout the staging IBD
-                let staging = self.ctx.consensus_manager.new_staging_consensus();
-                match self.ibd_with_headers_proof(&staging, negotiation_output.syncer_virtual_selected_parent, &relay_block).await {
-                    Ok(()) => {
-                        spawn_blocking(|| staging.commit()).await.unwrap();
-                        info!(
-                            "Header download stage of IBD with headers proof completed successfully from {}. Committed staging consensus.",
-                            self.router
-                        );
-
-                        // This will reobtain the freshly committed staging consensus
-                        session = self.ctx.consensus().session().await;
-                        // Next, sync a utxoset corresponding to the new pruning point from the syncer.
-                        // Note that the new pruning point's anticone need not be downloaded separately as in other IBD types
-                        // as it was just downloaded as part of the headers proof.
-                        self.sync_new_smt_state(&session, negotiation_output.syncer_pruning_point).await?;
-                        self.sync_new_shielded_state(&session, negotiation_output.syncer_pruning_point).await?;
-                        self.sync_new_utxo_set(&session, negotiation_output.syncer_pruning_point).await?;
-                    }
-                    Err(e) => {
-                        warn!("IBD with headers proof from {} was unsuccessful ({})", self.router, e);
-                        staging.cancel();
-                        return Err(e);
-                    }
+                let staging = self.ctx.consensus_manager.new_managed_staging_consensus().await;
+                let promotion =
+                    match self.prepare_staging_import(&staging, negotiation_output.syncer_virtual_selected_parent, &relay_block).await
+                    {
+                        Ok(promotion) => promotion,
+                        Err(error) => {
+                            warn!("IBD with headers proof from {} was unsuccessful ({})", self.router, error);
+                            staging.cancel().await;
+                            return Err(error);
+                        }
+                    };
+                let verified = promotion.is_some();
+                staging.commit(promotion).await.map_err(staging_error)?;
+                session = self.ctx.consensus().session().await;
+                if verified {
+                    self.ctx.on_pruning_point_utxoset_override();
+                } else {
+                    self.sync_new_smt_state(&session, negotiation_output.syncer_pruning_point).await?;
+                    self.sync_new_shielded_state(&session, negotiation_output.syncer_pruning_point).await?;
+                    self.sync_new_utxo_set(&session, negotiation_output.syncer_pruning_point).await?;
                 }
             }
             IbdType::PruningCatchUp { highest_known_syncer_chain_hash } => {
@@ -566,24 +563,46 @@ impl IbdFlow {
         Ok(())
     }
 
-    async fn ibd_with_headers_proof(
+    async fn prepare_staging_import(
         &mut self,
-        staging: &StagingConsensus,
+        staging: &ManagedStagingConsensus,
         syncer_virtual_selected_parent: Hash,
         relay_block: &Block,
-    ) -> Result<(), ProtocolError> {
+    ) -> Result<Option<StagingPromotion>, ProtocolError> {
         info!("Starting IBD with headers proof with peer {}", self.router);
+        let (point, import) = self.sync_and_validate_pruning_proof(staging, relay_block).await?;
+        let receiver = staging.session().await.with_staging_import(import.clone());
+        self.sync_headers(&receiver, syncer_virtual_selected_parent, point, relay_block).await?;
+        receiver.async_validate_pruning_points(syncer_virtual_selected_parent).await?;
+        self.validate_staging_timestamps(&self.ctx.consensus().session().await, &receiver).await?;
 
-        let staging_session = staging.session().await;
+        let Some(import) = import else { return Ok(None) };
+        receiver.check_staging_component(StagingImportComponent::Proof, true).await.map_err(staging_error)?;
+        self.sync_new_smt_state(&receiver, point).await?;
+        receiver.check_staging_component(StagingImportComponent::Smt, true).await.map_err(staging_error)?;
+        let child = self
+            .import_new_shielded_state(&receiver, point)
+            .await?
+            .ok_or(ProtocolError::Other("verified staging requires an authenticated shielded child"))?;
+        receiver.check_staging_component(StagingImportComponent::Shielded, true).await.map_err(staging_error)?;
+        self.import_new_utxo_set(&receiver, point).await?;
+        receiver.check_staging_component(StagingImportComponent::Utxo, true).await.map_err(staging_error)?;
+        drop(receiver);
 
-        let pruning_point = self.sync_and_validate_pruning_proof(&staging_session, relay_block).await?;
-        self.sync_headers(&staging_session, syncer_virtual_selected_parent, pruning_point, relay_block).await?;
-        staging_session.async_validate_pruning_points(syncer_virtual_selected_parent).await?;
-        self.validate_staging_timestamps(&self.ctx.consensus().session().await, &staging_session).await?;
-        Ok(())
+        let import = Arc::try_unwrap(import).map_err(|_| ProtocolError::Other("a staging worker still holds the import session"))?;
+        staging
+            .unguarded_session()
+            .spawn_blocking(move |c| c.finish_verified_staging_import(import, &child))
+            .await
+            .map(Some)
+            .map_err(staging_error)
     }
 
-    async fn sync_and_validate_pruning_proof(&mut self, staging: &ConsensusProxy, relay_block: &Block) -> Result<Hash, ProtocolError> {
+    async fn sync_and_validate_pruning_proof(
+        &mut self,
+        stage: &ManagedStagingConsensus,
+        relay_block: &Block,
+    ) -> Result<(Hash, Option<Arc<StagingImportSession>>), ProtocolError> {
         // [Toccata] Guard IBD from outdated nodes. P2P flow registration does not protect
         // fresh IBD peers, and the relay block is usually the syncer sink, so reject an unexpected
         // block version before requesting the pruning proof. The pruning point itself is
@@ -747,20 +766,40 @@ impl IbdFlow {
 
         // Create a topologically ordered vector of trusted blocks - the pruning point and its anticone,
         // and their daa windows headers
-        let mut trusted_set = pkg.build_trusted_subdag(entries)?;
-
-        if self.ctx.config.enable_sanity_checks {
-            let con = self.ctx.consensus().unguarded_session_blocking();
-            trusted_set = staging
-                .clone()
-                .spawn_blocking(move |c| {
-                    let ref_proof = proof.proof().clone();
+        let trusted_set = pkg.build_trusted_subdag(entries)?;
+        let reference = self.ctx.config.enable_sanity_checks.then(|| proof.proof().clone());
+        let defender = self.ctx.config.enable_sanity_checks.then(|| self.ctx.consensus().unguarded_session_blocking());
+        // Admission takes its own receiver pruning guard before the guarded
+        // proxy is created. The proof writer then uses the proxy's guard.
+        let (proof, import) = stage
+            .unguarded_session()
+            .spawn_blocking(move |c| {
+                if c.supports_verified_staging_import() {
+                    c.begin_verified_staging_import(proof).map(|import| (None, Some(Arc::new(import))))
+                } else {
+                    Ok((Some(proof), None))
+                }
+            })
+            .await
+            .map_err(staging_error)?;
+        let staging = stage.session().await.with_staging_import(import.clone());
+        let owned = import.clone();
+        let trusted_set = staging
+            .clone()
+            .spawn_blocking(move |c| {
+                if let Some(import) = owned {
+                    c.apply_verified_staging_proof(&import, &trusted_set, &header_only_chain_segment, pruning_points)
+                        .map_err(staging_error)?;
+                } else {
+                    let proof = proof.ok_or(ProtocolError::Other("staging proof admission returned no proof"))?;
                     c.apply_staging_pruning_proof_and_history(proof, &trusted_set, &header_only_chain_segment, pruning_points)?;
+                }
 
+                if let (Some(reference), Some(defender)) = (reference, defender) {
                     info!("Building the proof which was just applied (sanity test)");
-                    let built_proof = c.get_pruning_point_proof();
+                    let built_proof = c.get_staging_pruning_point_proof();
                     let mut mismatch_detected = false;
-                    for (i, (ref_level, built_level)) in ref_proof.iter().zip(built_proof.iter()).enumerate() {
+                    for (i, (ref_level, built_level)) in reference.iter().zip(built_proof.iter()).enumerate() {
                         if ref_level.iter().map(|h| h.hash).collect::<BlockHashSet>()
                             != built_level.iter().map(|h| h.hash).collect::<BlockHashSet>()
                         {
@@ -771,25 +810,17 @@ impl IbdFlow {
                     if mismatch_detected {
                         info!("Validating the locally built proof (sanity test fallback #2)");
                         // Note: the proof is validated in the context of *current* consensus
-                        if let Err(err) = con.validate_pruning_proof(&built_proof, &proof_metadata) {
+                        if let Err(err) = defender.validate_pruning_proof(&built_proof, &proof_metadata) {
                             panic!("Locally built proof failed validation: {}", err);
                         }
                         info!("Locally built proof was validated successfully");
                     } else {
                         info!("Proof was locally built successfully");
                     }
-                    Result::<_, ProtocolError>::Ok(trusted_set)
-                })
-                .await?;
-        } else {
-            trusted_set = staging
-                .clone()
-                .spawn_blocking(move |c| {
-                    c.apply_staging_pruning_proof_and_history(proof, &trusted_set, &header_only_chain_segment, pruning_points)?;
-                    Result::<_, ProtocolError>::Ok(trusted_set)
-                })
-                .await?;
-        }
+                }
+                Result::<_, ProtocolError>::Ok(trusted_set)
+            })
+            .await?;
 
         // TODO (relaxed): add logs to staging commit process
 
@@ -805,11 +836,12 @@ impl IbdFlow {
                 last_index = i;
             }
             // TODO (relaxed): queue and join in batches
+            staging.check_staging_component(StagingImportComponent::Proof, false).await.map_err(staging_error)?;
             staging.validate_and_insert_trusted_block(tb).virtual_state_task.await?;
         }
         staging.async_clear_body_missing_anticone_set().await;
         info!("Done processing trusted blocks");
-        Ok(proof_pruning_point)
+        Ok((proof_pruning_point, import))
     }
 
     async fn sync_headers(
@@ -819,6 +851,7 @@ impl IbdFlow {
         highest_known_syncer_chain_hash: Hash,
         relay_block: &Block,
     ) -> Result<(), ProtocolError> {
+        consensus.check_staging_component(StagingImportComponent::Proof, false).await.map_err(staging_error)?;
         let highest_shared_header_score = consensus.async_get_header(highest_known_syncer_chain_hash).await?.daa_score;
         let mut progress_reporter = ProgressReporter::new(highest_shared_header_score, relay_block.header.daa_score, "block headers");
 
@@ -879,6 +912,7 @@ impl IbdFlow {
     }
 
     async fn sync_new_smt_state(&mut self, consensus: &ConsensusProxy, pruning_point: Hash) -> Result<(), ProtocolError> {
+        consensus.check_staging_component(StagingImportComponent::Smt, false).await.map_err(staging_error)?;
         use super::streams::SmtStream;
         use kaspa_p2p_lib::pb::RequestPruningPointSmtStateMessage;
         use kaspa_seq_commit::verify::{SmtMetadata, verify_smt_metadata};
@@ -1175,13 +1209,27 @@ impl IbdFlow {
     }
 
     async fn sync_new_shielded_state(&mut self, consensus: &ConsensusProxy, pruning_point: Hash) -> Result<(), ProtocolError> {
+        self.import_new_shielded_state(consensus, pruning_point).await.map(drop)
+    }
+
+    async fn import_new_shielded_state(
+        &mut self,
+        consensus: &ConsensusProxy,
+        pruning_point: Hash,
+    ) -> Result<Option<Block>, ProtocolError> {
         use super::streams::ShieldedStream;
         use kaspa_p2p_lib::pb::RequestPruningPointShieldedStateMessage;
 
         // F-02: determine the PoW-committed shielded state root for this pruning point.
+        consensus.check_staging_component(StagingImportComponent::Shielded, false).await.map_err(staging_error)?;
         let binding = self.shielded_pp_commitment(consensus, pruning_point).await?;
+        if consensus.staging_import().is_some() && binding.is_none() {
+            return Err(ProtocolError::Other("verified staging requires an authenticated shielded child"));
+        }
 
-        if let Some(&(child, committed)) = binding.as_ref() {
+        if let Some((child, committed)) = binding.as_ref() {
+            let child = child.hash();
+            let committed = *committed;
             // F-15: if the locally held state root at the pruning point already equals the
             // PoW-committed root, the local state IS the committed state (the root binds the
             // frontier, supply totals, burns and the nullifier-set accumulator) — skip the
@@ -1200,7 +1248,7 @@ impl IbdFlow {
                     pruning_point
                 );
                 consensus.async_set_pruning_shielded_stable().await;
-                return Ok(());
+                return Ok(binding.map(|(child, _)| child));
             }
 
             // F-15 SAFETY: the re-import below clears the global nullifier set. If the pruning
@@ -1251,9 +1299,9 @@ impl IbdFlow {
         if md.data.is_empty() {
             // F-02: the "empty" claim must also match the PoW commitment — a peer that claims
             // empty while the selected child commits a non-empty root is misbehaving.
-            if let Some(&(_, committed)) = binding.as_ref() {
+            if let Some((_, committed)) = binding.as_ref() {
                 let empty_root = consensus.async_empty_shielded_state_root().await;
-                if committed != empty_root {
+                if *committed != empty_root {
                     return Err(ProtocolError::OtherOwned(format!(
                         "peer claims pruning point {pruning_point} has no shielded state, but its selected child commits a \
                          non-empty shielded state root"
@@ -1262,12 +1310,12 @@ impl IbdFlow {
             }
             consensus.async_set_pruning_shielded_stable().await;
             info!("pruning point {} has no shielded state to import", pruning_point);
-            return Ok(());
+            return Ok(binding.map(|(child, _)| child));
         }
 
         // F-02: the seeded state must match the PoW-committed root (checked inside consensus
         // before anything is seeded; on mismatch the import fails and this peer can be dropped).
-        let expected_state_root = binding.map(|(_, committed)| committed);
+        let expected_state_root = binding.as_ref().map(|(_, committed)| *committed);
 
         // One chunk in flight + one being processed by the importer is enough headroom.
         let (tx, rx) = tokio::sync::mpsc::channel::<Vec<[u8; 32]>>(2);
@@ -1289,7 +1337,7 @@ impl IbdFlow {
         consensus.async_set_pruning_shielded_stable().await;
 
         info!("shielded state synced: {} nullifiers", stream.count());
-        Ok(())
+        Ok(binding.map(|(child, _)| child))
     }
 
     /// F-02: determine the pruning point's selected child `c` on the local header
@@ -1307,7 +1355,7 @@ impl IbdFlow {
         &mut self,
         consensus: &ConsensusProxy,
         pruning_point: Hash,
-    ) -> Result<Option<(Hash, [u8; 32])>, ProtocolError> {
+    ) -> Result<Option<(Block, [u8; 32])>, ProtocolError> {
         let Some(children) = consensus.async_get_block_children(pruning_point).await else { return Ok(None) };
         let hst = consensus.async_get_headers_selected_tip().await;
         let mut selected_child = None;
@@ -1357,10 +1405,18 @@ impl IbdFlow {
             .transactions
             .first()
             .ok_or_else(|| ProtocolError::OtherOwned(format!("block {} has no coinbase transaction", child)))?;
-        Ok(kaspa_consensus_core::zkas_state_binding::extract_state_root(&coinbase.payload).map(|root| (child, root)))
+        if consensus.staging_import().is_some()
+            && (!coinbase.is_coinbase()
+                || kaspa_consensus_core::merkle::calc_hash_merkle_root(block.transactions.iter()) != local_header.hash_merkle_root)
+        {
+            return Err(ProtocolError::Other("shielded commitment child body does not match the accepted header"));
+        }
+        let root = kaspa_consensus_core::zkas_state_binding::extract_state_root(&coinbase.payload);
+        Ok(root.map(|root| (block, root)))
     }
 
     async fn import_new_utxo_set(&mut self, consensus: &ConsensusProxy, pruning_point: Hash) -> Result<(), ProtocolError> {
+        consensus.check_staging_component(StagingImportComponent::Utxo, false).await.map_err(staging_error)?;
         consensus.async_clear_pruning_utxo_set().await;
         self.sync_pruning_point_utxoset(consensus, pruning_point).await?;
         consensus.async_set_pruning_utxoset_stable().await;
@@ -1451,14 +1507,20 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
         let mut chunk_stream = PruningPointUtxosetChunkStream::new(&self.router, &mut self.incoming_route);
         let mut multiset = MuHash::new();
         while let Some(chunk) = chunk_stream.next().await? {
+            let import = consensus.staging_import().cloned();
             multiset = consensus
                 .clone()
                 .spawn_blocking(move |c| {
-                    c.append_imported_pruning_point_utxos(&chunk, &mut multiset);
-                    multiset
+                    if let Some(import) = import {
+                        c.append_verified_staging_utxos(&import, &chunk, &mut multiset).map_err(staging_error)?;
+                    } else {
+                        c.append_imported_pruning_point_utxos(&chunk, &mut multiset);
+                    }
+                    Ok::<_, ProtocolError>(multiset)
                 })
-                .await;
+                .await?;
         }
+        consensus.check_staging_component(StagingImportComponent::Utxo, false).await.map_err(staging_error)?;
         consensus.clone().spawn_blocking(move |c| c.import_pruning_point_utxo_set(pruning_point, multiset)).await?;
         Ok(())
     }
@@ -1679,6 +1741,10 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
         }
         Ok(QueueChunkOutput { jobs, daa_score: current_daa_score, timestamp: current_timestamp })
     }
+}
+
+fn staging_error(error: kaspa_consensus_core::api::StagingPromotionError) -> ProtocolError {
+    ProtocolError::OtherOwned(error.to_string())
 }
 
 // The stream sender must be dropped before draining. A receive failure can
