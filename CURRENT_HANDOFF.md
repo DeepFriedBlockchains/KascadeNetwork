@@ -196,13 +196,15 @@ PR #7 remains at `2ff50a53e727511a738c04fec6ddcd432c389790` on
 has passed seven jobs. Native focused and workspace results are pending.
 The same-SHA push run 42930270803 was superseded.
 
-The separate test candidate is `42a65a83e6d269618af826f4cda67ebe24b1d264` on
+The separate test candidate is `b510f585f3e746e7541a58cc5e09b69c988189d4` on
 `feature/phase6-preview-peer-interruption-20261110`.
-[Run 42931593794](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42931593794)
+[Run 42932087535](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42932087535)
 covers the interruption and reopen regressions and full workspace
 validation. The initial test candidate `f429ec4` triggered run
 42931436753, which reported three formatting changes. The candidate has
-a new source head and validation is pending.
+a new source head. Run 42931593794 was superseded by the corrected
+history fixture. The fixture uses distinct pruning-history entries and
+releases its database handle before reopening. Current validation is pending.
 
 ## Next executable task
 
