@@ -23,8 +23,22 @@ The focused proof-worker regression checks reconstruction header sets,
 exact descriptor row bytes before and after reconstruction, and the
 original authenticated evidence after the rebuild. The unchanged
 two-daemon test exercises the production sanity check and verified
-promotion. Candidate CI is pending.
+promotion. CI passed all eight jobs.
 
-After the fix passes, continue with peer-driven stream interruption and
-pre-promotion restart coverage. The preview remains default-off and
+## Validation
+
+Exact source `2ff50a53e727511a738c04fec6ddcd432c389790` passed
+[all eight jobs in run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069).
+The Test Suite passed 11 focused regressions, including the unchanged
+two-daemon shielded IBD case, 1,567 native workspace tests (25 skipped)
+and 32 no-asm tests. Workspace documentation tests, no-asm documentation
+tests, cargo doc and the kip10 example also passed. Formatting, strict
+Clippy and all platform/build jobs passed. Run 42930270803 was superseded.
+
+The next candidate is stacked [PR #8](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/8).
+Its interruption and restart tests exposed an active database role bug,
+fixed at `bc886b6aaf9df3f2deceac75691f1a1bb932f9fa`.
+[Run 42935509499](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42935509499)
+passed all eight jobs, 15 focused regressions, 1,568 workspace tests
+(25 skipped), and 32 no-asm tests. The preview remains default-off and
 Simnet-only.

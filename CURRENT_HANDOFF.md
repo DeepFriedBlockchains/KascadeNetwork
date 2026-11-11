@@ -105,9 +105,9 @@ records the continuation on the PR #6 branch. The typed UTXO completion
 worker verifies committed UTXO rows before publishing the position and
 stable flag in the same authority-checked batch. The consensus manager has
 a separate verified commit entry point. It asks the exact staging receiver
-to consume the completion receipt before swapping consensus. The real
-receipt issuer and receiver remain inactive test code pending production
-wiring. The initial source `bc393eae2d9bd03df2f684d06e53ec78e865da60` reached
+to consume the completion receipt before swapping consensus. At that checkpoint the receipt issuer and receiver were inactive test
+code. The later preview wires them into production IBD behind a
+default-off Simnet feature. The initial source `bc393eae2d9bd03df2f684d06e53ec78e865da60` reached
 [run 42894808941](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42894808941).
 Formatting reported two line wraps in the regression test. The correction
 `72af6c818be80c8a0365036e23c4744da8b4bf94` passed formatting in
@@ -122,8 +122,7 @@ receiver in a typed receipt. This uses the existing validation and
 application logic. The inactive promotion commit now independently
 rechecks the committed UTXO, SMT, proof, and shielded evidence before
 spending the lease. A regression removes committed UTXOs after receipt
-issuance and requires the write to fail with readiness closed. The
-follow-up Actions run is pending.
+issuance and requires the write to fail with readiness closed. The follow-up passed all eight jobs in run 42896198192, recorded below.
 
 ## Owner-bound proof application
 
@@ -145,7 +144,7 @@ before the streaming follow-up.
 
 The streaming follow-up also drains the SMT and shielded writer on a
 stream error before returning to the staging caller. A focused test
-covers error propagation only after worker release. Combined CI is in progress.
+covers error propagation only after worker release. The completed combined CI results are recorded below.
 
 The combined source is `ecf0aacafa9cfc3028eb363021c5aebf733c62e1` on
 `feature/phase6-owned-proof-import-20261110`. Its exact validation is
@@ -165,35 +164,83 @@ before writes, carries the same reservation through production IBD
 workers, and verifies durable virtual UTXOs before verified promotion.
 [Draft PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
 is stacked on the green `feature/phase6-owned-proof-import-20261110`
-branch at `ecf0aacafa9cfc3028eb363021c5aebf733c62e1`. The PR head is
+branch at `ecf0aacafa9cfc3028eb363021c5aebf733c62e1`. The initial head was
 `ebcb3ce00043b0d3f73a2ee7508f0cc68a363a69` on `feature/phase6-production-import-preview-20261110`.
-The authoritative [run 42909699012](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42909699012)
-has passed Check, formatting and strict Clippy, Check WASM32, and
-Check no_std. Test Suite, Test WASM32, Linux release and the WASM SDK
-build are still running. The same-SHA push run 42909689791 was superseded. The green
-parent passed eight focused regressions, 1,565 workspace tests (25
-skipped), and 32 no-asm tests in run 42898217206.
+[Run 42909699012](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42909699012)
+passed seven jobs and failed the two-daemon shielded preview on exact
+descriptor verification. The correction and green replacement run are
+recorded below. The parent passed eight focused regressions, 1,565
+workspace tests (25 skipped), and 32 no-asm tests in run 42898217206.
 
 ## Descriptor preservation correction
 
-See [the dated report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md). The sanity rebuild was replacing the
-external import descriptor with a local optimized descriptor. The
-correction uses reconstruction without descriptor or cache writes.
-Run 42932087535 passed 14 of 15 focused regressions and seven jobs.
-The restart case exposed an active/staging role bug. The follow-up
-assigns the role explicitly in the factory and revokes it at activation.
-Validation of that correction is pending.
+[PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
+is validated at `2ff50a53e727511a738c04fec6ddcd432c389790` on
+`feature/phase6-production-import-preview-20261110`.
+[Run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069)
+passed all eight jobs, including formatting, strict Clippy, 11 focused
+regressions, 1,567 workspace tests (25 skipped), and 32 no-asm tests.
+Workspace doc tests, no-asm doc tests, cargo doc and kip10 example checks
+also passed. The same-SHA push run 42930270803 was superseded.
 
-## Peer interruption candidate
+The production sanity rebuild had replaced the authenticated external
+descriptor with an optimized local descriptor. It now reconstructs
+without descriptor or proof-cache writes. Exact descriptor verification
+is unchanged. The original two-daemon shielded promotion regression
+passed. See [the descriptor report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md).
 
-See [the dated report](docs/development/PHASE6_PEER_STREAM_INTERRUPTION_2026-11-10.md). The candidate is separate from PR #7
-while the descriptor correction validates. It covers actual peer
-disconnects during SMT, shielded and UTXO transfer, then successful
-retry. It also reopens before promotion and rejects incomplete evidence.
-Candidate validation is pending.
+## Peer interruption and active receiver role
+
+[Draft PR #8](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/8)
+is stacked on PR #7. Its exact source is
+`bc886b6aaf9df3f2deceac75691f1a1bb932f9fa` on
+`feature/phase6-preview-peer-interruption-20261110`.
+[PR run 42935509499](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42935509499)
+passed all eight jobs. Formatting, strict Clippy, all 15 focused
+regressions, 1,568 workspace tests (25 skipped), and 32 no-asm tests passed.
+Workspace doc tests, no-asm doc tests, cargo doc and the kip10 example
+also passed. Same-SHA push run 42935435587 was superseded.
+This documentation-only continuation changes no tested implementation.
+
+The tests pause actual peer transfers, disconnect a temporary peer,
+require reservation retention while paused and worker draining before
+retry, then require verified promotion. The UTXO case reopens the same
+data directory before retry. A separate persistent database regression
+abandons a receipt before promotion, reopens incomplete SMT evidence and
+requires fresh authentication.
+
+Predecessor `b510f585f3e746e7541a58cc5e09b69c988189d4` passed seven jobs
+and 14 of 15 focused regressions in
+[run 42932087535](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42932087535).
+The remaining test exposed a real bug. Existing active databases skip
+genesis initialization when reopened, but that flag was also used to
+identify staging receivers. Fresh staging allocation now explicitly
+assigns a volatile role, activation revokes it and active reopen starts
+without it. The original rejection assertion remains. Successful import
+tests additionally require a durable verified promotion record and a
+closed active staging role.
+
+See [the interruption report](docs/development/PHASE6_PEER_STREAM_INTERRUPTION_2026-11-10.md).
+Shielded interruption occurs before metadata because this fixture has
+zero spent nullifiers. Its transparent UTXO stream is empty and pauses
+before the done frame. Nonempty payload interruption and abrupt process
+termination before promotion remain additional coverage.
 
 ## Next executable task
 
-Finish PR #7 descriptor correction validation in run 42930280069.
-Then validate the interruption candidate's focused cases and full
-workspace suite. Keep the preview default-off and Simnet-only.
+Start from the latest PR #8 branch head. Its tested implementation is
+`bc886b6aaf9df3f2deceac75691f1a1bb932f9fa`; run 42935509499 is green.
+No CI run remains pending for the implementation milestone.
+
+Extend `testing/integration/src/daemon_integration_tests.rs::run_shielded_ibd`
+with a valid spent-nullifier fixture and a nonempty transparent UTXO
+fixture. Extend the feature-gated transfer hooks in
+`protocol/flows/src/ibd/import_interruption.rs` to interrupt after
+payload writes have begun. Retain the existing reservation, restart
+rejection and verified-promotion assertions. Then add abrupt
+pre-promotion process termination coverage against the same data
+directory. Keep these changes on a new public feature branch stacked on
+PR #8, with focused regressions and full CI.
+
+All work remains default-off and Simnet-only. PRs #1–#8 remain open.
+No merge, publication or consensus activation is authorized.
