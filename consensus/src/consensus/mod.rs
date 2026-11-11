@@ -2029,6 +2029,10 @@ impl ConsensusApi for Consensus {
         Ok(self.services.dag_traversal_manager.anticone(hash, virtual_state.parents.iter().copied(), None)?)
     }
 
+    fn get_staging_pruning_point_proof(&self) -> Arc<PruningPointProof> {
+        self.services.pruning_proof_manager.get_staging_pruning_point_proof()
+    }
+
     fn get_pruning_point_proof(&self) -> Arc<PruningPointProof> {
         // PRUNE SAFETY: proof is cached before the prune op begins and the
         // pruning point cannot move during the prune so the cache remains valid

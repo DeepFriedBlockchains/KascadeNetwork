@@ -147,12 +147,22 @@ impl PruningProofManager {
     /// Temporary stores are used during construction, and headers are shared (via arcs)
     /// across levels in the final proof.
     pub(crate) fn build_pruning_point_proof(&self, pp: Hash) -> PruningPointProof {
+        let (proof, descriptor) = self.reconstruct_pruning_point_proof(pp);
+        if let Some(descriptor) = descriptor {
+            self.pruning_point_store.write().set_pruning_proof_descriptor(descriptor).unwrap();
+        }
+        proof
+    }
+
+    /// Reconstruct for import sanity checks without replacing authenticated
+    /// external evidence with a locally optimized descriptor.
+    pub(crate) fn reconstruct_pruning_point_proof(&self, pp: Hash) -> (PruningPointProof, Option<PruningProofDescriptor>) {
         let descriptor = self.pruning_point_store.read().pruning_proof_descriptor().optional().unwrap();
         if let Some(descriptor) = descriptor.as_ref() {
             // Use a locally built descriptor (when it matches the current pruning point) for fast reconstruction.
             // Otherwise, recalculate the descriptor to optimize proof size.
             if descriptor.pruning_point == pp && !descriptor.external {
-                return self.proof_from_descriptor(descriptor);
+                return (self.proof_from_descriptor(descriptor), None);
             }
         }
 
@@ -169,9 +179,7 @@ impl PruningProofManager {
         };
 
         let proof = self.proof_from_descriptor(&new_descriptor);
-        self.pruning_point_store.write().set_pruning_proof_descriptor(new_descriptor).unwrap();
-
-        proof
+        (proof, Some(new_descriptor))
     }
 
     /// Reconstructs the pruning proof described by `descriptor` by loading headers from storage

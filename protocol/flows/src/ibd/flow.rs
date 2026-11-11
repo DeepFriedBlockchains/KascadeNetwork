@@ -797,7 +797,7 @@ impl IbdFlow {
 
                 if let (Some(reference), Some(defender)) = (reference, defender) {
                     info!("Building the proof which was just applied (sanity test)");
-                    let built_proof = c.get_pruning_point_proof();
+                    let built_proof = c.get_staging_pruning_point_proof();
                     let mut mismatch_detected = false;
                     for (i, (ref_level, built_level)) in reference.iter().zip(built_proof.iter()).enumerate() {
                         if ref_level.iter().map(|h| h.hash).collect::<BlockHashSet>()

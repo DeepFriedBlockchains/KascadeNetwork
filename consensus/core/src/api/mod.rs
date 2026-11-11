@@ -887,6 +887,12 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// Rebuild staging proof data without changing the committed descriptor
+    /// or publishing an entry in the normal pruning proof cache.
+    fn get_staging_pruning_point_proof(&self) -> Arc<PruningPointProof> {
+        unimplemented!()
+    }
+
     fn get_pruning_point_proof(&self) -> Arc<PruningPointProof> {
         unimplemented!()
     }

@@ -163,12 +163,28 @@ default-off `kaspa-consensus/phase6-staging-preview` feature for an
 isolated Simnet staging receiver. It admits the exact defender-accepted proof
 before writes, carries the same reservation through production IBD
 workers, and verifies durable virtual UTXOs before verified promotion.
-Candidate Actions validation is pending.
+[Draft PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
+is stacked on the green `feature/phase6-owned-proof-import-20261110`
+branch at `ecf0aacafa9cfc3028eb363021c5aebf733c62e1`. The PR head is
+`ebcb3ce00043b0d3f73a2ee7508f0cc68a363a69` on `feature/phase6-production-import-preview-20261110`.
+The authoritative [run 42909699012](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42909699012)
+has passed Check, formatting and strict Clippy, Check WASM32, and
+Check no_std. Test Suite, Test WASM32, Linux release and the WASM SDK
+build are still running. The same-SHA push run 42909689791 was superseded. The green
+parent passed eight focused regressions, 1,565 workspace tests (25
+skipped), and 32 no-asm tests in run 42898217206.
+
+## Descriptor preservation correction
+
+See [the dated report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md). The sanity rebuild was replacing the
+external import descriptor with a local optimized descriptor. The
+correction uses reconstruction without descriptor or cache writes.
+Candidate validation is pending.
 
 ## Next executable task
 
-Run the complete preview regression matrix. Exercise a full peer-driven
-preview with a real staging manager and verify successful promotion,
-cancellation during each stream, and reopen after interruption.
-Review the supported preview builds before making any decision about
-replacing the default promotion path.
+Verify the focused two-daemon test
+`authority_integration_production_preview_promotes_shielded_ibd`,
+then the full eight-job run on the corrected PR #7 head. Continue with
+peer-driven state-stream interruption and pre-promotion restart cases
+after the descriptor correction passes.

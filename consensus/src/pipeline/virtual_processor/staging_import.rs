@@ -476,7 +476,17 @@ mod tests {
         runtime.block_on(async {
             receiver.stage_phase6_pruning_proof(&mut staging, vec![], vec![], vec![header]).unwrap().await.unwrap().unwrap();
         });
-        assert!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().is_some());
+        let descriptor_before = db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().unwrap();
+        let rebuilt = receiver.get_staging_pruning_point_proof();
+        assert_eq!(rebuilt.len(), proof.len());
+        for (actual, expected) in rebuilt.iter().zip(proof.iter()) {
+            let actual: kaspa_consensus_core::BlockHashSet = actual.iter().map(|header| header.hash).collect();
+            let expected: kaspa_consensus_core::BlockHashSet = expected.iter().map(|header| header.hash).collect();
+            assert_eq!(actual, expected);
+        }
+        assert_eq!(db.get(DatabaseStorePrefixes::PruningProofDescriptor).unwrap().unwrap(), descriptor_before);
+        let point = receiver.virtual_processor().staging_import_point().unwrap();
+        staging.proof.verify_committed(&db, point).unwrap();
         assert!(readiness.closed_revision().unwrap().is_some());
         assert!(db.get(PROMOTION_KEY).unwrap().is_none());
         runtime.block_on(staging.cancel());
