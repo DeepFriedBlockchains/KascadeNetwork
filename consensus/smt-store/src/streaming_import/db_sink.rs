@@ -79,6 +79,8 @@ impl<'a> DbSink<'a> {
         if self.batch_count > 0 {
             self.db.write(std::mem::take(&mut self.batch)).map_err(StoreError::DbError)?;
             self.batch_count = 0;
+            #[cfg(feature = "test-staging-interruption")]
+            kaspa_consensus_core::test_staging_write::after_smt_write();
         }
         Ok(())
     }

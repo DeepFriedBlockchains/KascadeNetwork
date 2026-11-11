@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 10, 2026.
+Updated November 11, 2026.
 
 ## Validation stack
 
@@ -226,21 +226,24 @@ zero spent nullifiers. Its transparent UTXO stream is empty and pauses
 before the done frame. Nonempty payload interruption and abrupt process
 termination before promotion remain additional coverage.
 
+## Nonempty payload and abrupt restart candidate
+
+The continuation is on `feature/phase6-payload-crash-recovery-20261111`,
+stacked on PR #8 at `4f23ff9f77bed788085efe03441420e522ad9595`.
+See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
+It adds real spent-nullifier and transparent UTXO fixtures, post-write
+peer cancellation and SIGKILL/reopen cases for SMT, shielded and UTXO
+imports. Source and Actions run IDs will be appended after the first push.
+This candidate has not yet passed validation.
+
 ## Next executable task
 
-Start from the latest PR #8 branch head. Its tested implementation is
-`bc886b6aaf9df3f2deceac75691f1a1bb932f9fa`; run 42935509499 is green.
-No CI run remains pending for the implementation milestone.
+Fetch the candidate PR head and its Actions run. Fix actual failures
+without relaxing the real-spend, nonempty-payload, worker reservation,
+SIGKILL, restart rejection or verified-promotion assertions.
+Require all six new regressions and full eight-job validation.
 
-Extend `testing/integration/src/daemon_integration_tests.rs::run_shielded_ibd`
-with a valid spent-nullifier fixture and a nonempty transparent UTXO
-fixture. Extend the feature-gated transfer hooks in
-`protocol/flows/src/ibd/import_interruption.rs` to interrupt after
-payload writes have begun. Retain the existing reservation, restart
-rejection and verified-promotion assertions. Then add abrupt
-pre-promotion process termination coverage against the same data
-directory. Keep these changes on a new public feature branch stacked on
-PR #8, with focused regressions and full CI.
-
-All work remains default-off and Simnet-only. PRs #1–#8 remain open.
-No merge, publication or consensus activation is authorized.
+Development is exclusively through GitHub and GitHub Actions.
+The preview remains default-off and Simnet-only. PRs #1–#8 remain intact.
+No merge, release, private-history import or consensus activation is
+authorized.

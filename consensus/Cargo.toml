@@ -73,6 +73,7 @@ name = "check_scripts"
 harness = false
 
 [features]
+test-staging-interruption = ["kaspa-consensus-core/test-staging-interruption", "kaspa-smt-store/test-staging-interruption"]
 phase6-staging-preview = []
 default = ["shielded-circuit"]
 html_reports = []

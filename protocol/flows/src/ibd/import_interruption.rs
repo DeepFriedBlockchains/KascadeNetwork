@@ -11,6 +11,7 @@ struct SenderPause {
 
 struct Interruption {
     component: StagingImportComponent,
+    after_payload: bool,
     sender: Mutex<Option<SenderPause>>,
     receiver: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -23,17 +24,28 @@ fn active() -> &'static Mutex<Option<Arc<Interruption>>> {
 /// Dropping the control releases the peer and disarms the next connection.
 pub struct TransferPause {
     case: Arc<Interruption>,
+    write_pause: Option<kaspa_consensus_core::test_staging_write::WritePause>,
     sender_paused: Option<oneshot::Receiver<()>>,
     receiver_waiting: Option<oneshot::Receiver<()>>,
     release: Option<oneshot::Sender<()>>,
 }
 
 pub fn pause_transfer(component: StagingImportComponent) -> TransferPause {
+    arm(component, false)
+}
+
+/// Pause only after a nonempty payload has been durably written by the receiver.
+pub fn pause_after_payload(component: StagingImportComponent) -> TransferPause {
+    arm(component, true)
+}
+
+fn arm(component: StagingImportComponent, after_payload: bool) -> TransferPause {
     let (sender_ready, sender_paused) = oneshot::channel();
     let (receiver_ready, receiver_waiting) = oneshot::channel();
     let (release, wait_for_release) = oneshot::channel();
     let case = Arc::new(Interruption {
         component,
+        after_payload,
         sender: Mutex::new(Some(SenderPause { ready: sender_ready, release: wait_for_release })),
         receiver: Mutex::new(Some(receiver_ready)),
     });
@@ -41,16 +53,27 @@ pub fn pause_transfer(component: StagingImportComponent) -> TransferPause {
     assert!(current.is_none(), "an interruption case is already armed");
     *current = Some(case.clone());
     drop(current);
-    TransferPause { case, sender_paused: Some(sender_paused), receiver_waiting: Some(receiver_waiting), release: Some(release) }
+    let write_pause = (after_payload && component == StagingImportComponent::Smt)
+        .then(kaspa_consensus_core::test_staging_write::pause);
+    TransferPause { case, write_pause, sender_paused: Some(sender_paused), receiver_waiting: Some(receiver_waiting), release: Some(release) }
 }
 
 impl TransferPause {
     pub async fn wait_until_paused(&mut self) {
-        self.sender_paused.take().expect("sender pause was already awaited").await.expect("peer sender exited before pause");
+        if let Some(write) = &self.write_pause {
+            while !write.is_paused() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        } else {
+            self.sender_paused.take().expect("sender pause was already awaited").await.expect("peer sender exited before pause");
+        }
         self.receiver_waiting.take().expect("receiver was already awaited").await.expect("receiver exited before import");
     }
 
     pub fn release(&mut self) {
+        if let Some(write) = &self.write_pause {
+            write.release();
+        }
         if let Some(release) = self.release.take() {
             let _ = release.send(());
         }
@@ -69,7 +92,7 @@ impl Drop for TransferPause {
 
 pub(crate) async fn pause_sender(component: StagingImportComponent) {
     let case = active().lock().clone();
-    let Some(case) = case.filter(|case| case.component == component) else { return };
+    let Some(case) = case.filter(|case| case.component == component && !case.after_payload) else { return };
     let pending = case.sender.lock().take();
     if let Some(SenderPause { ready, release }) = pending {
         let _ = ready.send(());
@@ -83,5 +106,15 @@ pub(crate) fn receiver_waiting(component: StagingImportComponent) {
     let ready = case.receiver.lock().take();
     if let Some(ready) = ready {
         let _ = ready.send(());
+    }
+}
+
+pub(crate) async fn receiver_payload_written(component: StagingImportComponent) {
+    let case = active().lock().clone();
+    let Some(case) = case.filter(|case| case.component == component && case.after_payload) else { return };
+    let pending = case.sender.lock().take();
+    if let Some(SenderPause { ready, release }) = pending {
+        let _ = ready.send(());
+        let _ = release.await;
     }
 }

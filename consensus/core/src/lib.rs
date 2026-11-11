@@ -34,6 +34,8 @@ pub mod network;
 pub mod pruning;
 pub mod sign;
 pub mod subnets;
+#[cfg(feature = "test-staging-interruption")]
+pub mod test_staging_write;
 pub mod trusted;
 pub mod tx;
 pub mod utxo;

@@ -1304,6 +1304,8 @@ impl IbdFlow {
         }
         // Metadata frame. Empty `data` => the pruning point has no shielded state.
         let md = stream.recv_metadata().await?;
+        #[cfg(feature = "test-staging-interruption")]
+        let has_nullifiers = md.nullifier_count > 0;
         if md.data.is_empty() {
             // F-02: the "empty" claim must also match the PoW commitment — a peer that claims
             // empty while the selected child commits a non-empty root is misbehaving.
@@ -1342,6 +1344,10 @@ impl IbdFlow {
         .await;
         drop(tx);
         finish_pruning_import_worker(stream_result, builder_handle, "shielded importer").await?;
+        #[cfg(feature = "test-staging-interruption")]
+        if consensus.staging_import().is_some() && has_nullifiers {
+            super::import_interruption::receiver_payload_written(StagingImportComponent::Shielded).await;
+        }
         consensus.async_set_pruning_shielded_stable().await;
 
         info!("shielded state synced: {} nullifiers", stream.count());
@@ -1519,6 +1525,8 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
             super::import_interruption::receiver_waiting(StagingImportComponent::Utxo);
         }
         while let Some(chunk) = chunk_stream.next().await? {
+            #[cfg(feature = "test-staging-interruption")]
+            let has_utxos = !chunk.is_empty();
             let import = consensus.staging_import().cloned();
             multiset = consensus
                 .clone()
@@ -1531,6 +1539,10 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
                     Ok::<_, ProtocolError>(multiset)
                 })
                 .await?;
+            #[cfg(feature = "test-staging-interruption")]
+            if consensus.staging_import().is_some() && has_utxos {
+                super::import_interruption::receiver_payload_written(StagingImportComponent::Utxo).await;
+            }
         }
         consensus.check_staging_component(StagingImportComponent::Utxo, false).await.map_err(staging_error)?;
         consensus.clone().spawn_blocking(move |c| c.import_pruning_point_utxo_set(pruning_point, multiset)).await?;
