@@ -61,3 +61,16 @@ shielded/UTXO stream interruption remain separate coverage.
 
 Next, validate the role correction and all 15 focused regressions, then
 the complete eight-job suite. Keep the preview default-off and Simnet-only.
+
+## Focused regressions
+
+- `authority_integration_preview_cancels_interrupted_smt_peer`
+- `authority_integration_preview_cancels_interrupted_shielded_peer`
+- `authority_integration_preview_restarts_after_interrupted_utxo_peer`
+- `authority_integration_reopen_before_promotion_rejects_incomplete_evidence`
+
+The first, second and fourth cases passed in run 42932087535. The third
+failed the retained assertion that a reopened active database must not
+advertise staging import support. Source `bc886b6` corrects that role
+classification. The existing successful production preview test now
+checks the durable promotion record and revocation of the staging role.
