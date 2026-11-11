@@ -170,6 +170,10 @@ impl ConsensusManager {
         }
     }
 
+    pub fn is_staging_import_pending(&self) -> bool {
+        self.staging_gate.try_lock().is_err()
+    }
+
     pub fn register_consensus_reset_handler(&self, handler: Arc<dyn ConsensusResetHandler>) {
         self.inner.write().consensus_reset_handlers.push(handler);
     }

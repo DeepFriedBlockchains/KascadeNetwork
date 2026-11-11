@@ -181,10 +181,16 @@ external import descriptor with a local optimized descriptor. The
 correction uses reconstruction without descriptor or cache writes.
 Candidate validation is pending.
 
+## Peer interruption candidate
+
+See [the dated report](docs/development/PHASE6_PEER_STREAM_INTERRUPTION_2026-11-10.md). The candidate is separate from PR #7
+while the descriptor correction validates. It covers actual peer
+disconnects during SMT, shielded and UTXO transfer, then successful
+retry. It also reopens before promotion and rejects incomplete evidence.
+Candidate validation is pending.
+
 ## Next executable task
 
-Verify the focused two-daemon test
-`authority_integration_production_preview_promotes_shielded_ibd`,
-then the full eight-job run on the corrected PR #7 head. Continue with
-peer-driven state-stream interruption and pre-promotion restart cases
-after the descriptor correction passes.
+Finish PR #7 descriptor correction validation in run 42930280069.
+Then validate the interruption candidate's focused cases and full
+workspace suite. Keep the preview default-off and Simnet-only.

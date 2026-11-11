@@ -977,6 +977,10 @@ impl IbdFlow {
         let builder_handle =
             tokio::task::spawn_blocking(move || consensus_for_import.import_pruning_point_smt(pruning_point, md, shortcut_block, rx));
 
+        #[cfg(feature = "test-staging-interruption")]
+        if consensus.staging_import().is_some() {
+            super::import_interruption::receiver_waiting(StagingImportComponent::Smt);
+        }
         let stream_result = async {
             while let Some(chunk) = stream.next_chunk().await? {
                 tx.send(chunk).await.map_err(|_| ProtocolError::Other("streaming SMT builder stopped unexpectedly"))?;
@@ -1294,6 +1298,10 @@ impl IbdFlow {
 
         let mut stream = ShieldedStream::new(&self.router, &mut self.incoming_route);
 
+        #[cfg(feature = "test-staging-interruption")]
+        if consensus.staging_import().is_some() {
+            super::import_interruption::receiver_waiting(StagingImportComponent::Shielded);
+        }
         // Metadata frame. Empty `data` => the pruning point has no shielded state.
         let md = stream.recv_metadata().await?;
         if md.data.is_empty() {
@@ -1506,6 +1514,10 @@ staging selected tip ({}) is too small or negative. Aborting IBD...",
             .await?;
         let mut chunk_stream = PruningPointUtxosetChunkStream::new(&self.router, &mut self.incoming_route);
         let mut multiset = MuHash::new();
+        #[cfg(feature = "test-staging-interruption")]
+        if consensus.staging_import().is_some() {
+            super::import_interruption::receiver_waiting(StagingImportComponent::Utxo);
+        }
         while let Some(chunk) = chunk_stream.next().await? {
             let import = consensus.staging_import().cloned();
             multiset = consensus
