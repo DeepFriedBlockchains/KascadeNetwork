@@ -304,3 +304,22 @@ validation, closed-role, promotion-record, cancellation and restart
 assertions. Do not repeat the completed PR #9 payload or crash work.
 No owner decision blocks continued testing. Merge, release and
 consensus activation remain unauthorized.
+
+## Final session checkpoint
+
+Implementation `509e54b5af6a686b24086eea30fe97e8dc02af23` remains
+under [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692).
+Formatting, strict Clippy, Check, Test WASM32, Check WASM32 and
+Check no_std passed. Native Test Suite, Linux release and WASM SDK
+release remain pending. The native job is 130718919553. No new native
+pass is claimed for PR #10. Markdown-only handoff commits do not change
+the validating implementation.
+
+The next session should verify all eight jobs of that exact run.
+If native tests fail, inspect the retained real proof validation and
+actual admission rejection in `run_payload_ibd_at`; preserve
+`Unsupported`, durable-promotion and closed-role assertions.
+PR #9's real payload, cancellation and SIGKILL cases are complete and
+passed; do not reimplement them. After PR #10 turns green, continue
+tampered nonempty nullifier stream rejection and authenticated retry.
+No owner decision is needed for continued tests.
