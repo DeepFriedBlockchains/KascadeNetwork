@@ -1504,7 +1504,7 @@ async fn run_payload_ibd_at(
             submit_ibd_fixture_spend(&kaspad1, &rpc_client1, &params).await;
         }
         #[cfg(feature = "phase6-staging-preview")]
-        if fixture == IbdPayloadFixture::Transparent && mined == 80 {
+        if fixture == IbdPayloadFixture::Transparent && mined >= 80 && (mined - 80).is_multiple_of(50) {
             submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
         }
         #[cfg(not(feature = "phase6-staging-preview"))]
@@ -1520,6 +1520,10 @@ async fn run_payload_ibd_at(
     while (dag_info.pruning_point_hash == SIMNET_GENESIS.hash || pruning_point_blue_score <= finality_depth)
         && extra_blocks < extra_blocks_limit
     {
+        #[cfg(feature = "phase6-staging-preview")]
+        if fixture == IbdPayloadFixture::Transparent && extra_blocks.is_multiple_of(50) {
+            submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
+        }
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
         rpc_client1.submit_block(template.block, false).await.unwrap();
         extra_blocks += 1;
@@ -1568,8 +1572,11 @@ async fn run_payload_ibd_at(
         let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
         let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        let metadata = session.get_pruning_point_smt_metadata(target_pruning_point).unwrap();
+        assert!(metadata.active_lanes_count >= 10, "fixture lanes fell outside the pruning-point finality window");
         assert!(
-            !active.unguarded_session_blocking().get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
+            !session.get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
             "transparent fixture has no pruning-point UTXOs"
         );
     }

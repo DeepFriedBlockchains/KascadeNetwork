@@ -243,7 +243,12 @@ Source `1c1042147e4b68b17460a46a85a55d7b961f71d0` passed Check,
 Check WASM32 and Check no_std in PR run 43067275773. Lints stopped at
 formatting. Thirteen exact Rustfmt hunks from the GitHub log were applied
 in the follow-up. Strict Clippy and native results are pending.
-This candidate has not yet passed full validation.
+Source `13a1e3de896eed9deb59e535f2431209be18b663` passed formatting,
+strict Clippy, Check, Check WASM32, Check no_std and Test WASM32 in
+run 43067753790 before native execution. The fixture follow-up refreshes
+ten user lanes inside the finality window and asserts their presence at
+the actual pruning point. Its exact source and CI run are recorded in
+PR #9. This candidate has not yet passed full validation.
 
 ## Next executable task
 

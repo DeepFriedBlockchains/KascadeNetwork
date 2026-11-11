@@ -103,3 +103,16 @@ in the new integration helpers and pause controller; strict Clippy did
 not run. The exact formatter diff from the GitHub job was applied.
 Native and remaining build jobs were still pending at correction time.
 No native pass is claimed for this candidate yet.
+
+## Active-window fixture strengthening
+
+Formatting source `13a1e3de896eed9deb59e535f2431209be18b663` passed
+Check, strict Clippy, Check WASM32, Check no_std and Test WASM32 in
+run 43067753790. Native validation was still building.
+
+The transparent fixture now refreshes its ten signed user lanes every
+50 mined blocks, including the extra pruning-advance loop. SMT export
+filters lanes to the pruning point's finality window, so a one-off early
+transaction set could expire before that point advances. The fixture
+now asserts at least ten active lanes at the actual pruning point,
+ensuring the partial-write test cannot become an empty import.
