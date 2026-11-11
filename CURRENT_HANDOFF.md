@@ -261,3 +261,19 @@ Development is exclusively through GitHub and GitHub Actions.
 The preview remains default-off and Simnet-only. PRs #1–#8 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
+
+## Current validation checkpoint
+
+[draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9)
+is at implementation `110d1625763c9fecd2cf2a226e5e7fb25add99bf` on
+`feature/phase6-payload-crash-recovery-20261111`.
+Authoritative [PR run 43068789717](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43068789717)
+is pending. Same-SHA push run 43068779387 was superseded.
+Formatting, strict Clippy, Check, Check WASM32 and Check no_std passed.
+Native focused and complete workspace tests have not finished. Expected
+focused additions are the six regressions above; require the exact
+observed counts from the completed job logs before reporting a pass.
+
+Next, retrieve this exact source/run, fix actual native failures and
+complete all eight jobs. Do not restart fixture/provenance recovery,
+descriptor work, or the completed PR #8 regressions.
