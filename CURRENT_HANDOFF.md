@@ -276,3 +276,31 @@ All development uses GitHub and GitHub Actions. The preview remains
 default-off and Simnet-only. PRs #1–#9 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
+
+## Exact handoff checkpoint
+
+Current implementation: `509e54b5af6a686b24086eea30fe97e8dc02af23`.
+Branch: `feature/phase6-active-admission-regression-20261111`.
+Draft PR: [#10](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/10).
+Authoritative [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692)
+is in progress. Push run 43076078613 was superseded.
+Formatting passed; Test WASM32, Check WASM32 and Check no_std passed.
+Check, strict Clippy, native Test Suite and Linux/WASM SDK release
+builds were pending when this checkpoint was committed. No focused or
+full native pass is claimed for this candidate. Native job ID is
+130718919553. This Markdown-only continuation changes no implementation
+and intentionally leaves that exact source run in progress.
+
+PR #9 is complete at implementation
+`110d1625763c9fecd2cf2a226e5e7fb25add99bf`, documentation head
+`9599133be7737b8006cab373d9a99d8fe9bafff8`, run 43068789717,
+all eight jobs passed. Counts are 21 focused, 1,568 regular workspace
+with 25 existing skips, and 32 no-asm tests.
+
+Next executable task: fetch PR #10's latest head and run 43076086692.
+Fix actual failures in the retained-receipt admission regression, then
+require all eight jobs. Preserve `Unsupported`, the real proof
+validation, closed-role, promotion-record, cancellation and restart
+assertions. Do not repeat the completed PR #9 payload or crash work.
+No owner decision blocks continued testing. Merge, release and
+consensus activation remain unauthorized.
