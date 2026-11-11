@@ -250,15 +250,27 @@ All six new regressions passed with their safety assertions retained.
 See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
 This documentation-only continuation changes no tested implementation.
 
+## Active receiver admission candidate
+
+The next branch is
+`feature/phase6-active-admission-regression-20261111`, stacked on
+the validated PR #9 documentation head
+`9599133be7737b8006cab373d9a99d8fe9bafff8`.
+See [the dated report](docs/development/PHASE6_ACTIVE_ADMISSION_2026-11-11.md).
+The production test harness retains genuinely validated proof receipts
+and calls the actual admission API on ordinary active receivers before
+import and after promotion, requiring `Unsupported`. Restart cases
+exercise the same boundary on reopened active receivers. This adds
+tests without changing production authority behavior.
+
 ## Next executable task
 
-Extend the production preview tests to retain a genuinely validated
-proof receipt across import/promotion. Call
-`begin_verified_staging_import` on the ordinary active receiver before
-import and after promotion, requiring `Unsupported` and unchanged
-promotion/role state. Reuse the new restart cases to cover the same
-admission boundary after reopening. Use a feature branch stacked on
-PR #9 and validate it independently.
+Read the new candidate PR head and Actions run. Source and run IDs
+are recorded in its PR description after push. Require focused and
+full eight-job validation; do not repeat PR #9's completed payload or
+crash investigation. After green validation, add tampered nonempty
+nullifier stream rejection and fresh retry coverage. Bounded-memory
+shielded ingestion remains a separate implementation item.
 
 All development uses GitHub and GitHub Actions. The preview remains
 default-off and Simnet-only. PRs #1–#9 remain intact.

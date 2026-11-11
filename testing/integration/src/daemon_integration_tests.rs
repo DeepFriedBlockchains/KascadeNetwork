@@ -1604,6 +1604,42 @@ async fn run_payload_ibd_at(
     let rpc_client2 = kaspad2.start().await;
 
     #[cfg(feature = "phase6-staging-preview")]
+    let retained_proof = if require_verified {
+        let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let source = manager.consensus();
+        let (proof, metadata) = tokio::task::spawn_blocking(move || {
+            let session = source.unguarded_session_blocking();
+            let tip = session.get_header(session.get_headers_selected_tip()).unwrap();
+            let proof = session.get_staging_pruning_point_proof();
+            ((*proof).clone(), kaspa_consensus_core::pruning::PruningProofMetadata::new(tip.blue_work))
+        })
+        .await
+        .unwrap();
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let defender = manager.consensus();
+        let receipt = tokio::task::spawn_blocking(move || {
+            let session = defender.unguarded_session_blocking();
+            let receipt = session.validate_staging_pruning_proof(proof.clone(), &metadata).unwrap();
+            assert!(
+                matches!(
+                    session.begin_verified_staging_import(receipt),
+                    Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported)
+                ),
+                "ordinary active receiver admitted a verified proof before IBD"
+            );
+            assert!(!session.supports_verified_staging_import());
+            session.validate_staging_pruning_proof(proof, &metadata).unwrap()
+        })
+        .await
+        .unwrap();
+        Some(receipt)
+    } else {
+        None
+    };
+
+    #[cfg(feature = "phase6-staging-preview")]
     let mut pause = interruption.map(|component| {
         if fixture == IbdPayloadFixture::Original {
             kaspa_p2p_flows::ibd::import_interruption::pause_transfer(component)
@@ -1718,6 +1754,18 @@ async fn run_payload_ibd_at(
         let session = active.unguarded_session_blocking();
         assert!(session.has_verified_staging_promotion().unwrap(), "IBD did not commit a verified promotion record");
         assert!(!session.supports_verified_staging_import(), "active consensus retained the staging receiver role");
+        #[cfg(feature = "phase6-staging-preview")]
+        if let Some(receipt) = retained_proof {
+            assert!(
+                matches!(
+                    session.begin_verified_staging_import(receipt),
+                    Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported)
+                ),
+                "activated receiver admitted the retained authenticated proof"
+            );
+            assert!(session.has_verified_staging_promotion().unwrap(), "rejected admission changed the promotion record");
+            assert!(!session.supports_verified_staging_import(), "rejected admission reopened the staging role");
+        }
     }
 
     // Assertion 2: the seeded frontier byte-matches the syncer's at the pruning point.
