@@ -2495,6 +2495,10 @@ impl VirtualStateProcessor {
         self.commit_staging_promotion_checked(lease, proof, child, false)
     }
 
+    pub(crate) fn has_verified_promotion_record(&self) -> kaspa_database::prelude::StoreResult<bool> {
+        Ok(self.db.get(super::staging_import::PROMOTION_KEY)?.as_deref() == Some(b"promotion-ready".as_slice()))
+    }
+
     pub(super) fn commit_staging_promotion_checked(
         &self,
         lease: super::persistent_branch_authority::PersistentBranchLease,

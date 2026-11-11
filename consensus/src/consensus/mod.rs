@@ -165,6 +165,8 @@ pub struct Consensus {
 
     // Signals
     is_consensus_exiting: Arc<AtomicBool>,
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    is_staging_receiver: AtomicBool,
 }
 
 impl Deref for Consensus {
@@ -387,6 +389,8 @@ impl Consensus {
             config,
             creation_timestamp,
             is_consensus_exiting,
+            #[cfg(any(test, feature = "phase6-staging-preview"))]
+            is_staging_receiver: AtomicBool::new(false),
         };
 
         // Run database upgrades if any
@@ -488,6 +492,11 @@ impl Consensus {
 
     pub fn processing_counters(&self) -> &Arc<ProcessingCounters> {
         &self.counters
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    pub(super) fn set_staging_receiver(&self, staging: bool) {
+        self.is_staging_receiver.store(staging, Ordering::Release);
     }
 
     pub fn signal_exit(&self) {
@@ -728,7 +737,15 @@ impl Consensus {
 impl ConsensusApi for Consensus {
     #[cfg(any(test, feature = "phase6-staging-preview"))]
     fn supports_verified_staging_import(&self) -> bool {
-        !self.config.process_genesis && self.config.params.net.network_type == kaspa_consensus_core::network::NetworkType::Simnet
+        self.is_staging_receiver.load(Ordering::Acquire)
+            && self.config.params.net.network_type == kaspa_consensus_core::network::NetworkType::Simnet
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn has_verified_staging_promotion(&self) -> Result<bool, kaspa_consensus_core::api::StagingPromotionError> {
+        self.virtual_processor
+            .has_verified_promotion_record()
+            .map_err(|error| kaspa_consensus_core::api::StagingPromotionError::Rejected(error.to_string()))
     }
 
     #[cfg(any(test, feature = "phase6-staging-preview"))]

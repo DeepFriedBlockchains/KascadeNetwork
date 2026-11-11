@@ -1442,6 +1442,7 @@ async fn run_shielded_ibd(
             let active = manager.consensus();
             assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
             assert!(!active.unguarded_session_blocking().supports_verified_staging_import());
+            assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
             drop(active);
             drop(manager);
             rpc_client2 = kaspad2.start().await;
@@ -1478,10 +1479,10 @@ async fn run_shielded_ibd(
     if require_verified {
         let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
-        assert!(
-            manager.consensus().unguarded_session_blocking().supports_verified_staging_import(),
-            "IBD did not promote a receiver that requires a verified receipt"
-        );
+        let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        assert!(session.has_verified_staging_promotion().unwrap(), "IBD did not commit a verified promotion record");
+        assert!(!session.supports_verified_staging_import(), "active consensus retained the staging receiver role");
     }
 
     // Assertion 2: the seeded frontier byte-matches the syncer's at the pruning point.

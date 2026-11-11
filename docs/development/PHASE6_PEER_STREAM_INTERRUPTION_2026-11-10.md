@@ -25,3 +25,18 @@ include them. The preview remains default-off and Simnet-only.
 
 Both parent validation and candidate validation are pending. These
 tests do not authorize replacing the default promotion path.
+
+## Restart finding
+
+Run 42932087535 passed seven jobs and 14 of 15 focused regressions.
+The UTXO interruption drained successfully, but reopening the active
+database incorrectly advertised staging support. The factory skips
+genesis processing for an existing active database, so that configuration
+flag does not identify a staging receiver.
+
+The correction gives freshly allocated staging receivers an explicit
+in-memory role. The controller revokes it when making the receiver
+active, and reopened active databases start without it. The peer test
+checks the durable verified promotion record after success and requires
+the active receiver role to be closed. The original restart assertion
+remains in place.

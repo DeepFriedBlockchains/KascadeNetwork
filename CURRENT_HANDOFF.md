@@ -179,7 +179,10 @@ skipped), and 32 no-asm tests in run 42898217206.
 See [the dated report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md). The sanity rebuild was replacing the
 external import descriptor with a local optimized descriptor. The
 correction uses reconstruction without descriptor or cache writes.
-Candidate validation is pending.
+Run 42932087535 passed 14 of 15 focused regressions and seven jobs.
+The restart case exposed an active/staging role bug. The follow-up
+assigns the role explicitly in the factory and revokes it at activation.
+Validation of that correction is pending.
 
 ## Peer interruption candidate
 
