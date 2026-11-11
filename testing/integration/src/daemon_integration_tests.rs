@@ -1303,17 +1303,155 @@ async fn authority_integration_preview_restarts_after_interrupted_utxo_peer() {
     run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true).await;
 }
 
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_interrupts_spent_nullifier_payload() {
+    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Shielded), true, IbdPayloadFixture::SpentNullifiers)
+        .await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_interrupts_nonempty_utxo_payload() {
+    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true, IbdPayloadFixture::Transparent).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_cancels_partial_smt_write() {
+    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Smt), true, IbdPayloadFixture::Transparent).await;
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_recovers_abrupt_smt_payload() {
+    run_abrupt_payload_import("smt", IbdPayloadFixture::Transparent).await;
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_recovers_abrupt_shielded_payload() {
+    run_abrupt_payload_import("shielded", IbdPayloadFixture::SpentNullifiers).await;
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_recovers_abrupt_utxo_payload() {
+    run_abrupt_payload_import("utxo", IbdPayloadFixture::Transparent).await;
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn phase6_payload_crash_worker() {
+    let Ok(root) = std::env::var("KASCADE_PHASE6_CRASH_ROOT") else { return };
+    let component = std::env::var("KASCADE_PHASE6_CRASH_COMPONENT").unwrap();
+    let (component, fixture) = match component.as_str() {
+        "smt" => (kaspa_consensus_core::api::StagingImportComponent::Smt, IbdPayloadFixture::Transparent),
+        "shielded" => (kaspa_consensus_core::api::StagingImportComponent::Shielded, IbdPayloadFixture::SpentNullifiers),
+        "utxo" => (kaspa_consensus_core::api::StagingImportComponent::Utxo, IbdPayloadFixture::Transparent),
+        _ => panic!("unknown crash component"),
+    };
+    run_payload_ibd_at(true, Some(component), false, fixture, Some((root.into(), true))).await;
+    panic!("crash worker returned before termination");
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+async fn run_abrupt_payload_import(component: &str, fixture: IbdPayloadFixture) {
+    use std::os::unix::process::ExitStatusExt;
+    let root = tempfile::tempdir().unwrap();
+    let mut child = tokio::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("daemon_integration_tests::phase6_payload_crash_worker")
+        .arg("--nocapture")
+        .env("KASCADE_PHASE6_CRASH_ROOT", root.path())
+        .env("KASCADE_PHASE6_CRASH_COMPONENT", component)
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(300), async {
+        while !root.path().join("payload-written").exists() {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!("crash worker exited before its durable-write checkpoint: {status}");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("child never committed payload data");
+    child.start_kill().unwrap();
+    let status = child.wait().await.unwrap();
+    assert_eq!(status.signal(), Some(9), "test must kill the process without graceful cleanup");
+    run_payload_ibd_at(true, None, false, fixture, Some((root.path().to_path_buf(), false))).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+async fn submit_ibd_fixture_lanes(rpc: &GrpcClient, miner: &Address, maturity: u64) {
+    let utxos = fetch_spendable_utxos(rpc, miner.clone(), maturity).await;
+    assert!(utxos.len() >= 10);
+    let key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[9u8; 32]).unwrap();
+    for (index, (outpoint, entry)) in utxos.iter().take(10).enumerate() {
+        let mut subnet = [0u8; 20];
+        subnet[3] = index as u8 + 1;
+        let transaction = Transaction::new(
+            TX_VERSION_TOCCATA,
+            vec![TransactionInput::new(*outpoint, vec![], 0, 1)],
+            vec![TransactionOutput {
+                value: entry.amount - fee::calc_for_plain_standard_tx(1, 1),
+                script_public_key: pay_to_address_script(miner),
+                covenant: None,
+            }],
+            0,
+            SubnetworkId::from_bytes(subnet),
+            0,
+            vec![],
+        );
+        let signed = sign(MutableTransaction::with_entries(transaction, vec![entry.clone()]), key);
+        rpc.submit_transaction((&signed.tx).into(), false).await.unwrap();
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IbdPayloadFixture {
+    Original,
+    SpentNullifiers,
+    Transparent,
+}
+
 async fn run_shielded_ibd(
     require_verified: bool,
     interruption: Option<kaspa_consensus_core::api::StagingImportComponent>,
     restart_receiver: bool,
 ) {
+    run_payload_ibd(require_verified, interruption, restart_receiver, IbdPayloadFixture::Original).await;
+}
+
+async fn run_payload_ibd(
+    require_verified: bool,
+    interruption: Option<kaspa_consensus_core::api::StagingImportComponent>,
+    restart_receiver: bool,
+    fixture: IbdPayloadFixture,
+) {
+    run_payload_ibd_at(require_verified, interruption, restart_receiver, fixture, None).await;
+}
+
+async fn run_payload_ibd_at(
+    require_verified: bool,
+    interruption: Option<kaspa_consensus_core::api::StagingImportComponent>,
+    restart_receiver: bool,
+    fixture: IbdPayloadFixture,
+    persistent: Option<(PathBuf, bool)>,
+) {
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_rpc_core=debug");
 
-    let override_params_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/params/shielded_ibd_sync_test_params.json");
+    let params_file = if fixture == IbdPayloadFixture::Transparent {
+        "testdata/params/transparent_payload_ibd_test_params.json"
+    } else {
+        "testdata/params/shielded_ibd_sync_test_params.json"
+    };
+    let override_params_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(params_file);
     let params = load_override_params(&override_params_path);
-    assert!(params.shielded_coinbase, "test params must enable the shielded coinbase or nothing populates shielded state");
+    assert_eq!(params.shielded_coinbase, fixture != IbdPayloadFixture::Transparent);
 
     let args = Args {
         simnet: true,
@@ -1326,7 +1464,15 @@ async fn run_shielded_ibd(
     };
 
     let total_fd_limit = 10;
+    #[cfg(feature = "phase6-staging-preview")]
+    let mut kaspad1 = if let Some((root, _)) = &persistent {
+        Daemon::new_persistent_with_args(args.clone(), total_fd_limit, &root.join("sender"))
+    } else {
+        Daemon::new_random_with_args(args.clone(), total_fd_limit)
+    };
+    #[cfg(not(feature = "phase6-staging-preview"))]
     let mut kaspad1 = Daemon::new_random_with_args(args.clone(), total_fd_limit);
+    let recovering = persistent.as_ref().is_some_and(|(_, crash_child)| !crash_child);
     let rpc_client1 = kaspad1.start().await;
 
     // A shielded_coinbase network pays the block reward as a coinbase note to the
@@ -1335,7 +1481,12 @@ async fn run_shielded_ibd(
     // address here would fail the shielded mint (build_coinbase_mint parses
     // script[..43] as a canonical Orchard address).
     let miner_recipient = kaspa_shielded_core::wallet::address_bytes_from_seed([7u8; 32]).expect("valid orchard address");
-    let miner_address = Address::new(kaspad1.network.into(), kaspa_addresses::Version::ShieldedOrchard, &miner_recipient);
+    let miner_address = if fixture == IbdPayloadFixture::Transparent {
+        let key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[9u8; 32]).unwrap();
+        Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &key.x_only_public_key().0.serialize())
+    } else {
+        Address::new(kaspad1.network.into(), kaspa_addresses::Version::ShieldedOrchard, &miner_recipient)
+    };
 
     // Phase 1: mine past the pruning depth so the pruning point advances off
     // genesis and past finality_depth (same guard as the SMT sync test: the IBD
@@ -1345,8 +1496,19 @@ async fn run_shielded_ibd(
     let finality_depth = params.finality_depth();
     let pruning_depth = params.pruning_depth();
     let coinbase_maturity = params.coinbase_maturity();
-    let initial_blocks = (coinbase_maturity as usize) + pruning_depth as usize + 80;
-    for _ in 0..initial_blocks {
+    let initial_blocks =
+        (coinbase_maturity as usize) + pruning_depth as usize + if fixture == IbdPayloadFixture::SpentNullifiers { 300 } else { 80 };
+    for mined in 0..if recovering { 0 } else { initial_blocks } {
+        #[cfg(feature = "phase6-staging-preview")]
+        if fixture == IbdPayloadFixture::SpentNullifiers && mined == 230 {
+            submit_ibd_fixture_spend(&kaspad1, &rpc_client1, &params).await;
+        }
+        #[cfg(feature = "phase6-staging-preview")]
+        if fixture == IbdPayloadFixture::Transparent && mined >= 80 && (mined - 80).is_multiple_of(50) {
+            submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
+        }
+        #[cfg(not(feature = "phase6-staging-preview"))]
+        let _ = mined;
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
         rpc_client1.submit_block(template.block, false).await.unwrap();
     }
@@ -1358,6 +1520,10 @@ async fn run_shielded_ibd(
     while (dag_info.pruning_point_hash == SIMNET_GENESIS.hash || pruning_point_blue_score <= finality_depth)
         && extra_blocks < extra_blocks_limit
     {
+        #[cfg(feature = "phase6-staging-preview")]
+        if fixture == IbdPayloadFixture::Transparent && extra_blocks.is_multiple_of(50) {
+            submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
+        }
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
         rpc_client1.submit_block(template.block, false).await.unwrap();
         extra_blocks += 1;
@@ -1376,18 +1542,75 @@ async fn run_shielded_ibd(
     // The syncer's shielded frontier at the pruning point: this is exactly what the
     // syncee must reproduce from the streamed metadata. Assert it is non-trivial so
     // the test can't pass vacuously against an empty tree.
-    let syncer_tree = rpc_client1.get_shielded_tree_state(Some(target_pruning_point)).await.unwrap();
-    assert!(
-        syncer_tree.size > 0,
-        "syncer shielded tree at pruning point is empty (size=0) — shielded coinbase did not populate the pool"
-    );
+    let syncer_tree = if params.shielded_coinbase {
+        let tree = rpc_client1.get_shielded_tree_state(Some(target_pruning_point)).await.unwrap();
+        assert!(tree.size > 0, "shielded fixture has no committed notes");
+        Some(tree)
+    } else {
+        None
+    };
+    #[cfg(feature = "phase6-staging-preview")]
+    let expected_nullifiers = if fixture == IbdPayloadFixture::SpentNullifiers {
+        let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        let metadata = session.get_pruning_point_shielded_metadata(target_pruning_point).unwrap().unwrap();
+        assert!(metadata.nullifier_count > 0, "the real spend did not enter the pruning-point state");
+        let mut nullifiers = session
+            .open_pruning_point_shielded_nullifier_stream(target_pruning_point)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(nullifiers.len() as u64, metadata.nullifier_count);
+        nullifiers.sort_unstable();
+        Some(nullifiers)
+    } else {
+        None
+    };
+    if fixture == IbdPayloadFixture::Transparent {
+        let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        let metadata = session.get_pruning_point_smt_metadata(target_pruning_point).unwrap();
+        assert!(metadata.active_lanes_count >= 10, "fixture lanes fell outside the pruning-point finality window");
+        assert!(
+            !session.get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
+            "transparent fixture has no pruning-point UTXOs"
+        );
+    }
 
     // Phase 2: bring up the syncee and connect it to the syncer.
+    #[cfg(feature = "phase6-staging-preview")]
+    let mut kaspad2 = if let Some((root, _)) = &persistent {
+        let daemon = Daemon::new_persistent_with_args(args, total_fd_limit, &root.join("receiver"));
+        if recovering {
+            let service = daemon.core.find(ConsensusManager::IDENT).unwrap();
+            let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+            assert!(!manager.is_staging_import_pending(), "restart resurrected a worker reservation");
+            let active = manager.consensus();
+            let session = active.unguarded_session_blocking();
+            assert_eq!(session.pruning_point(), SIMNET_GENESIS.hash, "restart promoted incomplete staging evidence");
+            assert!(!session.supports_verified_staging_import(), "active reopen acquired staging authority");
+            assert!(!session.has_verified_staging_promotion().unwrap(), "restart accepted an unauthenticated promotion");
+        }
+        daemon
+    } else {
+        Daemon::new_random_with_args(args, total_fd_limit)
+    };
+    #[cfg(not(feature = "phase6-staging-preview"))]
     let mut kaspad2 = Daemon::new_random_with_args(args, total_fd_limit);
     let rpc_client2 = kaspad2.start().await;
 
     #[cfg(feature = "phase6-staging-preview")]
-    let mut pause = interruption.map(kaspa_p2p_flows::ibd::import_interruption::pause_transfer);
+    let mut pause = interruption.map(|component| {
+        if fixture == IbdPayloadFixture::Original {
+            kaspa_p2p_flows::ibd::import_interruption::pause_transfer(component)
+        } else {
+            kaspa_p2p_flows::ibd::import_interruption::pause_after_payload(component)
+        }
+    });
     #[cfg(not(feature = "phase6-staging-preview"))]
     let _ = (interruption, restart_receiver);
 
@@ -1413,8 +1636,20 @@ async fn run_shielded_ibd(
         assert!(manager.is_staging_import_pending(), "receiver released its reservation during the transfer");
         assert!(!manager.consensus().unguarded_session_blocking().supports_verified_staging_import());
         assert_eq!(rpc_client2.get_block_dag_info().await.unwrap().pruning_point_hash, SIMNET_GENESIS.hash);
+        if let Some((root, true)) = &persistent {
+            // The parent kills this process while its real writer/continuation
+            // is paused. No daemon shutdown or RocksDB close runs in the child.
+            std::fs::write(root.join("payload-written"), b"receiver-write-committed").unwrap();
+            std::future::pending::<()>().await;
+            unreachable!();
+        }
 
         rpc_client2.ban("127.0.0.1".parse().unwrap()).await.unwrap();
+        // SMT still has a blocked native writer. Other components have
+        // completed their atomic write and may already finish cancellation.
+        if fixture != IbdPayloadFixture::Original && interruption == Some(kaspa_consensus_core::api::StagingImportComponent::Smt) {
+            assert!(manager.is_staging_import_pending(), "disconnect released authority before the native writer");
+        }
         pause.release();
         drop(pause);
         let drain_manager = manager.clone();
@@ -1486,10 +1721,26 @@ async fn run_shielded_ibd(
     }
 
     // Assertion 2: the seeded frontier byte-matches the syncer's at the pruning point.
-    let syncee_tree = rpc_client2.get_shielded_tree_state(Some(target_pruning_point)).await.unwrap();
-    assert_eq!(syncee_tree.size, syncer_tree.size, "syncee shielded frontier size differs from syncer's at the pruning point");
-    assert_eq!(syncee_tree.leaf, syncer_tree.leaf, "syncee shielded frontier leaf differs from syncer's at the pruning point");
-    assert_eq!(syncee_tree.ommers, syncer_tree.ommers, "syncee shielded frontier ommers differ from syncer's at the pruning point");
+    if let Some(syncer_tree) = syncer_tree {
+        let syncee_tree = rpc_client2.get_shielded_tree_state(Some(target_pruning_point)).await.unwrap();
+        assert_eq!(syncee_tree.size, syncer_tree.size, "syncee shielded frontier size differs");
+        assert_eq!(syncee_tree.leaf, syncer_tree.leaf, "syncee shielded frontier leaf differs");
+        assert_eq!(syncee_tree.ommers, syncer_tree.ommers, "syncee shielded frontier ommers differ");
+    }
+    #[cfg(feature = "phase6-staging-preview")]
+    if let Some(expected) = expected_nullifiers {
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let active = manager.consensus();
+        let mut actual = active
+            .unguarded_session_blocking()
+            .open_pruning_point_shielded_nullifier_stream(target_pruning_point)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "retry failed to import the authenticated spent-nullifier set");
+    }
 
     // Phase 4 / assertion 3: mine finality_depth + buffer blocks on the syncer and
     // assert the syncee accepts them. Each carries a #24 coinbase commitment to its
@@ -1526,6 +1777,56 @@ async fn run_shielded_ibd(
     rpc_client2.disconnect().await.unwrap();
     kaspad1.shutdown();
     kaspad2.shutdown();
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+async fn submit_ibd_fixture_spend(daemon: &Daemon, rpc: &GrpcClient, params: &Params) {
+    let service = daemon.core.find(ConsensusManager::IDENT).unwrap();
+    let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+    let active = manager.consensus();
+    let anchor_depth = params.shielded_anchor_depth() as usize + 5;
+    let seed_activation = params.shielded_coinbase_seed_activation;
+    let transaction = tokio::task::spawn_blocking(move || {
+        let session = active.unguarded_session_blocking();
+        let chain = session.get_shielded_chain_range(SIMNET_GENESIS.hash, 1000).unwrap().unwrap();
+        assert!(chain.len() > anchor_depth + 10);
+        let mut account = kaspa_shielded_core::ShieldedAccount::from_seed([7u8; 32]).unwrap();
+        for hash in chain.iter().take(chain.len() - anchor_depth) {
+            let data = session.get_shielded_chain_block_data(*hash).unwrap();
+            assert!(data.accepted_actions.is_empty(), "fixture must start before its first spend");
+            let mut notes = Vec::new();
+            for (index, (script, value)) in data.coinbase_outputs.iter().enumerate() {
+                let recipient: [u8; 43] = script[..43].try_into().unwrap();
+                let mut seed = Vec::new();
+                if seed_activation.is_active(data.daa_score) {
+                    seed.extend_from_slice(&hash.as_bytes());
+                }
+                seed.extend_from_slice(&data.coinbase_txid.as_bytes());
+                seed.extend_from_slice(&(index as u32).to_le_bytes());
+                notes.push((kaspa_shielded_core::coinbase::derive_coinbase_note_desc(recipient, &seed), *value));
+            }
+            account.ingest_block(&notes, &[]);
+        }
+        assert!(account.balance() > 11_000_000);
+        let recipient =
+            kaspa_shielded_core::ShieldedAccount::from_seed([8u8; 32]).unwrap().receiving_address(kaspa_addresses::Prefix::Simnet);
+        let mut transaction =
+            Transaction::new(kaspa_consensus_core::tx::TX_VERSION_SHIELDED, vec![], vec![], 0, SUBNETWORK_ID_NATIVE, 0, vec![]);
+        transaction.payload = account
+            .create_payment(
+                &recipient,
+                1_000_000,
+                10_000_000,
+                &SIMNET_GENESIS.hash.as_bytes(),
+                &transaction.shielded_sighash_context(),
+            )
+            .expect("a valid matured Orchard note must produce a real payment");
+        transaction.finalize();
+        transaction
+    })
+    .await
+    .unwrap();
+    rpc.submit_transaction((&transaction).into(), false).await.expect("real Orchard spend must pass production admission");
 }
 
 // The following test runtime parameters are required for a graceful shutdown of the gRPC server

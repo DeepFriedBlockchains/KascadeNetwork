@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 10, 2026.
+Updated November 11, 2026.
 
 ## Validation stack
 
@@ -226,21 +226,41 @@ zero spent nullifiers. Its transparent UTXO stream is empty and pauses
 before the done frame. Nonempty payload interruption and abrupt process
 termination before promotion remain additional coverage.
 
+## Nonempty payload and abrupt restart validation
+
+[Draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9)
+is stacked on PR #8. Its tested implementation is
+`110d1625763c9fecd2cf2a226e5e7fb25add99bf` on
+`feature/phase6-payload-crash-recovery-20261111`.
+[Run 43068789717](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43068789717)
+passed all eight jobs. Formatting, strict Clippy, 21 focused regressions,
+1,568 workspace tests (25 skipped), 32 no-asm tests, doc tests,
+cargo doc and the kip10 example passed. No implementation CI remains
+pending for this milestone.
+
+The fixtures mine a real Orchard spend and nonempty transparent UTXOs.
+Ten signed user lanes are refreshed inside the pruning-point finality
+window. Cancellation pauses after a real native SMT batch, nonempty
+UTXO append or verified atomic shielded seed. The UTXO done frame is
+held back until disconnect. Real SIGKILL cases reopen the same sender
+and receiver directories, reject incomplete staging, then require fresh
+authentication, verified promotion and successful post-IBD blocks.
+All six new regressions passed with their safety assertions retained.
+
+See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
+This documentation-only continuation changes no tested implementation.
+
 ## Next executable task
 
-Start from the latest PR #8 branch head. Its tested implementation is
-`bc886b6aaf9df3f2deceac75691f1a1bb932f9fa`; run 42935509499 is green.
-No CI run remains pending for the implementation milestone.
+Extend the production preview tests to retain a genuinely validated
+proof receipt across import/promotion. Call
+`begin_verified_staging_import` on the ordinary active receiver before
+import and after promotion, requiring `Unsupported` and unchanged
+promotion/role state. Reuse the new restart cases to cover the same
+admission boundary after reopening. Use a feature branch stacked on
+PR #9 and validate it independently.
 
-Extend `testing/integration/src/daemon_integration_tests.rs::run_shielded_ibd`
-with a valid spent-nullifier fixture and a nonempty transparent UTXO
-fixture. Extend the feature-gated transfer hooks in
-`protocol/flows/src/ibd/import_interruption.rs` to interrupt after
-payload writes have begun. Retain the existing reservation, restart
-rejection and verified-promotion assertions. Then add abrupt
-pre-promotion process termination coverage against the same data
-directory. Keep these changes on a new public feature branch stacked on
-PR #8, with focused regressions and full CI.
-
-All work remains default-off and Simnet-only. PRs #1–#8 remain open.
-No merge, publication or consensus activation is authorized.
+All development uses GitHub and GitHub Actions. The preview remains
+default-off and Simnet-only. PRs #1–#9 remain intact.
+No merge, release, private-history import or consensus activation is
+authorized.

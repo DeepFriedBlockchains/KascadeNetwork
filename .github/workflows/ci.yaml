@@ -114,7 +114,7 @@ jobs:
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
       - name: Run Phase 6 authority integration regressions
-        run: cargo nextest run --workspace --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_)'
+        run: cargo nextest run --workspace --test-threads=2 --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_)'
 
       - name: Run cargo test regular features
         run: cargo nextest run --workspace --no-fail-fast

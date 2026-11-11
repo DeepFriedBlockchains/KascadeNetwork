@@ -158,6 +158,18 @@ impl Daemon {
 
     fn with_manager_and_appdir(client_manager: Arc<ClientManager>, fd_total_budget: i32, appdir_tempdir: TempDir) -> Daemon {
         client_manager.args.write().appdir = Some(appdir_tempdir.path().to_str().unwrap().to_owned());
+        Self::with_manager_and_owner(client_manager, fd_total_budget, Some(appdir_tempdir))
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    pub fn new_persistent_with_args(mut args: Args, fd_total_budget: i32, path: &std::path::Path) -> Self {
+        std::fs::create_dir_all(path).unwrap();
+        Self::fill_args_with_random_ports(&mut args);
+        args.appdir = Some(path.to_str().unwrap().to_owned());
+        Self::with_manager_and_owner(Arc::new(ClientManager::new(args)), fd_total_budget, None)
+    }
+
+    fn with_manager_and_owner(client_manager: Arc<ClientManager>, fd_total_budget: i32, appdir: Option<TempDir>) -> Self {
         let (core, _) = create_core_with_runtime(&Default::default(), &client_manager.args.read(), fd_total_budget);
         let async_service = &Arc::downcast::<AsyncRuntime>(core.find(AsyncRuntime::IDENT).unwrap().into_any_arc()).unwrap();
         let rpc_core_service =
@@ -165,7 +177,7 @@ impl Daemon {
         let shutdown_requested = rpc_core_service.core_shutdown_request_listener();
         let grpc_server = &Arc::downcast::<GrpcService>(async_service.find(GrpcService::IDENT).unwrap().into_any_arc()).unwrap();
         let grpc_server_started = grpc_server.started();
-        Daemon { client_manager, core, grpc_server_started, shutdown_requested, workers: None, _appdir_tempdir: Some(appdir_tempdir) }
+        Daemon { client_manager, core, grpc_server_started, shutdown_requested, workers: None, _appdir_tempdir: appdir }
     }
 
     #[cfg(feature = "phase6-staging-preview")]

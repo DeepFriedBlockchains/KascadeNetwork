@@ -1877,6 +1877,10 @@ impl ConsensusApi for Consensus {
         // `inactivity_shortcut_block` was already resolved by the caller during metadata verification.
         let row = SmtBlockMetadata::new(payload_and_ctx_digest, inactivity_shortcut_block, active_lanes_count);
 
+        #[cfg(feature = "test-staging-interruption")]
+        let batch_entries = if kaspa_consensus_core::test_staging_write::is_armed() { 1 } else { 4096 };
+        #[cfg(not(feature = "test-staging-interruption"))]
+        let batch_entries = 4096;
         let result = self.virtual_processor.install(|| {
             streaming_import(
                 &self.db,
@@ -1887,7 +1891,7 @@ impl ConsensusApi for Consensus {
                 // Chunks arrive pre-sized (up to SMT_CHUNK_SIZE) from the wire-level chunker —
                 // forwarded as-is, no re-batching.
                 lane_batches,
-                4096,
+                batch_entries,
             )
             .map_err(|e| PruningImportError::SmtStoreError(format!("{e}")))
         })?;
