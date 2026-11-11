@@ -13,6 +13,7 @@ struct Interruption {
     component: StagingImportComponent,
     after_payload: bool,
     sender: Mutex<Option<SenderPause>>,
+    finish: Mutex<Option<oneshot::Receiver<()>>>,
     receiver: Mutex<Option<oneshot::Sender<()>>>,
 }
 
@@ -28,6 +29,7 @@ pub struct TransferPause {
     sender_paused: Option<oneshot::Receiver<()>>,
     receiver_waiting: Option<oneshot::Receiver<()>>,
     release: Option<oneshot::Sender<()>>,
+    finish: Option<oneshot::Sender<()>>,
 }
 
 pub fn pause_transfer(component: StagingImportComponent) -> TransferPause {
@@ -43,10 +45,12 @@ fn arm(component: StagingImportComponent, after_payload: bool) -> TransferPause 
     let (sender_ready, sender_paused) = oneshot::channel();
     let (receiver_ready, receiver_waiting) = oneshot::channel();
     let (release, wait_for_release) = oneshot::channel();
+    let (finish, wait_for_finish) = oneshot::channel();
     let case = Arc::new(Interruption {
         component,
         after_payload,
         sender: Mutex::new(Some(SenderPause { ready: sender_ready, release: wait_for_release })),
+        finish: Mutex::new(Some(wait_for_finish)),
         receiver: Mutex::new(Some(receiver_ready)),
     });
     let mut current = active().lock();
@@ -55,7 +59,7 @@ fn arm(component: StagingImportComponent, after_payload: bool) -> TransferPause 
     drop(current);
     let write_pause = (after_payload && component == StagingImportComponent::Smt)
         .then(kaspa_consensus_core::test_staging_write::pause);
-    TransferPause { case, write_pause, sender_paused: Some(sender_paused), receiver_waiting: Some(receiver_waiting), release: Some(release) }
+    TransferPause { case, write_pause, sender_paused: Some(sender_paused), receiver_waiting: Some(receiver_waiting), release: Some(release), finish: Some(finish) }
 }
 
 impl TransferPause {
@@ -71,6 +75,9 @@ impl TransferPause {
     }
 
     pub fn release(&mut self) {
+        if let Some(finish) = self.finish.take() {
+            let _ = finish.send(());
+        }
         if let Some(write) = &self.write_pause {
             write.release();
         }
@@ -92,7 +99,18 @@ impl Drop for TransferPause {
 
 pub(crate) async fn pause_sender(component: StagingImportComponent) {
     let case = active().lock().clone();
-    let Some(case) = case.filter(|case| case.component == component && !case.after_payload) else { return };
+    let Some(case) = case.filter(|case| case.component == component) else { return };
+    if case.after_payload {
+        // The UTXO sender reaches this hook before its explicit done frame.
+        // Hold it back until disconnect so buffered payload cannot finish IBD.
+        if component == StagingImportComponent::Utxo {
+            let finish = case.finish.lock().take();
+            if let Some(finish) = finish {
+                let _ = finish.await;
+            }
+        }
+        return;
+    }
     let pending = case.sender.lock().take();
     if let Some(SenderPause { ready, release }) = pending {
         let _ = ready.send(());

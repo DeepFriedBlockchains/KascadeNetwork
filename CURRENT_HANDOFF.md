@@ -233,7 +233,12 @@ stacked on PR #8 at `4f23ff9f77bed788085efe03441420e522ad9595`.
 See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
 It adds real spent-nullifier and transparent UTXO fixtures, post-write
 peer cancellation and SIGKILL/reopen cases for SMT, shielded and UTXO
-imports. Source and Actions run IDs will be appended after the first push.
+imports. Initial source `ccb68579d2cdb4b4770bcf679e8776f45418dddf` opened
+[draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9).
+PR run 43066415215 queued behind cancellation of push run 43066407288.
+A follow-up holds back the UTXO done frame until disconnect and checks
+reservation retention while a real SMT writer remains outstanding.
+The follow-up source and run IDs are recorded in the PR description.
 This candidate has not yet passed validation.
 
 ## Next executable task

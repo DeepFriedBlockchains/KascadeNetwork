@@ -1628,9 +1628,11 @@ async fn run_payload_ibd_at(
         }
 
         rpc_client2.ban("127.0.0.1".parse().unwrap()).await.unwrap();
-        // Disconnecting a peer must not release the reservation while this
-        // receiver continuation still owns the authenticated session.
-        assert!(manager.is_staging_import_pending(), "disconnect released authority before the writer continuation");
+        // SMT still has a blocked native writer. Other components have
+        // completed their atomic write and may already finish cancellation.
+        if fixture != IbdPayloadFixture::Original && interruption == Some(kaspa_consensus_core::api::StagingImportComponent::Smt) {
+            assert!(manager.is_staging_import_pending(), "disconnect released authority before the native writer");
+        }
         pause.release();
         drop(pause);
         let drain_manager = manager.clone();

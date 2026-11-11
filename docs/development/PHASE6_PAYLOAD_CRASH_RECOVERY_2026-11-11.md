@@ -82,3 +82,14 @@ Windows, WSL and existing checkouts are outside the authorized workflow.
 No private history, local files or project references are imported.
 PRs #1–#8 remain intact. No merge, release or consensus activation is
 authorized.
+
+## Initial push checkpoint
+
+Initial source `ccb68579d2cdb4b4770bcf679e8776f45418dddf` opened
+[draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9).
+PR run 43066415215 queued behind cancellation of push run 43066407288.
+The follow-up holds the UTXO done frame until disconnect, preventing a
+buffered completion frame from turning an interrupted test into a
+legitimate complete import. Reservation retention after disconnect is
+asserted while the native SMT writer is still outstanding; completed
+atomic writers may correctly finish cancellation immediately.
