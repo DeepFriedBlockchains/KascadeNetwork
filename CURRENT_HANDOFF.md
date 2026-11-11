@@ -226,38 +226,41 @@ zero spent nullifiers. Its transparent UTXO stream is empty and pauses
 before the done frame. Nonempty payload interruption and abrupt process
 termination before promotion remain additional coverage.
 
-## Nonempty payload and abrupt restart candidate
+## Nonempty payload and abrupt restart validation
 
-The continuation is on `feature/phase6-payload-crash-recovery-20261111`,
-stacked on PR #8 at `4f23ff9f77bed788085efe03441420e522ad9595`.
+[Draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9)
+is stacked on PR #8. Its tested implementation is
+`110d1625763c9fecd2cf2a226e5e7fb25add99bf` on
+`feature/phase6-payload-crash-recovery-20261111`.
+[Run 43068789717](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43068789717)
+passed all eight jobs. Formatting, strict Clippy, 21 focused regressions,
+1,568 workspace tests (25 skipped), 32 no-asm tests, doc tests,
+cargo doc and the kip10 example passed. No implementation CI remains
+pending for this milestone.
+
+The fixtures mine a real Orchard spend and nonempty transparent UTXOs.
+Ten signed user lanes are refreshed inside the pruning-point finality
+window. Cancellation pauses after a real native SMT batch, nonempty
+UTXO append or verified atomic shielded seed. The UTXO done frame is
+held back until disconnect. Real SIGKILL cases reopen the same sender
+and receiver directories, reject incomplete staging, then require fresh
+authentication, verified promotion and successful post-IBD blocks.
+All six new regressions passed with their safety assertions retained.
+
 See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
-It adds real spent-nullifier and transparent UTXO fixtures, post-write
-peer cancellation and SIGKILL/reopen cases for SMT, shielded and UTXO
-imports. Initial source `ccb68579d2cdb4b4770bcf679e8776f45418dddf` opened
-[draft PR #9](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/9).
-PR run 43066415215 queued behind cancellation of push run 43066407288.
-A follow-up holds back the UTXO done frame until disconnect and checks
-reservation retention while a real SMT writer remains outstanding.
-The follow-up source and run IDs are recorded in the PR description.
-Source `1c1042147e4b68b17460a46a85a55d7b961f71d0` passed Check,
-Check WASM32 and Check no_std in PR run 43067275773. Lints stopped at
-formatting. Thirteen exact Rustfmt hunks from the GitHub log were applied
-in the follow-up. Strict Clippy and native results are pending.
-Source `13a1e3de896eed9deb59e535f2431209be18b663` passed formatting,
-strict Clippy, Check, Check WASM32, Check no_std and Test WASM32 in
-run 43067753790 before native execution. The fixture follow-up refreshes
-ten user lanes inside the finality window and asserts their presence at
-the actual pruning point. Its exact source and CI run are recorded in
-PR #9. This candidate has not yet passed full validation.
+This documentation-only continuation changes no tested implementation.
 
 ## Next executable task
 
-Fetch the candidate PR head and its Actions run. Fix actual failures
-without relaxing the real-spend, nonempty-payload, worker reservation,
-SIGKILL, restart rejection or verified-promotion assertions.
-Require all six new regressions and full eight-job validation.
+Extend the production preview tests to retain a genuinely validated
+proof receipt across import/promotion. Call
+`begin_verified_staging_import` on the ordinary active receiver before
+import and after promotion, requiring `Unsupported` and unchanged
+promotion/role state. Reuse the new restart cases to cover the same
+admission boundary after reopening. Use a feature branch stacked on
+PR #9 and validate it independently.
 
-Development is exclusively through GitHub and GitHub Actions.
-The preview remains default-off and Simnet-only. PRs #1–#8 remain intact.
+All development uses GitHub and GitHub Actions. The preview remains
+default-off and Simnet-only. PRs #1–#9 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
