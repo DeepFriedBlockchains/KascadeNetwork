@@ -276,3 +276,19 @@ All development uses GitHub and GitHub Actions. The preview remains
 default-off and Simnet-only. PRs #1–#9 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
+
+## Exact continuation checkpoint
+
+Draft [PR #10](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/10)
+has source `509e54b5af6a686b24086eea30fe97e8dc02af23` on
+`feature/phase6-active-admission-regression-20261111`.
+Authoritative [PR run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692)
+is pending, waiting for cancellation of superseded push run 43076078613.
+No native result or full validation is claimed for PR #10 yet.
+PR #9 remains green at implementation
+`110d1625763c9fecd2cf2a226e5e7fb25add99bf`, run 43068789717,
+and documentation head `9599133be7737b8006cab373d9a99d8fe9bafff8`.
+
+Next, retrieve PR #10's exact source/run, correct actual formatting,
+compilation, Clippy or native failures, then require all eight jobs.
+Do not repeat the completed PR #9 fixture, interruption or crash work.
