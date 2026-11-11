@@ -4,7 +4,7 @@ November 10, 2026
 
 This test candidate builds on descriptor correction `2ff50a53e727511a738c04fec6ddcd432c389790`.
 The correction's [run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069)
-is still running. The separate branch preserves PR #7 validation.
+passed all eight jobs. The separate branch preserves PR #7's tested source.
 
 The integration test can pause a real peer transfer before its next
 protocol frame, then ban the temporary peer through RPC. SMT pauses
@@ -23,22 +23,41 @@ The pause controls compile only with a test feature and are armed
 explicitly by the integration harness. Default node builds do not
 include them. The preview remains default-off and Simnet-only.
 
-Both parent validation and candidate validation are pending. These
+Parent validation is complete. Candidate validation is pending. These
 tests do not authorize replacing the default promotion path.
 
-## Exact validation checkpoints
+## Restart finding
 
-PR #7 remains at `2ff50a53e727511a738c04fec6ddcd432c389790` on
-`feature/phase6-production-import-preview-20261110`. [Run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069)
-has passed seven jobs. Native focused and workspace results are pending.
-The same-SHA push run 42930270803 was superseded.
+Run 42932087535 passed seven jobs and 14 of 15 focused regressions.
+The UTXO interruption drained successfully, but reopening the active
+database incorrectly advertised staging support. The factory skips
+genesis processing for an existing active database, so that configuration
+flag does not identify a staging receiver.
 
-The separate test candidate is `b510f585f3e746e7541a58cc5e09b69c988189d4` on
-`feature/phase6-preview-peer-interruption-20261110`.
-[Run 42932087535](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42932087535)
-covers the interruption and reopen regressions and full workspace
-validation. The initial test candidate `f429ec4` triggered run
-42931436753, which reported three formatting changes. The candidate has
-a new source head. Run 42931593794 was superseded by the corrected
-history fixture. The fixture uses distinct pruning-history entries and
-releases its database handle before reopening. Current validation is pending.
+The correction gives freshly allocated staging receivers an explicit
+in-memory role. The controller revokes it when making the receiver
+active, and reopened active databases start without it. The peer test
+checks the durable verified promotion record after success and requires
+the active receiver role to be closed. The original restart assertion
+remains in place.
+
+## Exact continuation checkpoint
+
+[Draft PR #8](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/8)
+is stacked on PR #7. Source `bc886b6aaf9df3f2deceac75691f1a1bb932f9fa`
+on `feature/phase6-preview-peer-interruption-20261110` includes the role
+correction. [Run 42935509499](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42935509499)
+is pending. Push run 42935435587 was superseded.
+
+Parent PR #7 at `2ff50a53e727511a738c04fec6ddcd432c389790` passed all
+eight jobs, 11 focused tests, 1,567 workspace tests (25 skipped), and
+32 no-asm tests in run 42930280069.
+
+The shielded fixture has no spent nullifiers, so its interruption is
+before metadata. The transparent UTXO fixture is empty, so its pause is
+before the done frame. The same-directory restart is after cancellation
+drains the workers. Abrupt termination before promotion and nonempty
+shielded/UTXO stream interruption remain separate coverage.
+
+Next, validate the role correction and all 15 focused regressions, then
+the complete eight-job suite. Keep the preview default-off and Simnet-only.

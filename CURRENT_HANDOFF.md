@@ -176,41 +176,62 @@ skipped), and 32 no-asm tests in run 42898217206.
 
 ## Descriptor preservation correction
 
-See [the dated report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md). The sanity rebuild was replacing the
-external import descriptor with a local optimized descriptor. The
-correction uses reconstruction without descriptor or cache writes.
-Candidate validation is pending.
+[PR #7](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/7)
+is validated at `2ff50a53e727511a738c04fec6ddcd432c389790` on
+`feature/phase6-production-import-preview-20261110`.
+[Run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069)
+passed all eight jobs, including formatting, strict Clippy, 11 focused
+regressions, 1,567 workspace tests (25 skipped), and 32 no-asm tests.
+Workspace doc tests, no-asm doc tests, cargo doc and kip10 example checks
+also passed. The same-SHA push run 42930270803 was superseded.
 
-## Peer interruption candidate
+The production sanity rebuild had replaced the authenticated external
+descriptor with an optimized local descriptor. It now reconstructs
+without descriptor or proof-cache writes. Exact descriptor verification
+is unchanged. The original two-daemon shielded promotion regression
+passed. See [the descriptor report](docs/development/PHASE6_STAGING_PROOF_DESCRIPTOR_2026-11-10.md).
 
-See [the dated report](docs/development/PHASE6_PEER_STREAM_INTERRUPTION_2026-11-10.md). The candidate is separate from PR #7
-while the descriptor correction validates. It covers actual peer
-disconnects during SMT, shielded and UTXO transfer, then successful
-retry. It also reopens before promotion and rejects incomplete evidence.
-Candidate validation is pending.
+## Peer interruption and active receiver role
 
-## Exact validation checkpoints
-
-PR #7 remains at `2ff50a53e727511a738c04fec6ddcd432c389790` on
-`feature/phase6-production-import-preview-20261110`. [Run 42930280069](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42930280069)
-has passed seven jobs. Native focused and workspace results are pending.
-The same-SHA push run 42930270803 was superseded.
-
-The separate test candidate is `b510f585f3e746e7541a58cc5e09b69c988189d4` on
+[Draft PR #8](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/8)
+is stacked on PR #7. Its exact source is
+`bc886b6aaf9df3f2deceac75691f1a1bb932f9fa` on
 `feature/phase6-preview-peer-interruption-20261110`.
-[Run 42932087535](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42932087535)
-covers the interruption and reopen regressions and full workspace
-validation. The initial test candidate `f429ec4` triggered run
-42931436753, which reported three formatting changes. The candidate has
-a new source head. Run 42931593794 was superseded by the corrected
-history fixture. The fixture uses distinct pruning-history entries and
-releases its database handle before reopening. Current validation is pending.
+[PR run 42935509499](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42935509499)
+is pending. Same-SHA push run 42935435587 was superseded.
+Do not treat this candidate as validated until all eight jobs pass.
+
+The tests pause actual peer transfers, disconnect a temporary peer,
+require reservation retention while paused and worker draining before
+retry, then require verified promotion. The UTXO case reopens the same
+data directory before retry. A separate persistent database regression
+abandons a receipt before promotion, reopens incomplete SMT evidence and
+requires fresh authentication.
+
+Predecessor `b510f585f3e746e7541a58cc5e09b69c988189d4` passed seven jobs
+and 14 of 15 focused regressions in
+[run 42932087535](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/42932087535).
+The remaining test exposed a real bug. Existing active databases skip
+genesis initialization when reopened, but that flag was also used to
+identify staging receivers. Fresh staging allocation now explicitly
+assigns a volatile role, activation revokes it and active reopen starts
+without it. The original rejection assertion remains. Successful import
+tests additionally require a durable verified promotion record and a
+closed active staging role.
+
+See [the interruption report](docs/development/PHASE6_PEER_STREAM_INTERRUPTION_2026-11-10.md).
+Shielded interruption occurs before metadata because this fixture has
+zero spent nullifiers. Its transparent UTXO stream is empty and pauses
+before the done frame. Nonempty payload interruption and abrupt process
+termination before promotion remain additional coverage.
 
 ## Next executable task
 
-Finish PR #7's focused two-daemon correction and eight-job validation.
-Then finish the independent peer test candidate, correct actual failures,
-and open a draft successor PR after its parent is green. The shielded
-peer interruption is before metadata because this fixture has no spent
-nullifiers. Nonempty shielded streaming interruption remains additional
-coverage. Keep the preview default-off and Simnet-only.
+Fetch PR #8 head and run 42935509499. Fix actual failures, preserving
+the reservation, restart rejection and durable-promotion assertions.
+Require all 15 focused regressions and the full eight-job suite.
+After validation, strengthen interruption coverage with nonempty
+shielded/UTXO payloads and abrupt pre-promotion process termination.
+
+All work remains default-off and Simnet-only. PRs #1–#8 remain open.
+No merge, publication or consensus activation is authorized.
