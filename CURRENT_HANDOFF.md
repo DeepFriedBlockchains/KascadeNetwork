@@ -239,7 +239,11 @@ PR run 43066415215 queued behind cancellation of push run 43066407288.
 A follow-up holds back the UTXO done frame until disconnect and checks
 reservation retention while a real SMT writer remains outstanding.
 The follow-up source and run IDs are recorded in the PR description.
-This candidate has not yet passed validation.
+Source `1c1042147e4b68b17460a46a85a55d7b961f71d0` passed Check,
+Check WASM32 and Check no_std in PR run 43067275773. Lints stopped at
+formatting. Thirteen exact Rustfmt hunks from the GitHub log were applied
+in the follow-up. Strict Clippy and native results are pending.
+This candidate has not yet passed full validation.
 
 ## Next executable task
 

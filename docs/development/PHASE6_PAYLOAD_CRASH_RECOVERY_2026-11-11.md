@@ -93,3 +93,13 @@ buffered completion frame from turning an interrupted test into a
 legitimate complete import. Reservation retention after disconnect is
 asserted while the native SMT writer is still outstanding; completed
 atomic writers may correctly finish cancellation immediately.
+
+## Formatting correction
+
+Source `1c1042147e4b68b17460a46a85a55d7b961f71d0` reached
+PR run 43067275773. Check (all tests with preview features), Check
+WASM32 and Check no_std passed. Lints stopped on 13 Rustfmt hunks
+in the new integration helpers and pause controller; strict Clippy did
+not run. The exact formatter diff from the GitHub job was applied.
+Native and remaining build jobs were still pending at correction time.
+No native pass is claimed for this candidate yet.

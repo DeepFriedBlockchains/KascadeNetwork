@@ -1303,11 +1303,11 @@ async fn authority_integration_preview_restarts_after_interrupted_utxo_peer() {
     run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true).await;
 }
 
-
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_interrupts_spent_nullifier_payload() {
-    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Shielded), true, IbdPayloadFixture::SpentNullifiers).await;
+    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Shielded), true, IbdPayloadFixture::SpentNullifiers)
+        .await;
 }
 
 #[cfg(feature = "phase6-staging-preview")]
@@ -1315,7 +1315,6 @@ async fn authority_integration_preview_interrupts_spent_nullifier_payload() {
 async fn authority_integration_preview_interrupts_nonempty_utxo_payload() {
     run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true, IbdPayloadFixture::Transparent).await;
 }
-
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
@@ -1367,7 +1366,8 @@ async fn run_abrupt_payload_import(component: &str, fixture: IbdPayloadFixture) 
         .env("KASCADE_PHASE6_CRASH_ROOT", root.path())
         .env("KASCADE_PHASE6_CRASH_COMPONENT", component)
         .kill_on_drop(true)
-        .spawn().unwrap();
+        .spawn()
+        .unwrap();
     tokio::time::timeout(Duration::from_secs(300), async {
         while !root.path().join("payload-written").exists() {
             if let Some(status) = child.try_wait().unwrap() {
@@ -1375,7 +1375,9 @@ async fn run_abrupt_payload_import(component: &str, fixture: IbdPayloadFixture) 
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-    }).await.expect("child never committed payload data");
+    })
+    .await
+    .expect("child never committed payload data");
     child.start_kill().unwrap();
     let status = child.wait().await.unwrap();
     assert_eq!(status.signal(), Some(9), "test must kill the process without graceful cleanup");
@@ -1398,7 +1400,10 @@ async fn submit_ibd_fixture_lanes(rpc: &GrpcClient, miner: &Address, maturity: u
                 script_public_key: pay_to_address_script(miner),
                 covenant: None,
             }],
-            0, SubnetworkId::from_bytes(subnet), 0, vec![],
+            0,
+            SubnetworkId::from_bytes(subnet),
+            0,
+            vec![],
         );
         let signed = sign(MutableTransaction::with_entries(transaction, vec![entry.clone()]), key);
         rpc.submit_transaction((&signed.tx).into(), false).await.unwrap();
@@ -1491,7 +1496,8 @@ async fn run_payload_ibd_at(
     let finality_depth = params.finality_depth();
     let pruning_depth = params.pruning_depth();
     let coinbase_maturity = params.coinbase_maturity();
-    let initial_blocks = (coinbase_maturity as usize) + pruning_depth as usize + if fixture == IbdPayloadFixture::SpentNullifiers { 300 } else { 80 };
+    let initial_blocks =
+        (coinbase_maturity as usize) + pruning_depth as usize + if fixture == IbdPayloadFixture::SpentNullifiers { 300 } else { 80 };
     for mined in 0..if recovering { 0 } else { initial_blocks } {
         #[cfg(feature = "phase6-staging-preview")]
         if fixture == IbdPayloadFixture::SpentNullifiers && mined == 230 {
@@ -1547,8 +1553,11 @@ async fn run_payload_ibd_at(
         let session = active.unguarded_session_blocking();
         let metadata = session.get_pruning_point_shielded_metadata(target_pruning_point).unwrap().unwrap();
         assert!(metadata.nullifier_count > 0, "the real spend did not enter the pruning-point state");
-        let mut nullifiers = session.open_pruning_point_shielded_nullifier_stream(target_pruning_point).unwrap()
-            .collect::<Result<Vec<_>, _>>().unwrap();
+        let mut nullifiers = session
+            .open_pruning_point_shielded_nullifier_stream(target_pruning_point)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(nullifiers.len() as u64, metadata.nullifier_count);
         nullifiers.sort_unstable();
         Some(nullifiers)
@@ -1559,9 +1568,10 @@ async fn run_payload_ibd_at(
         let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
         let active = manager.consensus();
-        assert!(!active.unguarded_session_blocking()
-            .get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
-            "transparent fixture has no pruning-point UTXOs");
+        assert!(
+            !active.unguarded_session_blocking().get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
+            "transparent fixture has no pruning-point UTXOs"
+        );
     }
 
     // Phase 2: bring up the syncee and connect it to the syncer.
@@ -1715,9 +1725,12 @@ async fn run_payload_ibd_at(
         let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
         let active = manager.consensus();
-        let mut actual = active.unguarded_session_blocking()
-            .open_pruning_point_shielded_nullifier_stream(target_pruning_point).unwrap()
-            .collect::<Result<Vec<_>, _>>().unwrap();
+        let mut actual = active
+            .unguarded_session_blocking()
+            .open_pruning_point_shielded_nullifier_stream(target_pruning_point)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         actual.sort_unstable();
         assert_eq!(actual, expected, "retry failed to import the authenticated spent-nullifier set");
     }
@@ -1759,7 +1772,6 @@ async fn run_payload_ibd_at(
     kaspad2.shutdown();
 }
 
-
 #[cfg(feature = "phase6-staging-preview")]
 async fn submit_ibd_fixture_spend(daemon: &Daemon, rpc: &GrpcClient, params: &Params) {
     let service = daemon.core.find(ConsensusManager::IDENT).unwrap();
@@ -1789,17 +1801,24 @@ async fn submit_ibd_fixture_spend(daemon: &Daemon, rpc: &GrpcClient, params: &Pa
             account.ingest_block(&notes, &[]);
         }
         assert!(account.balance() > 11_000_000);
-        let recipient = kaspa_shielded_core::ShieldedAccount::from_seed([8u8; 32]).unwrap()
-            .receiving_address(kaspa_addresses::Prefix::Simnet);
-        let mut transaction = Transaction::new(
-            kaspa_consensus_core::tx::TX_VERSION_SHIELDED, vec![], vec![], 0, SUBNETWORK_ID_NATIVE, 0, vec![],
-        );
-        transaction.payload = account.create_payment(
-            &recipient, 1_000_000, 10_000_000, &SIMNET_GENESIS.hash.as_bytes(), &transaction.shielded_sighash_context(),
-        ).expect("a valid matured Orchard note must produce a real payment");
+        let recipient =
+            kaspa_shielded_core::ShieldedAccount::from_seed([8u8; 32]).unwrap().receiving_address(kaspa_addresses::Prefix::Simnet);
+        let mut transaction =
+            Transaction::new(kaspa_consensus_core::tx::TX_VERSION_SHIELDED, vec![], vec![], 0, SUBNETWORK_ID_NATIVE, 0, vec![]);
+        transaction.payload = account
+            .create_payment(
+                &recipient,
+                1_000_000,
+                10_000_000,
+                &SIMNET_GENESIS.hash.as_bytes(),
+                &transaction.shielded_sighash_context(),
+            )
+            .expect("a valid matured Orchard note must produce a real payment");
         transaction.finalize();
         transaction
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     rpc.submit_transaction((&transaction).into(), false).await.expect("real Orchard spend must pass production admission");
 }
 

@@ -57,9 +57,16 @@ fn arm(component: StagingImportComponent, after_payload: bool) -> TransferPause 
     assert!(current.is_none(), "an interruption case is already armed");
     *current = Some(case.clone());
     drop(current);
-    let write_pause = (after_payload && component == StagingImportComponent::Smt)
-        .then(kaspa_consensus_core::test_staging_write::pause);
-    TransferPause { case, write_pause, sender_paused: Some(sender_paused), receiver_waiting: Some(receiver_waiting), release: Some(release), finish: Some(finish) }
+    let write_pause =
+        (after_payload && component == StagingImportComponent::Smt).then(kaspa_consensus_core::test_staging_write::pause);
+    TransferPause {
+        case,
+        write_pause,
+        sender_paused: Some(sender_paused),
+        receiver_waiting: Some(receiver_waiting),
+        release: Some(release),
+        finish: Some(finish),
+    }
 }
 
 impl TransferPause {
