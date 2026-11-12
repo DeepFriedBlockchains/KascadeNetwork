@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 11, 2026.
+Updated November 12, 2026.
 
 ## Validation stack
 
@@ -250,76 +250,55 @@ All six new regressions passed with their safety assertions retained.
 See [the dated report](docs/development/PHASE6_PAYLOAD_CRASH_RECOVERY_2026-11-11.md).
 This documentation-only continuation changes no tested implementation.
 
-## Active receiver admission candidate
+## Active receiver admission validation
 
-The next branch is
-`feature/phase6-active-admission-regression-20261111`, stacked on
-the validated PR #9 documentation head
-`9599133be7737b8006cab373d9a99d8fe9bafff8`.
-See [the dated report](docs/development/PHASE6_ACTIVE_ADMISSION_2026-11-11.md).
-The production test harness retains genuinely validated proof receipts
-and calls the actual admission API on ordinary active receivers before
-import and after promotion, requiring `Unsupported`. Restart cases
-exercise the same boundary on reopened active receivers. This adds
-tests without changing production authority behavior.
+[PR #10](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/10)
+retains documentation head `a0885ad19eac58edec15283394e9ad78cacc98d2`.
+Implementation `509e54b5af6a686b24086eea30fe97e8dc02af23` passed
+all eight jobs in [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692).
+The completed job log confirms 21 focused tests, 1,568 workspace tests
+(25 existing skips), and 32 no-asm tests. Formatting, strict Clippy,
+documentation, example and platform/build checks passed.
+Real authenticated receipts were rejected by actual admission calls
+on ordinary active receivers before import and after promotion,
+including the restart scenarios. Do not repeat this completed work.
+
+## Tampered shielded stream candidate
+
+Branch `feature/phase6-tampered-shielded-stream-20261112` is stacked
+on PR #10. The test-only sender changes one byte of one real nonempty
+nullifier frame, preserving declared count, metadata and source storage.
+The receiver must report its actual committed-accumulator rejection
+after joining the shielded importer. The test requires draining,
+unpromoted active state, optional same-directory reopen, fresh retry,
+exact legitimate nullifier-set recovery, verified promotion and closed
+post-activation admission.
+
+See [the dated report](docs/development/PHASE6_TAMPERED_SHIELDED_STREAM_2026-11-12.md).
+Candidate source and run IDs are recorded in the new draft PR after push.
+No validation pass is claimed for this candidate yet.
 
 ## Next executable task
 
-Read the new candidate PR head and Actions run. Source and run IDs
-are recorded in its PR description after push. Require focused and
-full eight-job validation; do not repeat PR #9's completed payload or
-crash investigation. After green validation, add tampered nonempty
-nullifier stream rejection and fresh retry coverage. Bounded-memory
-shielded ingestion remains a separate implementation item.
+Validate the tampered-stream candidate's focused regressions and all
+eight jobs. Fix actual failures without weakening the expected
+committed-accumulator rejection or admission/promotion assertions.
+After this independent milestone passes, implement bounded-memory
+shielded ingestion: the current consensus importer still collects all
+declared nullifiers in a Vec before verification and atomic seeding.
+Preserve count bounds, duplicates, authentication, ownership and
+fail-closed cancellation/restart behavior.
 
-All development uses GitHub and GitHub Actions. The preview remains
-default-off and Simnet-only. PRs #1–#9 remain intact.
+All development uses GitHub and GitHub Actions exclusively.
+The preview stays default-off and Simnet-only. PRs #1–#10 remain intact.
 No merge, release, private-history import or consensus activation is
 authorized.
 
-## Exact handoff checkpoint
+## Initial validation checkpoint
 
-Current implementation: `509e54b5af6a686b24086eea30fe97e8dc02af23`.
-Branch: `feature/phase6-active-admission-regression-20261111`.
-Draft PR: [#10](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/10).
-Authoritative [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692)
-is in progress. Push run 43076078613 was superseded.
-Formatting passed; Test WASM32, Check WASM32 and Check no_std passed.
-Check, strict Clippy, native Test Suite and Linux/WASM SDK release
-builds were pending when this checkpoint was committed. No focused or
-full native pass is claimed for this candidate. Native job ID is
-130718919553. This Markdown-only continuation changes no implementation
-and intentionally leaves that exact source run in progress.
-
-PR #9 is complete at implementation
-`110d1625763c9fecd2cf2a226e5e7fb25add99bf`, documentation head
-`9599133be7737b8006cab373d9a99d8fe9bafff8`, run 43068789717,
-all eight jobs passed. Counts are 21 focused, 1,568 regular workspace
-with 25 existing skips, and 32 no-asm tests.
-
-Next executable task: fetch PR #10's latest head and run 43076086692.
-Fix actual failures in the retained-receipt admission regression, then
-require all eight jobs. Preserve `Unsupported`, the real proof
-validation, closed-role, promotion-record, cancellation and restart
-assertions. Do not repeat the completed PR #9 payload or crash work.
-No owner decision blocks continued testing. Merge, release and
-consensus activation remain unauthorized.
-
-## Final session checkpoint
-
-Implementation `509e54b5af6a686b24086eea30fe97e8dc02af23` remains
-under [run 43076086692](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43076086692).
-Formatting, strict Clippy, Check, Test WASM32, Check WASM32 and
-Check no_std and WASM SDK release passed. Six jobs have completed
-successfully; native Test Suite and Linux release remain pending. The native job is 130718919553. No new native
-pass is claimed for PR #10. Markdown-only handoff commits do not change
-the validating implementation.
-
-The next session should verify all eight jobs of that exact run.
-If native tests fail, inspect the retained real proof validation and
-actual admission rejection in `run_payload_ibd_at`; preserve
-`Unsupported`, durable-promotion and closed-role assertions.
-PR #9's real payload, cancellation and SIGKILL cases are complete and
-passed; do not reimplement them. After PR #10 turns green, continue
-tampered nonempty nullifier stream rejection and authenticated retry.
-No owner decision is needed for continued tests.
+Initial source `c309386d2f18568b5ee4e91156ff6b9dde378d8e` opened
+draft PR #11 and PR run 43308475970 (push 43308466345 superseded).
+Lints stopped on five Rustfmt layout hunks; strict Clippy did not run.
+The exact CI formatter output was applied without changing assertions.
+The replacement source/run will be recorded in the PR description.
+Native validation is pending.

@@ -100,3 +100,13 @@ PR #9's real payload, cancellation and SIGKILL cases are complete and
 passed; do not reimplement them. After PR #10 turns green, continue
 tampered nonempty nullifier stream rejection and authenticated retry.
 No owner decision is needed for continued tests.
+
+## Validation completed November 12, 2026
+
+Run 43076086692 completed all eight jobs at implementation
+`509e54b5af6a686b24086eea30fe97e8dc02af23`.
+Observed counts: 21 focused passed (1,583 excluded), 1,568 regular
+workspace passed (25 existing skips), and 32 no-asm passed.
+Formatting, strict Clippy and all remaining checks passed.
+The former pending checkpoint is historical. Continue with tampered
+nonempty shielded stream rejection; preserve PR #10's validated head.

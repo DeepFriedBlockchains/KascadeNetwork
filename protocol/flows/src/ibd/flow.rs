@@ -1343,7 +1343,12 @@ impl IbdFlow {
         }
         .await;
         drop(tx);
-        finish_pruning_import_worker(stream_result, builder_handle, "shielded importer").await?;
+        let result = finish_pruning_import_worker(stream_result, builder_handle, "shielded importer").await;
+        #[cfg(feature = "test-staging-interruption")]
+        if let Err(error) = &result {
+            super::import_interruption::record_shielded_rejection(error.to_string());
+        }
+        result?;
         #[cfg(feature = "test-staging-interruption")]
         if consensus.staging_import().is_some() && has_nullifiers {
             super::import_interruption::receiver_payload_written(StagingImportComponent::Shielded).await;
