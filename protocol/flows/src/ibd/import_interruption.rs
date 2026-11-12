@@ -144,7 +144,6 @@ pub(crate) async fn receiver_payload_written(component: StagingImportComponent) 
     }
 }
 
-
 struct TamperCase {
     ready: Mutex<Option<oneshot::Sender<()>>>,
     release: Mutex<Option<oneshot::Receiver<()>>>,

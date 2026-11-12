@@ -54,3 +54,12 @@ restart safety. Do not change consensus or monetary rules.
 GitHub and GitHub Actions are the exclusive development environment.
 The preview stays default-off and Simnet-only. PRs #1–#10 remain intact;
 no merge, release or activation is authorized.
+
+## Initial validation checkpoint
+
+Initial source `c309386d2f18568b5ee4e91156ff6b9dde378d8e` opened
+draft PR #11 and PR run 43308475970 (push 43308466345 superseded).
+Lints stopped on five Rustfmt layout hunks; strict Clippy did not run.
+The exact CI formatter output was applied without changing assertions.
+The replacement source/run will be recorded in the PR description.
+Native validation is pending.

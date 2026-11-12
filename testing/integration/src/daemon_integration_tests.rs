@@ -1509,8 +1509,9 @@ async fn run_payload_ibd_at(
     let finality_depth = params.finality_depth();
     let pruning_depth = params.pruning_depth();
     let coinbase_maturity = params.coinbase_maturity();
-    let initial_blocks =
-        (coinbase_maturity as usize) + pruning_depth as usize + if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) { 300 } else { 80 };
+    let initial_blocks = (coinbase_maturity as usize)
+        + pruning_depth as usize
+        + if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) { 300 } else { 80 };
     for mined in 0..if recovering { 0 } else { initial_blocks } {
         #[cfg(feature = "phase6-staging-preview")]
         if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) && mined == 230 {
@@ -1667,7 +1668,13 @@ async fn run_payload_ibd_at(
     #[cfg(not(feature = "phase6-staging-preview"))]
     let _ = (interruption, restart_receiver);
 
-    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers).await.unwrap();
+    rpc_client2
+        .add_peer(
+            format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(),
+            interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers,
+        )
+        .await
+        .unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
         50,
@@ -1693,14 +1700,22 @@ async fn run_payload_ibd_at(
             while tamper.rejection().is_none() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-        }).await.expect("receiver did not reject the altered nullifier set");
+        })
+        .await
+        .expect("receiver did not reject the altered nullifier set");
         let rejection = tamper.rejection().unwrap();
         assert!(rejection.contains("does not reproduce the committed accumulator"), "unexpected rejection: {rejection}");
         let drain_manager = manager.clone();
-        wait_for(50, 200, move || {
-            let manager = drain_manager.clone();
-            Box::pin(async move { !manager.is_staging_import_pending() })
-        }, "rejected shielded importer did not drain").await;
+        wait_for(
+            50,
+            200,
+            move || {
+                let manager = drain_manager.clone();
+                Box::pin(async move { !manager.is_staging_import_pending() })
+            },
+            "rejected shielded importer did not drain",
+        )
+        .await;
         let active = manager.consensus();
         assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
         assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
