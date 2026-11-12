@@ -1410,10 +1410,23 @@ async fn submit_ibd_fixture_lanes(rpc: &GrpcClient, miner: &Address, maturity: u
     }
 }
 
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_rejects_tampered_nullifier_payload() {
+    run_payload_ibd(true, None, false, IbdPayloadFixture::TamperedNullifiers).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_reopens_after_tampered_nullifier_payload() {
+    run_payload_ibd(true, None, true, IbdPayloadFixture::TamperedNullifiers).await;
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum IbdPayloadFixture {
     Original,
     SpentNullifiers,
+    TamperedNullifiers,
     Transparent,
 }
 
@@ -1497,10 +1510,10 @@ async fn run_payload_ibd_at(
     let pruning_depth = params.pruning_depth();
     let coinbase_maturity = params.coinbase_maturity();
     let initial_blocks =
-        (coinbase_maturity as usize) + pruning_depth as usize + if fixture == IbdPayloadFixture::SpentNullifiers { 300 } else { 80 };
+        (coinbase_maturity as usize) + pruning_depth as usize + if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) { 300 } else { 80 };
     for mined in 0..if recovering { 0 } else { initial_blocks } {
         #[cfg(feature = "phase6-staging-preview")]
-        if fixture == IbdPayloadFixture::SpentNullifiers && mined == 230 {
+        if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) && mined == 230 {
             submit_ibd_fixture_spend(&kaspad1, &rpc_client1, &params).await;
         }
         #[cfg(feature = "phase6-staging-preview")]
@@ -1550,7 +1563,7 @@ async fn run_payload_ibd_at(
         None
     };
     #[cfg(feature = "phase6-staging-preview")]
-    let expected_nullifiers = if fixture == IbdPayloadFixture::SpentNullifiers {
+    let expected_nullifiers = if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) {
         let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
         let active = manager.consensus();
@@ -1640,6 +1653,10 @@ async fn run_payload_ibd_at(
     };
 
     #[cfg(feature = "phase6-staging-preview")]
+    let mut tamper = (fixture == IbdPayloadFixture::TamperedNullifiers)
+        .then(kaspa_p2p_flows::ibd::import_interruption::tamper_next_nullifier_payload);
+
+    #[cfg(feature = "phase6-staging-preview")]
     let mut pause = interruption.map(|component| {
         if fixture == IbdPayloadFixture::Original {
             kaspa_p2p_flows::ibd::import_interruption::pause_transfer(component)
@@ -1650,7 +1667,7 @@ async fn run_payload_ibd_at(
     #[cfg(not(feature = "phase6-staging-preview"))]
     let _ = (interruption, restart_receiver);
 
-    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), interruption.is_none()).await.unwrap();
+    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers).await.unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
         50,
@@ -1662,6 +1679,60 @@ async fn run_payload_ibd_at(
         "the nodes did not connect to each other",
     )
     .await;
+
+    #[cfg(feature = "phase6-staging-preview")]
+    let rpc_client2 = if let Some(mut tamper) = tamper.take() {
+        let mut client = rpc_client2;
+        tokio::time::timeout(Duration::from_secs(30), tamper.wait_until_ready()).await.expect("no nonempty nullifier frame");
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        assert!(manager.is_staging_import_pending(), "tampered transfer lost its reservation before verification");
+        assert_eq!(client.get_block_dag_info().await.unwrap().pruning_point_hash, SIMNET_GENESIS.hash);
+        tamper.release();
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while tamper.rejection().is_none() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("receiver did not reject the altered nullifier set");
+        let rejection = tamper.rejection().unwrap();
+        assert!(rejection.contains("does not reproduce the committed accumulator"), "unexpected rejection: {rejection}");
+        let drain_manager = manager.clone();
+        wait_for(50, 200, move || {
+            let manager = drain_manager.clone();
+            Box::pin(async move { !manager.is_staging_import_pending() })
+        }, "rejected shielded importer did not drain").await;
+        let active = manager.consensus();
+        assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
+        assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
+        assert!(!active.unguarded_session_blocking().supports_verified_staging_import());
+        drop(active);
+        drop(manager);
+        client.ban("127.0.0.1".parse().unwrap()).await.unwrap();
+        drop(tamper);
+        if restart_receiver {
+            client.disconnect().await.unwrap();
+            drop(client);
+            kaspad2 = kaspad2.restart(total_fd_limit);
+            let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+            let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+            let active = manager.consensus();
+            assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
+            assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
+            assert!(!active.unguarded_session_blocking().supports_verified_staging_import());
+            assert!(!manager.is_staging_import_pending());
+            drop(active);
+            drop(manager);
+            client = kaspad2.start().await;
+        }
+        let peer_ip = "127.0.0.1".parse().unwrap();
+        if client.get_peer_addresses().await.unwrap().banned_addresses.contains(&peer_ip) {
+            client.unban(peer_ip).await.unwrap();
+        }
+        client.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+        client
+    } else {
+        rpc_client2
+    };
 
     #[cfg(feature = "phase6-staging-preview")]
     let rpc_client2 = if let Some(mut pause) = pause.take() {

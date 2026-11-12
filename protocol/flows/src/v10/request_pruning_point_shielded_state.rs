@@ -111,6 +111,12 @@ impl RequestPruningPointShieldedStateFlow {
 
         while let Some(batch) = rx.recv().await {
             let nullifiers: Vec<Vec<u8>> = batch.into_iter().map(|nf| nf.to_vec()).collect();
+            #[cfg(feature = "test-staging-interruption")]
+            let nullifiers = {
+                let mut nullifiers = nullifiers;
+                crate::ibd::import_interruption::tamper_nullifier_chunk(&mut nullifiers).await;
+                nullifiers
+            };
             let chunk_len = nullifiers.len() as u64;
             self.router.enqueue(make_message!(Payload::ShieldedNullifierChunk, ShieldedNullifierChunkMessage { nullifiers })).await?;
 

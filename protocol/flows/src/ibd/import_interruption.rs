@@ -143,3 +143,93 @@ pub(crate) async fn receiver_payload_written(component: StagingImportComponent) 
         let _ = release.await;
     }
 }
+
+
+struct TamperCase {
+    ready: Mutex<Option<oneshot::Sender<()>>>,
+    release: Mutex<Option<oneshot::Receiver<()>>>,
+    mutated: std::sync::atomic::AtomicBool,
+    rejection: Mutex<Option<String>>,
+}
+
+fn tamper_case() -> &'static Mutex<Option<Arc<TamperCase>>> {
+    static ACTIVE: OnceLock<Mutex<Option<Arc<TamperCase>>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(None))
+}
+
+/// One-shot wire corruption. No consensus data or authenticated metadata is changed.
+pub struct TamperedTransfer {
+    case: Arc<TamperCase>,
+    ready: Option<oneshot::Receiver<()>>,
+    release: Option<oneshot::Sender<()>>,
+}
+
+pub fn tamper_next_nullifier_payload() -> TamperedTransfer {
+    let (ready, wait_ready) = oneshot::channel();
+    let (release, wait_release) = oneshot::channel();
+    let case = Arc::new(TamperCase {
+        ready: Mutex::new(Some(ready)),
+        release: Mutex::new(Some(wait_release)),
+        mutated: std::sync::atomic::AtomicBool::new(false),
+        rejection: Mutex::new(None),
+    });
+    let mut current = tamper_case().lock();
+    assert!(current.is_none(), "a nullifier tamper case is already armed");
+    *current = Some(case.clone());
+    drop(current);
+    TamperedTransfer { case, ready: Some(wait_ready), release: Some(release) }
+}
+
+impl TamperedTransfer {
+    pub async fn wait_until_ready(&mut self) {
+        self.ready.take().expect("tamper readiness already awaited").await.expect("sender exited before the nonempty payload");
+    }
+
+    pub fn release(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+
+    pub fn rejection(&self) -> Option<String> {
+        self.case.rejection.lock().clone()
+    }
+}
+
+impl Drop for TamperedTransfer {
+    fn drop(&mut self) {
+        self.release();
+        let mut current = tamper_case().lock();
+        if current.as_ref().is_some_and(|case| Arc::ptr_eq(case, &self.case)) {
+            current.take();
+        }
+    }
+}
+
+pub(crate) async fn tamper_nullifier_chunk(nullifiers: &mut [Vec<u8>]) {
+    use std::sync::atomic::Ordering;
+    let case = tamper_case().lock().clone();
+    let Some(case) = case else { return };
+    let Some(first) = nullifiers.first_mut().filter(|nf| !nf.is_empty()) else { return };
+    if case.mutated.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    first[0] ^= 1;
+    let ready = case.ready.lock().take();
+    if let Some(ready) = ready {
+        let _ = ready.send(());
+    }
+    let release = case.release.lock().take();
+    if let Some(release) = release {
+        let _ = release.await;
+    }
+}
+
+/// Called only after the receiver has joined the actual shielded importer.
+pub(crate) fn record_shielded_rejection(message: String) {
+    use std::sync::atomic::Ordering;
+    let case = tamper_case().lock().clone();
+    if let Some(case) = case.filter(|case| case.mutated.load(Ordering::Acquire)) {
+        *case.rejection.lock() = Some(message);
+    }
+}
