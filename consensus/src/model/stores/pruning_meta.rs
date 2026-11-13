@@ -122,6 +122,15 @@ impl PruningMetaStores {
         self.smt_stable_flag_access.read().optional().unwrap().unwrap_or(true)
     }
 
+    /// Caller retains the exclusive metadata lock through the deferred commit.
+    pub(crate) fn stage_pruning_shielded_stable<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        stable: bool,
+    ) -> StoreResult<()> {
+        self.shielded_stable_flag_access.stage_exclusive_write(batch, &stable)
+    }
+
     pub fn set_pruning_shielded_stable_flag(&mut self, batch: &mut WriteBatch, stable: bool) -> StoreResult<()> {
         self.shielded_stable_flag_access.write(BatchDbWriter::new(batch), &stable)
     }

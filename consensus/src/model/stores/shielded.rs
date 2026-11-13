@@ -25,7 +25,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use kaspa_consensus_core::BlockHasher;
-use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DB, StoreError, StoreResult};
+use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DeferredDbBatch, DB, StoreError, StoreResult};
 use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::Hash;
 use kaspa_math::Uint3072;
@@ -78,6 +78,10 @@ pub struct DbNullifierSetStore {
 }
 
 impl DbNullifierSetStore {
+    pub(crate) fn insert_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, nullifier: [u8; 32]) -> StoreResult<()> {
+        self.access.write_deferred(batch, NullifierKey(nullifier), 1u8)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedNullifiers.into()) }
     }
@@ -194,6 +198,10 @@ pub struct DbShieldedTreeStore {
 }
 
 impl DbShieldedTreeStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, state: FrontierState) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, StoredFrontier(state))
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedTreeFrontier.into()) }
     }
@@ -245,6 +253,10 @@ pub struct DbShieldedSupplyStore {
 }
 
 impl DbShieldedSupplyStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, totals: SupplyTotals) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, totals)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedSupply.into()) }
     }
@@ -301,6 +313,10 @@ pub struct DbShieldedDevAccruedStore {
 }
 
 impl DbShieldedDevAccruedStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, accrued: u64) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, accrued)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedDevAccrued.into()) }
     }
@@ -349,6 +365,10 @@ pub struct DbShieldedAnchorSourceScoreStore {
 }
 
 impl DbShieldedAnchorSourceScoreStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, source: Hash, blue_score: u64) -> StoreResult<()> {
+        self.access.write_deferred(batch, source, blue_score)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -418,6 +438,10 @@ pub struct DbShieldedBurnStore {
 }
 
 impl DbShieldedBurnStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, receipts: BurnReceipts) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, receipts)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedBurns.into()) }
     }
@@ -474,6 +498,10 @@ pub struct DbShieldedNullifierMuHashStore {
 }
 
 impl DbShieldedNullifierMuHashStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, muhash: MuHash) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, muhash.try_into().map_err(|_| StoreError::DataInconsistency("invalid imported nullifier accumulator".into()))?)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -654,6 +682,10 @@ pub struct DbAnchorProducersStore {
 }
 
 impl DbAnchorProducersStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, anchor: [u8; 32], producers: Vec<Hash>) -> StoreResult<()> {
+        self.access.write_deferred(batch, AnchorKey(anchor), producers)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -742,6 +774,10 @@ pub struct DbAnchorBlockStore {
 }
 
 impl DbAnchorBlockStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, anchor: [u8; 32], block: Hash) -> StoreResult<()> {
+        self.access.write_deferred(batch, AnchorKey(anchor), block)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchors.into()) }
     }

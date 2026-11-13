@@ -494,31 +494,76 @@ impl VirtualStateProcessor {
     /// declared state root must equal this PoW-committed value (the coinbase
     /// `shielded_commitment` of the pruning point's selected child) BEFORE anything
     /// is seeded — the import is otherwise entirely attacker-controlled.
-    pub fn seed_pruning_point_shielded(
+    /// The caller pins its existing pruning session for the entire blocking worker.
+    /// Network waits hold no store locks. Every write is bounded and atomic.
+    pub(crate) fn import_bounded_pruning_shielded(
         &self,
-        pp: kaspa_hashes::Hash,
+        pp: Hash,
         metadata: kaspa_consensus_core::api::ShieldedExportMetadata,
         expected_state_root: Option<[u8; 32]>,
-        nullifiers: Vec<[u8; 32]>,
+        nullifier_batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator<'_>,
+        mut commit: impl for<'a> FnMut(kaspa_database::prelude::DeferredDbBatch<'a>) -> kaspa_database::prelude::StoreResult<()>,
     ) -> Result<(), String> {
+        use crate::model::stores::shielded::NullifierSetStoreReader;
         use crate::processes::shielded::{PruningPointShieldedMetadata, ShieldedStateManager};
+        use crate::processes::shielded_import::ShieldedImportAccumulator;
+        use kaspa_database::prelude::DeferredDbBatch;
+
+        let mut stream = ShieldedImportAccumulator::new(metadata.nullifier_count)?;
         let md = PruningPointShieldedMetadata::from_wire_bytes(&metadata.data)?;
-        // F-02: reject the import before seeding if it does not match the
-        // PoW-committed shielded state root (peer can be dropped; another syncer
-        // can be tried).
         if let Some(committed) = expected_state_root {
             ShieldedStateManager::verify_import_binding(&md, committed)?;
         }
-        let n = ShieldedStateManager::verify_pruning_point_shielded(&md, nullifiers.iter())?;
-        if n as u64 != metadata.nullifier_count {
-            return Err(format!("nullifier count mismatch: metadata says {}, streamed {}", metadata.nullifier_count, n));
+        ShieldedStateManager::verify_import_metadata(&md)?;
+        {
+            // Read point before metadata, matching the other authority writers.
+            let point = self.pruning_point_store.read();
+            if point.pruning_point().map_err(|e| e.to_string())? != pp {
+                return Err("shielded import pruning point changed".into());
+            }
+            let metadata_store = self.pruning_meta_stores.write();
+            if self.shielded_state_manager.nullifiers().iter_all().next().transpose().map_err(|e| e.to_string())?.is_some() {
+                return Err("shielded import requires a cleared membership set".into());
+            }
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            metadata_store.stage_pruning_shielded_stable(&mut batch, false).map_err(|e| e.to_string())?;
+            commit(batch).map_err(|e| e.to_string())?;
         }
-        let mut batch = WriteBatch::default();
-        self.shielded_state_manager
-            .seed_pruning_point_shielded(&mut batch, pp, &md, nullifiers.iter())
-            .map_err(|e| format!("seeding shielded stores failed: {e:?}"))?;
-        self.db.write(batch).unwrap();
-        info!("Imported shielded state for pruning point {}: {} nullifiers imported", pp, n);
+        for chunk in nullifier_batches {
+            stream.append(&chunk)?;
+            let point = self.pruning_point_store.read();
+            if point.pruning_point().map_err(|e| e.to_string())? != pp {
+                return Err("shielded import pruning point changed".into());
+            }
+            // This set is bounded by the single frame limit, never the stream size.
+            let mut unique = std::collections::HashSet::with_capacity(chunk.len());
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            for nf in chunk {
+                if !unique.insert(nf) || self.shielded_state_manager.nullifiers().contains(&nf).map_err(|e| e.to_string())? {
+                    return Err("duplicate nullifier in shielded import".into());
+                }
+                self.shielded_state_manager.nullifiers().insert_deferred(&mut batch, nf).map_err(|e| e.to_string())?;
+            }
+            commit(batch).map_err(|e| e.to_string())?;
+            drop(point);
+            #[cfg(feature = "test-staging-interruption")]
+            kaspa_consensus_core::test_staging_write::after_shielded_write();
+        }
+        stream.finish(&md.nullifier_muhash)?;
+        let point = self.pruning_point_store.read();
+        if point.pruning_point().map_err(|e| e.to_string())? != pp {
+            return Err("shielded import pruning point changed".into());
+        }
+        let metadata_store = self.pruning_meta_stores.write();
+        let rows = self.shielded_state_manager.verify_import_rows(&md).map_err(|e| e.to_string())?;
+        if rows != metadata.nullifier_count {
+            return Err("committed nullifier count differs from the declared count".into());
+        }
+        let mut batch = DeferredDbBatch::new(self.db.clone());
+        self.shielded_state_manager.stage_import_metadata(&mut batch, pp, &md).map_err(|e| e.to_string())?;
+        metadata_store.stage_pruning_shielded_stable(&mut batch, true).map_err(|e| e.to_string())?;
+        commit(batch).map_err(|e| e.to_string())?;
+        info!("Imported shielded state for pruning point {}: {} nullifiers imported", pp, rows);
         Ok(())
     }
 
@@ -2536,6 +2581,16 @@ impl VirtualStateProcessor {
     ) -> kaspa_database::prelude::StoreResult<()> {
         let _session = self.pruning_lock.blocking_read();
         self.append_guarded_staging_utxos(operation, utxos, multiset)
+    }
+
+    pub(super) fn commit_guarded_shielded_batch(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let prefixes: Vec<_> = super::staging_import::StagingComponent::Shielded.write_prefixes().iter().copied().map(u8::from).collect();
+        batch.ensure_key_prefixes(&prefixes)?;
+        operation.apply(&self.branch_authority, batch)
     }
 
     pub(super) fn append_guarded_staging_utxos(

@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 12, 2026.
+Updated November 13, 2026.
 
 ## Validation stack
 
@@ -263,42 +263,67 @@ Real authenticated receipts were rejected by actual admission calls
 on ordinary active receivers before import and after promotion,
 including the restart scenarios. Do not repeat this completed work.
 
-## Tampered shielded stream candidate
+## Tampered shielded stream validation
 
-Branch `feature/phase6-tampered-shielded-stream-20261112` is stacked
-on PR #10. The test-only sender changes one byte of one real nonempty
-nullifier frame, preserving declared count, metadata and source storage.
-The receiver must report its actual committed-accumulator rejection
-after joining the shielded importer. The test requires draining,
-unpromoted active state, optional same-directory reopen, fresh retry,
-exact legitimate nullifier-set recovery, verified promotion and closed
-post-activation admission.
+Draft [PR #11](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/11)
+is validated at `9612aac2ebca91f384591c3c135fa9df57dbc6d3` on
+`feature/phase6-tampered-shielded-stream-20261112`.
+[Run 43309997530](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43309997530)
+passed all eight jobs, independently rechecked November 13, 2026.
+Logs confirm 23 focused tests, 1,568 workspace tests (25 skips), and
+32 no-asm tests.
+The original tampered-stream, same-directory recovery, active-admission
+and verified-promotion assertions passed. Do not reimplement these.
+Initial run 43308475970 failed five formatter hunks; the validated
+correction changed formatting only.
 
-See [the dated report](docs/development/PHASE6_TAMPERED_SHIELDED_STREAM_2026-11-12.md).
-Candidate source and run IDs are recorded in the new draft PR after push.
-No validation pass is claimed for this candidate yet.
+## Bounded shielded ingestion candidate
 
-## Next executable task
+Branch `feature/phase6-bounded-shielded-ingestion-20261113` is stacked on PR #11's
+exact validated head above. The ingestion path no longer buffers the
+complete nullifier set or builds a membership batch proportional to it.
+Frames are limited to 4,096 nullifiers (128 KiB raw payload). Each frame
+is a deferred, synchronous atomic RocksDB batch; one authenticated owner
+permit is rechecked at each write on the preview route. The existing
+proxy pruning guard and worker reservation remain pinned through the
+blocking call. No store lock is held while waiting for another frame.
 
-Validate the tampered-stream candidate's focused regressions and all
-eight jobs. Fix actual failures without weakening the expected
-committed-accumulator rejection or admission/promotion assertions.
-After this independent milestone passes, implement bounded-memory
-shielded ingestion: the current consensus importer still collects all
-declared nullifiers in a Vec before verification and atomic seeding.
-Preserve count bounds, duplicates, authentication, ownership and
-fail-closed cancellation/restart behavior.
+Partial membership rows remain unready. EOF must match declared count
+and accumulator; a streaming re-read of committed rows must match too.
+Only then are all verified metadata and the stable flag published in
+one deferred batch. Duplicate rows, malformed/oversize frames, stale
+authority, damaged committed evidence and rejected writes fail closed.
+A failed owned worker poisons its session before returning. The raw
+legacy adapter cannot bypass owner admission on an isolated receiver.
 
-All development uses GitHub and GitHub Actions exclusively.
-The preview stays default-off and Simnet-only. PRs #1–#10 remain intact.
-No merge, release, private-history import or consensus activation is
-authorized.
+Isolated completion and promotion verification also iterate committed
+membership without collecting a global snapshot. Descendant restart
+projection remains unchanged and still uses a global set; general
+export/recovery memory limits remain separate follow-up work. Metadata
+(frontier, historical anchor window and burn receipts) retains its
+existing wire representation; this milestone bounds spent-nullifier
+ingestion, not arbitrary metadata size.
 
-## Initial validation checkpoint
+The existing nonempty shielded disconnect and SIGKILL regressions now
+pause after the first actual membership batch, before metadata/readiness.
+The SMT and shielded hooks are independent and compile only under the
+existing test feature. Existing safety assertions remain intact.
 
-Initial source `c309386d2f18568b5ee4e91156ff6b9dde378d8e` opened
-draft PR #11 and PR run 43308475970 (push 43308466345 superseded).
-Lints stopped on five Rustfmt layout hunks; strict Clippy did not run.
-The exact CI formatter output was applied without changing assertions.
-The replacement source/run will be recorded in the PR description.
-Native validation is pending.
+See [the dated report](docs/development/PHASE6_BOUNDED_SHIELDED_INGESTION_2026-11-13.md).
+Implementation SHA, PR and Actions IDs are recorded after push. This is
+an unvalidated candidate until focused tests, strict Clippy, formatting
+and all eight jobs pass.
+
+## Next executable checkpoint
+
+Verify the bounded-ingestion candidate's GitHub Actions run. Apply exact
+formatter output and fix genuine compiler/test failures. Require all
+new `bounded_shielded_` tests and existing production
+`authority_integration_` cases, including disconnect/SIGKILL,
+tampered retry and successful verified promotion. Then address the
+remaining full-set snapshot in descendant restart/export without
+weakening membership projection or authenticated evidence checks.
+
+The public repository and GitHub Actions are the exclusive environment.
+PRs #1–#11 remain intact. Preview stays default-off and Simnet-only.
+No merge, release, force-push or consensus activation is authorized.
