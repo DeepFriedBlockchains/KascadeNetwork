@@ -59,3 +59,15 @@ Descendant recovery and export snapshots follow as separate milestones.
 All source edits and validation use GitHub integration and Actions only.
 The preview remains default-off and Simnet-only. No merge, release,
 force-push or consensus activation is authorized.
+
+## Pushed correction checkpoint
+
+Correction source: `f1808f1231697474de66bf3f99bad0c2f01ead0d`.
+Remote PR #12 head was verified after push. Authoritative replacement
+PR run: [43515652940](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43515652940).
+Duplicate push run 43515643677 is being cancelled by workflow concurrency;
+the PR run is pending while that cancellation finishes. No replacement
+focused or full validation result is claimed. Native job order is the
+single persistent-reopen regression, then workspace build, 31 focused
+cases and full workspace validation. Resume this run rather than rerunning
+the prior known-bad source. PR #12 stays draft and unvalidated.
