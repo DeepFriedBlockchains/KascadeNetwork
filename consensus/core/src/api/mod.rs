@@ -339,6 +339,12 @@ pub trait ConsensusApi: Send + Sync {
         Err(StagingPromotionError::Unsupported)
     }
 
+    /// Clear failed shielded payload under the receiver's exact worker permit.
+    /// Readiness stays false throughout the bounded durable deletions.
+    fn clear_verified_staging_shielded(&self, _session: &StagingImportSession, _point: Hash) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
     /// Import with the receiver's exact session permit, checked on every durable batch.
     fn import_verified_staging_shielded(
         &self,
@@ -1055,12 +1061,11 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    /// F-15: really clears the shielded import state — the whole global nullifier
-    /// set, the per-block snapshots at the current pruning point, and the stable
-    /// flag, in one atomic batch. Call ONLY immediately before a full re-seed (see
-    /// `ShieldedStateManager::clear_for_pruning_reimport` in `kaspa-consensus` for
-    /// the safety preconditions; the IBD flow enforces them).
-    fn clear_pruning_shielded_stores(&self) {
+    /// F-15: persist false readiness before bounded durable membership deletion,
+    /// then remove the pruning-point snapshots. Call only immediately before
+    /// re-seeding and with no validated descendants; IBD enforces both conditions.
+    /// Failure or interruption leaves readiness false and cleanup can restart.
+    fn clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
         unimplemented!()
     }
 

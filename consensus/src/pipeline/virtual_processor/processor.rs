@@ -575,16 +575,36 @@ impl VirtualStateProcessor {
         self.shielded_state_manager.state_root_at(block)
     }
 
-    /// F-15: stage the real clear of the shielded import state (the whole global
-    /// nullifier set + the per-block snapshots at `pruning_point`) into `batch`.
-    /// See `ShieldedStateManager::clear_for_pruning_reimport` for the safety
-    /// preconditions — the caller (IBD flow via `Consensus`) enforces them.
-    pub fn clear_shielded_state_for_pruning_reimport(
+    /// Clear before a full re-seed, only after IBD rejects validated descendants.
+    /// A durable false marker precedes deletion. A single database iterator and
+    /// bounded deferred batches avoid a full membership snapshot or write batch.
+    /// The proxy retains its existing pruning guard across the complete call.
+    pub(crate) fn clear_bounded_pruning_shielded(
         &self,
-        batch: &mut WriteBatch,
-        pruning_point: kaspa_hashes::Hash,
-    ) -> Result<(), kaspa_database::prelude::StoreError> {
-        self.shielded_state_manager.clear_for_pruning_reimport(batch, pruning_point)
+        pp: Hash,
+        mut commit: impl for<'a> FnMut(kaspa_database::prelude::DeferredDbBatch<'a>) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use kaspa_database::prelude::{DeferredDbBatch, StoreError};
+
+        let check_point = || {
+            let point = self.pruning_point_store.read();
+            if point.pruning_point()? != pp {
+                return Err(StoreError::DataInconsistency("shielded cleanup pruning point changed".into()));
+            }
+            Ok(point)
+        };
+        {
+            let _point = check_point()?;
+            let metadata = self.pruning_meta_stores.write();
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            metadata.stage_pruning_shielded_stable(&mut batch, false)?;
+            commit(batch)?;
+        }
+        self.shielded_state_manager.clear_for_pruning_reimport(pp, |batch| {
+            let _point = check_point()?;
+            let _metadata = self.pruning_meta_stores.write();
+            commit(batch)
+        })
     }
 
     /// The shielded effects one **chain block** applied (PLAN §2.4), for wallet sync

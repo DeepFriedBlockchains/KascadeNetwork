@@ -428,3 +428,27 @@ PR #12 remains draft, unmerged and inactive. Its source is validated.
 
 Next: a new stacked draft PR for bounded failed-import cleanup.
 Keep descendant recovery and export snapshots as later milestones.
+
+## Bounded failed-import cleanup candidate
+
+Branch: `feature/phase6-bounded-failed-import-cleanup-20261113`,
+stacked on the validated PR #12 handoff checkpoint
+`3734e6fa30d2d5e4c82b30034f42dbedcf30bbd6`.
+See [the cleanup report](docs/development/PHASE6_BOUNDED_FAILED_IMPORT_CLEANUP_2026-11-13.md).
+
+The candidate persists false readiness before deleting membership in
+synchronous batches of at most 4,096 nullifiers under the same authenticated
+worker permit. It uses no full-set snapshot or deletion batch. Deferred
+typed deletes invalidate caches only after persistence. Wrong owner,
+point, component, busy worker or stale revision rejects writes; failure
+requires a fresh session after worker drain. Existing validated-descendant
+refusal is retained. Matching old snapshot roots cannot bypass the false
+readiness left by interrupted cleanup.
+
+Three new cleanup regressions cover durable interruption/reopen/retry,
+rejected marker and snapshot batches, cache behavior and exact permit
+ownership/reservations. The existing F-15 test retains every assertion.
+All eight CI jobs remain required; cleanup source is not yet validated.
+Exact PR, source and run IDs will be appended after push. Descendant
+recovery and export snapshots remain subsequent milestones. No merge,
+release or consensus activation.

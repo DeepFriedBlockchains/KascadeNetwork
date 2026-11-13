@@ -298,6 +298,26 @@ impl Consensus {
         Ok(())
     }
 
+    pub(crate) fn clear_owned_staging_shielded(
+        &self,
+        session: &StagingImportSession,
+        point: kaspa_hashes::Hash,
+    ) -> Result<(), StagingPromotionError> {
+        let mut import = self.owned_staging_import(session)?;
+        if import.proof.pruning_point() != point {
+            return Err(rejected(inconsistent("shielded cleanup differs from the authenticated pruning point")));
+        }
+        let mut operation = import.start_guarded_operation(StagingComponent::Shielded).map_err(rejected)?;
+        *import.progress.lock() = StagingProgress::Failed;
+        self.virtual_processor
+            .clear_bounded_pruning_shielded(point, |batch| {
+                self.virtual_processor.commit_guarded_shielded_batch(&mut operation, batch)
+            })
+            .map_err(rejected)?;
+        *import.progress.lock() = StagingProgress::Writing(StagingComponent::Shielded);
+        Ok(())
+    }
+
     pub(crate) fn import_owned_staging_shielded(
         &self,
         session: &StagingImportSession,
@@ -641,5 +661,74 @@ mod tests {
         drop(operation);
         drop(import);
         assert!(StagingImport::begin_fixture(processor.clone(), proof).is_ok());
+    }
+    #[test]
+    fn bounded_cleanup_rejects_foreign_busy_out_of_order_and_stale_permits() {
+        use crate::model::stores::shielded::{DbNullifierSetStore, NullifierSetStore};
+        use kaspa_consensus_core::api::SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT;
+        use kaspa_database::prelude::CachePolicy;
+        let config = ConfigBuilder::new(DEVNET_PARAMS).build();
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let (sender, _receiver) = async_channel::unbounded();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender);
+        let processor = consensus.virtual_processor();
+        let point = DEVNET_GENESIS.hash;
+        let mut header = Header::from(&DEVNET_GENESIS);
+        header.finalize();
+        let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header)]]).unwrap();
+        let import = StagingImport::begin_fixture(processor.clone(), proof.clone()).unwrap();
+        let session = StagingImportSession::new(Mutex::new(import));
+        let rows = DbNullifierSetStore::new(db.clone(), CachePolicy::Empty);
+        let count = SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT + 1;
+        let mut batch = rocksdb::WriteBatch::default();
+        for i in 0..count {
+            let mut nf = [0; 32];
+            nf[..8].copy_from_slice(&(i as u64).to_le_bytes());
+            rows.insert_batch(&mut batch, nf).unwrap();
+        }
+        db.write(batch).unwrap();
+        let marker = db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
+        assert!(consensus.clear_owned_staging_shielded(&session, point).is_err(), "proof component cannot clear shielded data");
+        {
+            let import = session.downcast_ref::<Mutex<StagingImport>>().unwrap().lock();
+            *import.progress.lock() = StagingProgress::Writing(StagingComponent::Shielded);
+        }
+        let foreign = TestConsensus::new(&config);
+        assert!(foreign.clear_owned_staging_shielded(&session, point).is_err());
+        assert!(consensus.clear_owned_staging_shielded(&session, Hash::from_bytes([9; 32])).is_err());
+        assert_eq!(db.get(DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), marker);
+        assert_eq!(rows.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), count);
+
+        let mut operation = session
+            .downcast_ref::<Mutex<StagingImport>>()
+            .unwrap()
+            .lock()
+            .start_guarded_operation(StagingComponent::Shielded)
+            .unwrap();
+        assert!(consensus.clear_owned_staging_shielded(&session, point).is_err(), "live worker keeps cleanup excluded");
+        let readiness = DbBranchReadiness::new(db.clone());
+        let mut writes = 0;
+        let result = processor.clear_bounded_pruning_shielded(point, |batch| {
+            processor.commit_guarded_shielded_batch(&mut operation, batch)?;
+            writes += 1;
+            if writes == 2 {
+                readiness.close_revision_sync()?;
+            }
+            Ok(())
+        });
+        assert!(result.is_err(), "the next deletion must reject the replaced revision");
+        assert_eq!(writes, 2, "only false readiness and one bounded deletion may persist");
+        assert_eq!(rows.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), 1);
+        assert!(!consensus.is_pruning_shielded_stable());
+        assert!(StagingImport::begin_fixture(processor.clone(), proof.clone()).is_err());
+        drop(session);
+        assert!(StagingImport::begin_fixture(processor.clone(), proof.clone()).is_err(), "detached worker still reserves the owner");
+        drop(operation);
+        let import = StagingImport::begin_fixture(processor.clone(), proof).unwrap();
+        *import.progress.lock() = StagingProgress::Writing(StagingComponent::Shielded);
+        let fresh_session = StagingImportSession::new(Mutex::new(import));
+        consensus.clear_owned_staging_shielded(&fresh_session, point).unwrap();
+        assert!(rows.iter_all().next().is_none());
+        assert!(!consensus.is_pruning_shielded_stable());
     }
 }

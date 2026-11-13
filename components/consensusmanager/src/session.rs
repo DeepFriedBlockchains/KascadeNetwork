@@ -701,8 +701,20 @@ impl ConsensusSessionOwned {
 
     // -------------------- Shielded-pool pruning-point state (IBD) --------------------
 
-    pub async fn async_clear_pruning_shielded_stores(&self) {
-        self.clone().spawn_blocking(move |c| c.clear_pruning_shielded_stores()).await
+    pub async fn async_clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
+        let import = self.staging_import.clone();
+        self.clone()
+            .spawn_blocking(move |c| {
+                if let Some(import) = import {
+                    c.clear_verified_staging_shielded(&import, c.pruning_point())
+                        .map_err(|error| {
+                            kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string())
+                        })
+                } else {
+                    c.clear_pruning_shielded_stores()
+                }
+            })
+            .await
     }
     pub async fn async_set_pruning_shielded_stable(&self) {
         self.clone().spawn_blocking(move |c| c.set_pruning_shielded_stable_flag(true)).await
