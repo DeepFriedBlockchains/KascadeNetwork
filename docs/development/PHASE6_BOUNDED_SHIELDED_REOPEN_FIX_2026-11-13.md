@@ -88,3 +88,16 @@ latest head is tested. No history rewrite or additional PR is involved.
 The new validation push run is authoritative once its exact SHA and all
 eight results are verified. Source and workflow equivalence will be
 checked through GitHub's commit comparison. No pass is claimed yet.
+
+## Active authoritative replacement run
+
+Validation commit: `fa229e6524a78bb3bcd032d08e861f62a926637e`.
+Both the PR #12 feature branch and `validation/phase6-bounded-reopen-20261113`
+were verified at that commit. All eight jobs have started in push run
+[43516463729](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43516463729).
+GitHub's comparison f1808f1...fa229e6 lists only CURRENT_HANDOFF.md and
+this correction report: all Rust source, tests and workflow are identical.
+The original PR group's newer run 43516476491 remained pending; feature
+push 43516466968 was cancelled. Use 43516463729 for actual validation,
+not those duplicates. No replacement test result is claimed yet.
+Any later handoff head is documentation-only unless explicitly recorded.
