@@ -391,3 +391,16 @@ The original PR group's newer run 43516476491 remained pending; feature
 push 43516466968 was cancelled. Use 43516463729 for actual validation,
 not those duplicates. No replacement test result is claimed yet.
 Any later handoff head is documentation-only unless explicitly recorded.
+
+## Focused reopen regression passed
+
+Authoritative run 43516463729 at validation commit
+`fa229e6524a78bb3bcd032d08e861f62a926637e`, native job
+132199538931, completed the dedicated persistent-reopen step successfully.
+This was independently confirmed through the job-steps endpoint. All
+retained restart, dirty-row, retry and readiness assertions, plus the
+exact persisted-marker check, executed in that step. This confirms the
+fixture initialization correction. The job has continued to workspace
+build; the broader 31-case selection and full workspace suite are still
+pending. PR #12 remains unvalidated until all eight jobs finish
+successfully. Bounded cleanup remains gated on that result.
