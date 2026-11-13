@@ -277,106 +277,91 @@ and verified-promotion assertions passed. Do not reimplement these.
 Initial run 43308475970 failed five formatter hunks; the validated
 correction changed formatting only.
 
-## Bounded shielded ingestion candidate
+## Bounded shielded ingestion — PR #12
 
-Branch `feature/phase6-bounded-shielded-ingestion-20261113` is stacked on PR #11's
-exact validated head above. The ingestion path no longer buffers the
-complete nullifier set or builds a membership batch proportional to it.
-Frames are limited to 4,096 nullifiers (128 KiB raw payload). Each frame
-is a deferred, synchronous atomic RocksDB batch; one authenticated owner
-permit is rechecked at each write on the preview route. The existing
-proxy pruning guard and worker reservation remain pinned through the
-blocking call. No store lock is held while waiting for another frame.
+Draft [PR #12](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12)
+is stacked directly on PR #11 at
+`9612aac2ebca91f384591c3c135fa9df57dbc6d3`.
+Branch: `feature/phase6-bounded-shielded-ingestion-20261113`.
+Current implementation: `acba224032ab7613ac805bcb33160fc696436f2c`.
+Subsequent handoff commits contain documentation only.
 
-Partial membership rows remain unready. EOF must match declared count
-and accumulator; a streaming re-read of committed rows must match too.
-Only then are all verified metadata and the stable flag published in
-one deferred batch. Duplicate rows, malformed/oversize frames, stale
-authority, damaged committed evidence and rejected writes fail closed.
-A failed owned worker poisons its session before returning. The raw
-legacy adapter cannot bypass owner admission on an isolated receiver.
+Spent-nullifier ingestion no longer accumulates the full set or one
+full-set membership batch. Frames are capped at 4,096 entries (128 KiB
+raw payload). Each deferred synchronous RocksDB batch checks the exact
+processor-owned session, database, revision and allowed shielded prefixes.
+The existing proxy pruning guard and worker reservation remain pinned
+through the blocking call; network waits hold no store locks.
 
-Isolated completion and promotion verification also iterate committed
-membership without collecting a global snapshot. Descendant restart
-projection remains unchanged and still uses a global set; general
-export/recovery memory limits remain separate follow-up work. Metadata
-(frontier, historical anchor window and burn receipts) retains its
-existing wire representation; this milestone bounds spent-nullifier
-ingestion, not arbitrary metadata size.
+Partial rows remain unready. Declared count, received accumulator and
+streamed committed database evidence must all agree. Verified metadata
+and readiness publish together in one atomic deferred batch, with cache
+invalidation after persistence. Failed owned imports poison their session.
+The raw adapter rejects isolated receivers lacking an authenticated permit.
+Isolated completion/promotion checks also stream committed membership.
 
-The existing nonempty shielded disconnect and SIGKILL regressions now
-pause after the first actual membership batch, before metadata/readiness.
-The SMT and shielded hooks are independent and compile only under the
-existing test feature. Existing safety assertions remain intact.
+Eight new bounded_shielded_ regressions cover lazy large streams,
+persistent close/reopen/retry, interrupted and corrupt payloads, duplicate
+membership, changed committed evidence, rejected final publication,
+stale authority, foreign ownership and deferred metadata/shared anchors.
+Existing production shielded disconnect and SIGKILL controls now stop
+after a real membership batch, before metadata publication. The original
+23 authority integration cases remain selected, including tampered retry,
+restart, activation rejection and verified successful promotion.
 
-See [the dated report](docs/development/PHASE6_BOUNDED_SHIELDED_INGESTION_2026-11-13.md).
-Implementation SHA, PR and Actions IDs are recorded after push. This is
-an unvalidated candidate until focused tests, strict Clippy, formatting
-and all eight jobs pass.
+## Current validation result
 
-## Next executable checkpoint
+Authoritative PR run:
+[43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558).
+It validates source `acba224032ab7613ac805bcb33160fc696436f2c`.
+Push run 43511647206 was superseded.
 
-Verify the bounded-ingestion candidate's GitHub Actions run. Apply exact
-formatter output and fix genuine compiler/test failures. Require all
-new `bounded_shielded_` tests and existing production
-`authority_integration_` cases, including disconnect/SIGKILL,
-tampered retry and successful verified promotion. Then address the
-remaining full-set snapshot in descendant restart/export without
-weakening membership projection or authenticated evidence checks.
+Verified passing jobs:
+- Check, including tests/benches and the preview adapters.
+- Lints: formatting and strict Clippy.
+- Check WASM32.
+- Test WASM32.
+- Check no_std.
+
+Still running at this checkpoint:
+- Test Suite: building the workspace with devnet-prealloc before focused tests.
+- Build Linux Release.
+- Build WASM32 SDK.
+
+No native runtime test pass or eight-job pass is claimed for PR #12.
+Expected focused selection is eight new bounded tests plus the existing
+23 authority regressions; use actual completed logs for final counts.
+
+Earlier runs: 43509749012 reported 22 formatter hunks, applied exactly.
+43510035150 reported E0308 in a new test's borrowed Arc; ffe3ba69 corrected
+the handle and made row-count assertions propagate iteration errors.
+43511360104 reported one formatter wrap; acba224 matches it exactly.
+No safety assertion was weakened. Current source has passed native
+compilation and strict Clippy after these corrections.
+
+See [the dated report](docs/development/PHASE6_BOUNDED_SHIELDED_INGESTION_2026-11-13.md)
+for implementation details and full source/run history.
+
+## Exact next executable checkpoint
+
+Resume run 43511658558 for source acba224. Inspect Test Suite focused
+results and all eight jobs. If a test fails, fix its actual regression
+and rerun CI without relaxing readiness, ownership, draining, restart,
+accumulator or promotion assertions. Do not repeat the completed
+tampered-stream or active-admission milestones.
+
+Only after PR #12 independently passes, implement bounded failed-import
+cleanup: the legacy clear still constructs a full-set deletion batch.
+Use bounded durable deletions under the same owner permit, keep readiness
+false across interruption/restart, and preserve the no-validated-descendants
+precondition. Validate cleanup separately. Then address full-set
+descendant restart/export snapshots without weakening exact membership
+projection. Metadata/burn-receipt serialization retains existing bounds
+and is outside this spent-nullifier ingestion change.
 
 The public repository and GitHub Actions are the exclusive environment.
-PRs #1–#11 remain intact. Preview stays default-off and Simnet-only.
-No merge, release, force-push or consensus activation is authorized.
-
-## Initial Actions checkpoint
-
-Draft PR #12: https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12.
-Initial implementation `d13ba931018f08ca71ddb78c242a42432d4d3431` was
-pushed and its remote head verified. PR run 43509749012 superseded push
-43509739189. Lints reported 22 Rustfmt layout hunks; the exact formatter
-output has been applied without altering checks or assertions. Full
-validation is pending for the replacement source. No pass is claimed.
-
-## Replacement validation checkpoint
-
-Current implementation: `454ec2fb37bed61562f1e2a598d522d299558c78`.
-Remote PR #12 head was verified after push. Authoritative PR run:
-[43510035150](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43510035150).
-Push run 43510024178 was superseded. Formatting passed; strict Clippy,
-Check, native focused tests and full validation are still running.
-This documentation-only continuation preserves the exact source above.
-Resume that run before changing code or repeating completed work.
-
-## Compiler correction
-
-Run 43510035150 passed formatting, no-std, WASM checking and WASM tests,
-but Check reported E0308 in the new stale-authority test: its last
-begin_fixture call passed a borrowed Arc. The correction clones the
-processor handle; it changes no safety assertion. Row-count assertions
-also explicitly propagate iterator errors without collecting a full set.
-The replacement full run must pass before this candidate is validated.
-Follow-up memory work also includes bounded deletion during failed-import
-cleanup; the legacy clear still constructs one full-set deletion batch.
-
-## Current executable checkpoint
-
-Source `acba224032ab7613ac805bcb33160fc696436f2c` is pushed on
-`feature/phase6-bounded-shielded-ingestion-20261113`, draft PR #12 above PR #11.
-The borrowed-Arc test correction is in ffe3ba69cfbbc30b2d39d2b70b478ece19f18a42;
-acba224 matches the one CI formatter wrap exactly.
-
-Authoritative full run: [43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558).
-Push 43511647206 was superseded. Run 43511360104 stopped at the single
-formatter wrap before Clippy; it is superseded. No new native tests have
-yet completed. Require the eight new bounded_shielded_ regressions and
-all 23 existing authority_integration_ cases, then the full workspace,
-strict Clippy and all eight jobs. Do not treat earlier WASM/no-std passes
-as a native or combined validation pass. This documentation commit does
-not alter the validating source.
-
-After that run is green, the next implementation task is bounded
-failed-import cleanup: replace the legacy full membership deletion batch
-with bounded durable deletions under the same owner permit and a false
-readiness marker, preserving no-validated-descendants preconditions.
-Then address descendant recovery/export snapshots independently. No
-other Phase 6 milestone has been declared complete by this checkpoint.
+PRs #1–#11 and their heads remain intact; PR #12 is draft.
+The preview stays default-off and Simnet-only. No merge, release,
+force-push, private-history import or consensus activation is authorized.
+No owner decision is needed to finish this validation or the next safe
+implementation task; merge and activation still require approval.

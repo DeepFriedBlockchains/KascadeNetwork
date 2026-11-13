@@ -132,3 +132,20 @@ with bounded durable deletions under the same owner permit and a false
 readiness marker, preserving no-validated-descendants preconditions.
 Then address descendant recovery/export snapshots independently. No
 other Phase 6 milestone has been declared complete by this checkpoint.
+
+## Verified compilation and handoff
+
+Source `acba224032ab7613ac805bcb33160fc696436f2c` in draft PR #12
+has passed Check (including tests/benches and preview), formatting,
+strict Clippy, WASM checking/tests and no-std checking in run 43511658558.
+Those checks occupy five passing jobs. The native Test Suite, Linux
+release and WASM SDK build remain in progress. No native test counts
+or full eight-job pass are claimed. The native job is still compiling
+before the focused selection; expect eight new bounded tests plus the
+23 existing authority regressions, but record actual completed counts.
+
+Current handoff documents the exact next step: finish that run, fix any
+actual runtime failure, then independently implement bounded failed-import
+cleanup under the authenticated permit. Full-set descendant recovery/
+export snapshots and metadata/burn serialization remain follow-ups.
+This documentation-only continuation preserves the validating source.
