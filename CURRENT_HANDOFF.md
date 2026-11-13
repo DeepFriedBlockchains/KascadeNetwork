@@ -309,59 +309,42 @@ after a real membership batch, before metadata publication. The original
 23 authority integration cases remain selected, including tampered retry,
 restart, activation rejection and verified successful promotion.
 
-## Current validation result
+## PR #12 reopen correction and current validation
 
-Authoritative PR run:
-[43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558).
-It validates source `acba224032ab7613ac805bcb33160fc696436f2c`.
-Push run 43511647206 was superseded.
+Run [43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558)
+finished with seven of eight jobs passing. Native job 132183262907 failed
+bounded_shielded_partial_stream_reopens_unready_and_retries_fresh with
+HashAlreadyExists while trying to insert committed genesis GHOSTDAG data.
+Two focused cases passed, one failed, 28 were not run; full workspace
+runtime validation did not execute. PR #12 is not validated.
 
-Verified passing jobs:
-- Check, including tests/benches and the preview adapters.
-- Lints: formatting and strict Clippy.
-- Check WASM32.
-- Test WASM32.
-- Check no_std.
+This is a fixture initialization error: TestConsensus::with_db re-used
+process_genesis=true when reopening a populated database. Production
+Factory::new_active_consensus disables genesis processing for an Existing
+entry. The correction uses skip_adding_genesis only on the fixture's
+second open, matching that production contract. All prior assertions
+remain, with an additional byte-for-byte persisted unready-marker check.
+No production header or readiness check has been changed.
 
-Still running at this checkpoint:
-- Test Suite: building the workspace with devnet-prealloc before focused tests.
-- Build Linux Release.
-- Build WASM32 SDK.
-
-No native runtime test pass or eight-job pass is claimed for PR #12.
-Expected focused selection is eight new bounded tests plus the existing
-23 authority regressions; use actual completed logs for final counts.
-
-Earlier runs: 43509749012 reported 22 formatter hunks, applied exactly.
-43510035150 reported E0308 in a new test's borrowed Arc; ffe3ba69 corrected
-the handle and made row-count assertions propagate iteration errors.
-43511360104 reported one formatter wrap; acba224 matches it exactly.
-No safety assertion was weakened. Current source has passed native
-compilation and strict Clippy after these corrections.
-
-See [the dated report](docs/development/PHASE6_BOUNDED_SHIELDED_INGESTION_2026-11-13.md)
-for implementation details and full source/run history.
+The native CI job now runs that focused regression first, before its
+workspace build and broader 31-case selection. Require all eight jobs.
+See [the correction report](docs/development/PHASE6_BOUNDED_SHIELDED_REOPEN_FIX_2026-11-13.md) for evidence and details.
+Replacement source SHA and Actions run IDs will be recorded after push.
 
 ## Exact next executable checkpoint
 
-Resume run 43511658558 for source acba224. Inspect Test Suite focused
-results and all eight jobs. If a test fails, fix its actual regression
-and rerun CI without relaxing readiness, ownership, draining, restart,
-accumulator or promotion assertions. Do not repeat the completed
-tampered-stream or active-admission milestones.
+Verify the corrected focused persistent reopen regression, then the
+31 authority/bounded cases and full eight-job run. Fix genuine failures
+without weakening readiness, authentication, worker draining, restart or
+promotion assertions. Do not repeat completed earlier milestones.
 
-Only after PR #12 independently passes, implement bounded failed-import
-cleanup: the legacy clear still constructs a full-set deletion batch.
-Use bounded durable deletions under the same owner permit, keep readiness
-false across interruption/restart, and preserve the no-validated-descendants
-precondition. Validate cleanup separately. Then address full-set
-descendant restart/export snapshots without weakening exact membership
-projection. Metadata/burn-receipt serialization retains existing bounds
-and is outside this spent-nullifier ingestion change.
+Only after PR #12 independently passes, create a new stacked draft PR
+for bounded failed-import cleanup: replace the legacy full-set deletion
+batch with bounded durable deletions under the same owner permit. Keep
+readiness false through interruption/restart and preserve the
+no-validated-descendants precondition. Descendant recovery/export
+snapshots remain subsequent independently validated milestones.
 
-The public repository and GitHub Actions are the exclusive environment.
-PRs #1–#11 and their heads remain intact; PR #12 is draft.
-The preview stays default-off and Simnet-only. No merge, release,
-force-push, private-history import or consensus activation is authorized.
-No owner decision is needed to finish this validation or the next safe
-implementation task; merge and activation still require approval.
+PUBLIC repository and GitHub Actions only. PRs #1–#12 remain intact,
+draft and unmerged. Preview stays default-off and Simnet-only. No merge,
+release, force-push, private-history import or consensus activation.

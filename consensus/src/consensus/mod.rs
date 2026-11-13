@@ -2815,6 +2815,7 @@ mod tests {
         let pp = config.genesis.hash;
         let temp = kaspa_database::utils::get_kaspa_tempdir();
         let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let unready_before_reopen;
         {
             let (sender, _receiver) = async_channel::unbounded();
             let tc = TestConsensus::with_db(connect(), &config, sender);
@@ -2823,13 +2824,22 @@ mod tests {
             let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut partial).unwrap_err();
             assert!(error.to_string().contains("count mismatch"));
             assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+            unready_before_reopen = consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
+            assert!(unready_before_reopen.is_some(), "the partial import must persist its unready marker");
         }
+        // Match Factory::new_active_consensus for an existing database: genesis
+        // was already committed on the first open and must not be inserted again.
         // Reopen the same physical RocksDB, with fresh processor/store caches.
+        let reopen_config = config.to_builder().skip_adding_genesis().build();
         let (sender, _receiver) = async_channel::unbounded();
-        let tc = TestConsensus::with_db(connect(), &config, sender);
+        let tc = TestConsensus::with_db(connect(), &reopen_config, sender);
         let consensus = tc.consensus_clone();
         let fresh = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
         assert!(fresh.contains(&bounded_nullifier(0)).unwrap());
+        assert_eq!(
+            consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(),
+            unready_before_reopen
+        );
         assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         assert!(!consensus.supports_verified_staging_import());
         let mut retry_without_clear = vec![vec![bounded_nullifier(0), bounded_nullifier(1)]].into_iter();

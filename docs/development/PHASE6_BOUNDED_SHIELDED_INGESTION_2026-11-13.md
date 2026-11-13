@@ -149,3 +149,16 @@ actual runtime failure, then independently implement bounded failed-import
 cleanup under the authenticated permit. Full-set descendant recovery/
 export snapshots and metadata/burn serialization remain follow-ups.
 This documentation-only continuation preserves the validating source.
+
+## Completed run and reopen fixture correction
+
+Run 43511658558 finished 7/8, with native job 132183262907 failing the
+persistent reopen test on duplicate genesis GHOSTDAG insertion. Two of
+31 focused cases passed, one failed and 28 were not run; no full workspace
+runtime pass is claimed. The test incorrectly reused process_genesis=true
+on its populated second open. Production Factory disables genesis for
+Existing entries. See [the correction report](PHASE6_BOUNDED_SHIELDED_REOPEN_FIX_2026-11-13.md).
+The fixture now matches production reopen configuration, preserves all
+assertions and also compares the durable unready marker's exact bytes.
+Native CI runs that focused regression before broader validation. PR #12
+remains unvalidated pending all eight replacement jobs.
