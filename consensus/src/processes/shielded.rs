@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use kaspa_consensus_core::BlockHashSet;
 use kaspa_consensus_core::tx::Transaction;
-use kaspa_database::prelude::{CachePolicy, DB, StoreError, StoreResult};
+use kaspa_database::prelude::{CachePolicy, DB, DeferredDbBatch, StoreError, StoreResult};
 use kaspa_hashes::Hash;
 use kaspa_shielded_core::ExtractedNoteCommitment;
 use kaspa_shielded_core::coinbase::{coinbase_note, derive_coinbase_note_desc};
@@ -1171,6 +1171,11 @@ impl ShieldedStateManager {
         if acc.finalize() != md.nullifier_muhash.clone().finalize() {
             return Err(format!("streamed nullifier set ({count}) does not reproduce the committed accumulator"));
         }
+        Self::verify_import_metadata(md)?;
+        Ok(count)
+    }
+
+    pub(crate) fn verify_import_metadata(md: &PruningPointShieldedMetadata) -> Result<(), String> {
         // 2. The declared state root must be consistent with the transferred parts.
         //    The frontier is peer-controlled: propagate a rebuild failure as an Err
         //    rather than panicking (audit finding F-17).
@@ -1179,7 +1184,61 @@ impl ShieldedStateManager {
         if recomputed != md.state_root {
             return Err("declared shielded state root is inconsistent with (frontier, supply, nullifier_muhash, burns)".to_string());
         }
+        Ok(())
+    }
+
+    /// Recheck durable membership with constant payload memory and no cache.
+    pub(crate) fn verify_import_rows(&self, md: &PruningPointShieldedMetadata) -> StoreResult<u64> {
+        let mut accumulator = MuHash::new();
+        let mut count = 0u64;
+        for row in self.nullifiers.iter_all() {
+            accumulator.add_element(&row?);
+            count += 1;
+        }
+        if accumulator.finalize() != md.nullifier_muhash.clone().finalize() {
+            return Err(StoreError::DataInconsistency("committed nullifier rows differ from the authenticated accumulator".into()));
+        }
+        Self::verify_import_metadata(md).map_err(StoreError::DataInconsistency)?;
         Ok(count)
+    }
+
+    /// Stage only the verified metadata. The caller publishes readiness in this
+    /// same deferred batch, after re-reading the committed membership set.
+    pub(crate) fn stage_import_metadata<'a>(
+        &'a self,
+        batch: &mut DeferredDbBatch<'a>,
+        block: Hash,
+        md: &PruningPointShieldedMetadata,
+    ) -> StoreResult<()> {
+        self.tree_store.set_deferred(batch, block, md.frontier.clone())?;
+        let anchor = GlobalTree::from_state(&md.frontier)
+            .map_err(|e| StoreError::DataInconsistency(format!("malformed shielded frontier: {e:?}")))?
+            .anchor()
+            .to_bytes();
+        // Deferred writes cannot observe other writes in this batch. Group the
+        // producers explicitly so shared historical roots retain every producer.
+        let mut producers = std::collections::BTreeMap::new();
+        for (root, source) in std::iter::once((anchor, block)).chain(md.in_window_anchors.iter().copied()) {
+            self.anchor_block.set_deferred(batch, root, source)?;
+            let list = match producers.entry(root) {
+                std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::btree_map::Entry::Vacant(entry) => entry.insert(self.anchor_producers.get_producers(&root)?),
+            };
+            if !list.contains(&source) {
+                list.push(source);
+            }
+        }
+        for (root, list) in producers {
+            self.anchor_producers.set_deferred(batch, root, list)?;
+        }
+        for (source, score) in &md.in_window_anchor_source_scores {
+            self.anchor_source_scores.set_deferred(batch, *source, *score)?;
+        }
+        self.supply_store.set_deferred(batch, block, md.supply)?;
+        self.burn_store.set_deferred(batch, block, md.burns.clone())?;
+        self.nullifier_muhash.set_deferred(batch, block, md.nullifier_muhash.clone())?;
+        self.dev_accrued_store.set_deferred(batch, block, md.dev_accrued)?;
+        Ok(())
     }
 
     /// Seed the shielded stores at the pruning point from verified imported state,
@@ -2436,5 +2495,33 @@ mod tests {
         // And a spend of nf(1) — unspent on the new chain — is accepted, not frozen.
         let ok = mgr.compute(pp, Some(&coinbase(50, 30)), &[stx(&[1], &[400], 5)]).unwrap();
         assert_eq!(ok.outcome.accepted, vec![0], "previously-frozen note is spendable again after the clean re-seed");
+    }
+    #[test]
+    fn bounded_shielded_metadata_is_atomic_and_retains_shared_anchor_producers() {
+        let (_lt, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let mgr = manager(&db);
+        let anchor = GlobalTree::from_state(&FrontierState::default()).unwrap().anchor().to_bytes();
+        let md = PruningPointShieldedMetadata {
+            frontier: FrontierState::default(),
+            supply: SupplyTotals::default(),
+            nullifier_muhash: MuHash::new(),
+            burns: BurnReceipts::default(),
+            state_root: PruningPointShieldedMetadata::empty_state_root(),
+            in_window_anchors: vec![(anchor, h(2)), (anchor, h(3)), (anchor, h(2))],
+            dev_accrued: 7,
+            in_window_anchor_source_scores: vec![(h(2), 10), (h(3), 11)],
+        };
+        let mut batch = DeferredDbBatch::new(db.clone());
+        mgr.stage_import_metadata(&mut batch, h(1), &md).unwrap();
+        assert!(mgr.anchor_producer_blocks(&anchor).unwrap().is_empty());
+        assert_eq!(mgr.dev_accrued_at(h(1)).unwrap(), 0);
+        drop(batch);
+        assert!(mgr.anchor_producer_blocks(&anchor).unwrap().is_empty());
+        let mut batch = DeferredDbBatch::new(db.clone());
+        mgr.stage_import_metadata(&mut batch, h(1), &md).unwrap();
+        batch.commit().unwrap();
+        assert_eq!(mgr.anchor_producer_blocks(&anchor).unwrap(), vec![h(1), h(2), h(3)]);
+        assert_eq!(mgr.dev_accrued_at(h(1)).unwrap(), 7);
+        assert_eq!(mgr.anchor_source_block(&anchor).unwrap(), Some(h(2)));
     }
 }

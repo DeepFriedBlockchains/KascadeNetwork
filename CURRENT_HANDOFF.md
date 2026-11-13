@@ -1,6 +1,6 @@
 # KASCADE public development handoff
 
-Updated November 12, 2026.
+Updated November 13, 2026.
 
 ## Validation stack
 
@@ -263,42 +263,168 @@ Real authenticated receipts were rejected by actual admission calls
 on ordinary active receivers before import and after promotion,
 including the restart scenarios. Do not repeat this completed work.
 
-## Tampered shielded stream candidate
+## Tampered shielded stream validation
 
-Branch `feature/phase6-tampered-shielded-stream-20261112` is stacked
-on PR #10. The test-only sender changes one byte of one real nonempty
-nullifier frame, preserving declared count, metadata and source storage.
-The receiver must report its actual committed-accumulator rejection
-after joining the shielded importer. The test requires draining,
-unpromoted active state, optional same-directory reopen, fresh retry,
-exact legitimate nullifier-set recovery, verified promotion and closed
-post-activation admission.
+Draft [PR #11](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/11)
+is validated at `9612aac2ebca91f384591c3c135fa9df57dbc6d3` on
+`feature/phase6-tampered-shielded-stream-20261112`.
+[Run 43309997530](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43309997530)
+passed all eight jobs, independently rechecked November 13, 2026.
+Logs confirm 23 focused tests, 1,568 workspace tests (25 skips), and
+32 no-asm tests.
+The original tampered-stream, same-directory recovery, active-admission
+and verified-promotion assertions passed. Do not reimplement these.
+Initial run 43308475970 failed five formatter hunks; the validated
+correction changed formatting only.
 
-See [the dated report](docs/development/PHASE6_TAMPERED_SHIELDED_STREAM_2026-11-12.md).
-Candidate source and run IDs are recorded in the new draft PR after push.
-No validation pass is claimed for this candidate yet.
+## Bounded shielded ingestion — PR #12
 
-## Next executable task
+Draft [PR #12](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12)
+is stacked directly on PR #11 at
+`9612aac2ebca91f384591c3c135fa9df57dbc6d3`.
+Branch: `feature/phase6-bounded-shielded-ingestion-20261113`.
+Bounded ingestion implementation: `acba224032ab7613ac805bcb33160fc696436f2c`.
+Current reopen test/CI correction: `f1808f1231697474de66bf3f99bad0c2f01ead0d`.
+Later checkpoint commits contain documentation only.
 
-Validate the tampered-stream candidate's focused regressions and all
-eight jobs. Fix actual failures without weakening the expected
-committed-accumulator rejection or admission/promotion assertions.
-After this independent milestone passes, implement bounded-memory
-shielded ingestion: the current consensus importer still collects all
-declared nullifiers in a Vec before verification and atomic seeding.
-Preserve count bounds, duplicates, authentication, ownership and
-fail-closed cancellation/restart behavior.
+Spent-nullifier ingestion no longer accumulates the full set or one
+full-set membership batch. Frames are capped at 4,096 entries (128 KiB
+raw payload). Each deferred synchronous RocksDB batch checks the exact
+processor-owned session, database, revision and allowed shielded prefixes.
+The existing proxy pruning guard and worker reservation remain pinned
+through the blocking call; network waits hold no store locks.
 
-All development uses GitHub and GitHub Actions exclusively.
-The preview stays default-off and Simnet-only. PRs #1–#10 remain intact.
-No merge, release, private-history import or consensus activation is
-authorized.
+Partial rows remain unready. Declared count, received accumulator and
+streamed committed database evidence must all agree. Verified metadata
+and readiness publish together in one atomic deferred batch, with cache
+invalidation after persistence. Failed owned imports poison their session.
+The raw adapter rejects isolated receivers lacking an authenticated permit.
+Isolated completion/promotion checks also stream committed membership.
 
-## Initial validation checkpoint
+Eight new bounded_shielded_ regressions cover lazy large streams,
+persistent close/reopen/retry, interrupted and corrupt payloads, duplicate
+membership, changed committed evidence, rejected final publication,
+stale authority, foreign ownership and deferred metadata/shared anchors.
+Existing production shielded disconnect and SIGKILL controls now stop
+after a real membership batch, before metadata publication. The original
+23 authority integration cases remain selected, including tampered retry,
+restart, activation rejection and verified successful promotion.
 
-Initial source `c309386d2f18568b5ee4e91156ff6b9dde378d8e` opened
-draft PR #11 and PR run 43308475970 (push 43308466345 superseded).
-Lints stopped on five Rustfmt layout hunks; strict Clippy did not run.
-The exact CI formatter output was applied without changing assertions.
-The replacement source/run will be recorded in the PR description.
-Native validation is pending.
+## PR #12 reopen correction and current validation
+
+Run [43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558)
+finished with seven of eight jobs passing. Native job 132183262907 failed
+bounded_shielded_partial_stream_reopens_unready_and_retries_fresh with
+HashAlreadyExists while trying to insert committed genesis GHOSTDAG data.
+Two focused cases passed, one failed, 28 were not run; full workspace
+runtime validation did not execute. PR #12 is not validated.
+
+This is a fixture initialization error: TestConsensus::with_db re-used
+process_genesis=true when reopening a populated database. Production
+Factory::new_active_consensus disables genesis processing for an Existing
+entry. The correction uses skip_adding_genesis only on the fixture's
+second open, matching that production contract. All prior assertions
+remain, with an additional byte-for-byte persisted unready-marker check.
+No production header or readiness check has been changed.
+
+The native CI job now runs that focused regression first, before its
+workspace build and broader 31-case selection. Require all eight jobs.
+See [the correction report](docs/development/PHASE6_BOUNDED_SHIELDED_REOPEN_FIX_2026-11-13.md) for evidence and details.
+Replacement source SHA and Actions run IDs will be recorded after push.
+
+## Exact next executable checkpoint
+
+Verify the corrected focused persistent reopen regression, then the
+31 authority/bounded cases and full eight-job run. Fix genuine failures
+without weakening readiness, authentication, worker draining, restart or
+promotion assertions. Do not repeat completed earlier milestones.
+
+Only after PR #12 independently passes, create a new stacked draft PR
+for bounded failed-import cleanup: replace the legacy full-set deletion
+batch with bounded durable deletions under the same owner permit. Keep
+readiness false through interruption/restart and preserve the
+no-validated-descendants precondition. Descendant recovery/export
+snapshots remain subsequent independently validated milestones.
+
+PUBLIC repository and GitHub Actions only. PRs #1–#12 remain intact,
+draft and unmerged. Preview stays default-off and Simnet-only. No merge,
+release, force-push, private-history import or consensus activation.
+
+## Pushed correction checkpoint
+
+Correction source: `f1808f1231697474de66bf3f99bad0c2f01ead0d`.
+Remote PR #12 head was verified after push. Authoritative replacement
+PR run: [43515652940](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43515652940).
+Duplicate push run 43515643677 is being cancelled by workflow concurrency;
+the PR run is pending while that cancellation finishes. No replacement
+focused or full validation result is claimed. Native job order is the
+single persistent-reopen regression, then workspace build, 31 focused
+cases and full workspace validation. Resume this run rather than rerunning
+the prior known-bad source. PR #12 stays draft and unvalidated.
+
+## Isolated validation branch for stalled Actions cancellation
+
+The push run 43515643677 has seven cancelled jobs but Lints job
+132196802751 still reports in_progress with no steps. PR run 43515652940
+remains pending with no jobs. The GitHub connector has no cancellation
+action; no local or browser access is used as a workaround.
+
+Branch `validation/phase6-bounded-reopen-20261113` carries the exact
+same corrected Rust source and eight-job workflow as f1808f1, plus this
+documentation checkpoint. Its push uses a different existing concurrency
+group, avoiding the stuck group without modifying the workflow or its
+checks. PR #12 is fast-forwarded to the same commit so that the exact
+latest head is tested. No history rewrite or additional PR is involved.
+The new validation push run is authoritative once its exact SHA and all
+eight results are verified. Source and workflow equivalence will be
+checked through GitHub's commit comparison. No pass is claimed yet.
+
+## Active authoritative replacement run
+
+Validation commit: `fa229e6524a78bb3bcd032d08e861f62a926637e`.
+Both the PR #12 feature branch and `validation/phase6-bounded-reopen-20261113`
+were verified at that commit. All eight jobs have started in push run
+[43516463729](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43516463729).
+GitHub's comparison f1808f1...fa229e6 lists only CURRENT_HANDOFF.md and
+this correction report: all Rust source, tests and workflow are identical.
+The original PR group's newer run 43516476491 remained pending; feature
+push 43516466968 was cancelled. Use 43516463729 for actual validation,
+not those duplicates. No replacement test result is claimed yet.
+Any later handoff head is documentation-only unless explicitly recorded.
+
+## Focused reopen regression passed
+
+Authoritative run 43516463729 at validation commit
+`fa229e6524a78bb3bcd032d08e861f62a926637e`, native job
+132199538931, completed the dedicated persistent-reopen step successfully.
+This was independently confirmed through the job-steps endpoint. All
+retained restart, dirty-row, retry and readiness assertions, plus the
+exact persisted-marker check, executed in that step. This confirms the
+fixture initialization correction. The job has continued to workspace
+build; the broader 31-case selection and full workspace suite are still
+pending. PR #12 remains unvalidated until all eight jobs finish
+successfully. Bounded cleanup remains gated on that result.
+
+## PR #12 verified eight-job result
+
+Validation commit `fa229e6524a78bb3bcd032d08e861f62a926637e` passed
+all eight jobs in [run 43516463729](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43516463729).
+The completed native job 132199538931 confirms the dedicated persistent
+reopen regression passed first, all 31 authority/bounded cases passed,
+1,576 workspace tests passed (25 existing skips), and all 32 no-asm tests
+passed. Workspace and no-asm doc tests, cargo doc, the kip-10 example,
+formatting, strict Clippy and platform/build checks also passed.
+
+This independently validates the fixture-only correction at
+`f1808f1231697474de66bf3f99bad0c2f01ead0d`: populated-database reopen
+skips duplicate genesis initialization exactly as production Factory does.
+No assertion, authentication check, header insertion rule or restart
+guarantee was weakened. The exact persisted false marker assertion passed.
+
+GitHub comparison from the validating commit through handoff head
+`3ef81662656decfb6ba89595c0c82cdc4c38bf29` contains only the two
+handoff documents. This milestone commit also changes documentation only.
+PR #12 remains draft, unmerged and inactive. Its source is validated.
+
+Next: a new stacked draft PR for bounded failed-import cleanup.
+Keep descendant recovery and export snapshots as later milestones.

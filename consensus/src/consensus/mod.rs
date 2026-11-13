@@ -789,6 +789,21 @@ impl ConsensusApi for Consensus {
     }
 
     #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn import_verified_staging_shielded(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        point: Hash,
+        metadata: kaspa_consensus_core::api::ShieldedExportMetadata,
+        expected_state_root: [u8; 32],
+        batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator<'_>,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        if !self.supports_verified_staging_import() {
+            return Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported);
+        }
+        self.import_owned_staging_shielded(session, point, metadata, expected_state_root, batches)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     fn append_verified_staging_utxos(
         &self,
         session: &kaspa_consensus_core::api::StagingImportSession,
@@ -2469,31 +2484,14 @@ impl ConsensusApi for Consensus {
         expected_state_root: Option<[u8; 32]>,
         nullifier_batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator<'_>,
     ) -> PruningImportResult<()> {
-        // F-08: `nullifier_count` is declared by an untrusted sync peer. Never
-        // pre-allocate from it (a huge value aborts the process on allocation
-        // failure), cap it to bound memory/CPU, and fail as soon as the stream
-        // overruns the declared count instead of buffering unboundedly first.
-        if metadata.nullifier_count > kaspa_consensus_core::api::MAX_SHIELDED_NULLIFIER_IMPORT_COUNT {
-            return Err(PruningImportError::ShieldedStateError(format!(
-                "declared nullifier count {} exceeds the sanity cap {}",
-                metadata.nullifier_count,
-                kaspa_consensus_core::api::MAX_SHIELDED_NULLIFIER_IMPORT_COUNT
-            )));
-        }
-        let mut nullifiers: Vec<[u8; 32]> = Vec::new();
-        for batch in nullifier_batches {
-            nullifiers.extend(batch);
-            if nullifiers.len() as u64 > metadata.nullifier_count {
-                return Err(PruningImportError::ShieldedStateError(format!(
-                    "streamed nullifiers exceed the declared count {}",
-                    metadata.nullifier_count
-                )));
-            }
+        if self.supports_verified_staging_import() {
+            return Err(PruningImportError::ShieldedStateError("staging receiver requires an authenticated import session".into()));
         }
         self.virtual_processor
-            .seed_pruning_point_shielded(new_pruning_point, metadata, expected_state_root, nullifiers)
-            .map_err(PruningImportError::ShieldedStateError)?;
-        Ok(())
+            .import_bounded_pruning_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches, |batch| {
+                batch.commit()
+            })
+            .map_err(PruningImportError::ShieldedStateError)
     }
 
     fn get_shielded_state_root(&self, block: Hash) -> ConsensusResult<[u8; 32]> {
@@ -2721,7 +2719,7 @@ mod tests {
 
         // 2. Stream longer than declared: fail early as soon as the buffered
         //    entries exceed the declared count (pre-fix: buffered everything first).
-        let metadata = ShieldedExportMetadata { data: vec![], nullifier_count: 1 };
+        let metadata = bounded_metadata(1);
         let mut over = vec![vec![[7u8; 32]; 2]].into_iter();
         match consensus.import_pruning_point_shielded(pp, metadata, None, &mut over) {
             Err(PruningImportError::ShieldedStateError(msg)) => {
@@ -2741,5 +2739,185 @@ mod tests {
             }
             other => panic!("expected a downstream ShieldedStateError, got {other:?}"),
         }
+    }
+    fn bounded_nullifier(index: u64) -> [u8; 32] {
+        let mut nf = [0; 32];
+        nf[..8].copy_from_slice(&index.to_le_bytes());
+        nf
+    }
+
+    fn bounded_metadata(count: u64) -> ShieldedExportMetadata {
+        use crate::processes::shielded::PruningPointShieldedMetadata;
+        let mut nullifier_muhash = MuHash::new();
+        for index in 0..count {
+            nullifier_muhash.add_element(&bounded_nullifier(index));
+        }
+        let frontier = Default::default();
+        let supply = Default::default();
+        let burns = Default::default();
+        let state_root = PruningPointShieldedMetadata::recompute_state_root(&frontier, &supply, &nullifier_muhash, &burns).unwrap();
+        let metadata = PruningPointShieldedMetadata {
+            frontier,
+            supply,
+            burns,
+            nullifier_muhash,
+            state_root,
+            in_window_anchors: vec![],
+            dev_accrued: 0,
+            in_window_anchor_source_scores: vec![],
+        };
+        ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: count }
+    }
+
+    #[test]
+    fn bounded_shielded_large_stream_commits_before_requesting_the_next_frame() {
+        use crate::model::stores::shielded::{DbNullifierSetStore, NullifierSetStoreReader};
+        use kaspa_consensus_core::api::SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT;
+        use kaspa_database::prelude::CachePolicy;
+        let config = Config::new(MAINNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let limit = SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT as u64;
+        let count = 3 * limit + 17;
+        let metadata = bounded_metadata(count);
+        let mut next = 0;
+        let mut frames = 0;
+        // This lazy source refuses to hand over another frame until the preceding
+        // one is durably visible and the readiness flag remains false.
+        let mut source = std::iter::from_fn(|| {
+            if next > 0 {
+                let committed = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+                assert!(committed.contains(&bounded_nullifier(next - 1)).unwrap());
+                assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+            }
+            if next == count {
+                return None;
+            }
+            let end = (next + limit).min(count);
+            let frame = (next..end).map(bounded_nullifier).collect::<Vec<_>>();
+            assert!(frame.len() <= SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT);
+            next = end;
+            frames += 1;
+            Some(frame)
+        });
+        consensus.import_pruning_point_shielded(config.genesis.hash, metadata, None, &mut source).unwrap();
+        assert_eq!(frames, 4);
+        assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        let committed = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+        assert_eq!(committed.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(), count as usize);
+    }
+
+    #[test]
+    fn bounded_shielded_partial_stream_reopens_unready_and_retries_fresh() {
+        use crate::model::stores::shielded::{DbNullifierSetStore, NullifierSetStoreReader};
+        use kaspa_database::prelude::{CachePolicy, ConnBuilder};
+        let config = Config::new(MAINNET_PARAMS);
+        let pp = config.genesis.hash;
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let unready_before_reopen;
+        {
+            let (sender, _receiver) = async_channel::unbounded();
+            let tc = TestConsensus::with_db(connect(), &config, sender);
+            let consensus = tc.consensus_clone();
+            let mut partial = vec![vec![bounded_nullifier(0)]].into_iter();
+            let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut partial).unwrap_err();
+            assert!(error.to_string().contains("count mismatch"));
+            assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+            unready_before_reopen = consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
+            assert!(unready_before_reopen.is_some(), "the partial import must persist its unready marker");
+        }
+        // Match Factory::new_active_consensus for an existing database: genesis
+        // was already committed on the first open and must not be inserted again.
+        // Reopen the same physical RocksDB, with fresh processor/store caches.
+        let reopen_config = config.to_builder().skip_adding_genesis().build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let tc = TestConsensus::with_db(connect(), &reopen_config, sender);
+        let consensus = tc.consensus_clone();
+        let fresh = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+        assert!(fresh.contains(&bounded_nullifier(0)).unwrap());
+        assert_eq!(
+            consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(),
+            unready_before_reopen
+        );
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert!(!consensus.supports_verified_staging_import());
+        let mut retry_without_clear = vec![vec![bounded_nullifier(0), bounded_nullifier(1)]].into_iter();
+        assert!(consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry_without_clear).is_err());
+        consensus.clear_pruning_shielded_stores();
+        let mut retry = (0..2).map(|i| vec![bounded_nullifier(i)]);
+        consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry).unwrap();
+        assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert_eq!(fresh.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(), 2);
+    }
+
+    #[test]
+    fn bounded_shielded_duplicate_and_corrupt_batches_never_publish_completion() {
+        let config = Config::new(MAINNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let pp = config.genesis.hash;
+        let mut duplicates = vec![vec![bounded_nullifier(0)], vec![bounded_nullifier(0)]].into_iter();
+        let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut duplicates).unwrap_err();
+        assert!(error.to_string().contains("duplicate nullifier"));
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        consensus.clear_pruning_shielded_stores();
+        let mut corrupt = vec![vec![bounded_nullifier(1)]].into_iter();
+        let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(1), None, &mut corrupt).unwrap_err();
+        assert!(error.to_string().contains("committed accumulator"));
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+    }
+
+    #[test]
+    fn bounded_shielded_rechecks_committed_rows_before_publishing() {
+        use crate::model::stores::shielded::{DbNullifierSetStore, NullifierSetStore};
+        use kaspa_database::prelude::CachePolicy;
+        let config = Config::new(MAINNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let mut sent = false;
+        let mut source = std::iter::from_fn(|| {
+            if !sent {
+                sent = true;
+                return Some(vec![bounded_nullifier(0)]);
+            }
+            // Simulate damaged committed evidence after receipt of a valid frame.
+            let store = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+            let mut batch = rocksdb::WriteBatch::default();
+            store.delete_batch(&mut batch, bounded_nullifier(0)).unwrap();
+            store.insert_batch(&mut batch, bounded_nullifier(1)).unwrap();
+            consensus.db.write(batch).unwrap();
+            None
+        });
+        let error = consensus.import_pruning_point_shielded(config.genesis.hash, bounded_metadata(1), None, &mut source).unwrap_err();
+        assert!(error.to_string().contains("committed nullifier rows"));
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+    }
+
+    #[test]
+    fn bounded_shielded_rejected_final_batch_does_not_publish_metadata_or_cache() {
+        use kaspa_database::prelude::StoreError;
+        let config = Config::new(MAINNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let pp = config.genesis.hash;
+        let before = consensus.get_shielded_state_root(pp).unwrap();
+        let mut source = vec![vec![bounded_nullifier(0)]].into_iter();
+        let mut writes = 0;
+        let error = consensus
+            .virtual_processor
+            .import_bounded_pruning_shielded(pp, bounded_metadata(1), None, &mut source, |batch| {
+                writes += 1;
+                if writes == 3 {
+                    return Err(StoreError::DataInconsistency("injected final-batch rejection".into()));
+                }
+                batch.commit()
+            })
+            .unwrap_err();
+        assert!(error.contains("injected final-batch rejection"));
+        assert_eq!(writes, 3);
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), before);
+        assert_eq!(consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), Some(vec![0]));
     }
 }

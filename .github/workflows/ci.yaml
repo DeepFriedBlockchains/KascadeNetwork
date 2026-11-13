@@ -110,11 +110,16 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run bounded shielded persistent reopen regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(bounded_shielded_partial_stream_reopens_unready_and_retries_fresh)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
       - name: Run Phase 6 authority integration regressions
-        run: cargo nextest run --workspace --test-threads=2 --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_)'
+        run: cargo nextest run --workspace --test-threads=2 --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_) | test(bounded_shielded_)'
 
       - name: Run cargo test regular features
         run: cargo nextest run --workspace --no-fail-fast

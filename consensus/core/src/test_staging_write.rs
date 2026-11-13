@@ -1,4 +1,4 @@
-//! Test-only rendezvous after a real SMT RocksDB batch has committed.
+//! Test-only rendezvous after a real SMT or shielded RocksDB batch has committed.
 //! No storage or authority lock is acquired here.
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
@@ -8,6 +8,7 @@ struct State {
 }
 
 struct Case {
+    shielded: bool,
     state: Mutex<State>,
     changed: Condvar,
 }
@@ -22,9 +23,17 @@ pub struct WritePause {
 }
 
 pub fn pause() -> WritePause {
-    let case = Arc::new(Case { state: Mutex::new(State { paused: false, released: false }), changed: Condvar::new() });
+    arm(false)
+}
+
+pub fn pause_shielded() -> WritePause {
+    arm(true)
+}
+
+fn arm(shielded: bool) -> WritePause {
+    let case = Arc::new(Case { shielded, state: Mutex::new(State { paused: false, released: false }), changed: Condvar::new() });
     let mut current = active().lock().unwrap();
-    assert!(current.is_none(), "an SMT write pause is already armed");
+    assert!(current.is_none(), "an import write pause is already armed");
     *current = Some(case.clone());
     WritePause { case }
 }
@@ -57,8 +66,16 @@ impl Drop for WritePause {
 /// Called only after DB::write returns, while the importer still owns its
 /// worker reservation and before metadata/readiness publication.
 pub fn after_smt_write() {
+    after_write(false);
+}
+
+pub fn after_shielded_write() {
+    after_write(true);
+}
+
+fn after_write(shielded: bool) {
     let case = active().lock().unwrap().clone();
-    if let Some(case) = case {
+    if let Some(case) = case.filter(|case| case.shielded == shielded) {
         let mut state = case.state.lock().unwrap();
         state.paused = true;
         while !state.released {

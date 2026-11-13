@@ -188,6 +188,9 @@ pub struct ShieldedExportMetadata {
 /// shielded pool.
 pub const MAX_SHIELDED_NULLIFIER_IMPORT_COUNT: u64 = 1 << 26;
 
+/// Maximum nullifiers admitted in one import batch (128 KiB of payload).
+pub const SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT: usize = 4096;
+
 /// Batches of spent nullifiers (each 32 bytes) streamed during pruning-point
 /// shielded-state import, mirroring [`ImportLaneBatchIterator`].
 pub type ShieldedNullifierBatchIterator<'a> = &'a mut (dyn Iterator<Item = Vec<[u8; 32]>> + Send);
@@ -332,6 +335,18 @@ pub trait ConsensusApi: Send + Sync {
         &self,
         _session: &StagingImportSession,
         _component: StagingImportComponent,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    /// Import with the receiver's exact session permit, checked on every durable batch.
+    fn import_verified_staging_shielded(
+        &self,
+        _session: &StagingImportSession,
+        _point: Hash,
+        _metadata: ShieldedExportMetadata,
+        _expected_state_root: [u8; 32],
+        _batches: ShieldedNullifierBatchIterator<'_>,
     ) -> Result<(), StagingPromotionError> {
         Err(StagingPromotionError::Unsupported)
     }

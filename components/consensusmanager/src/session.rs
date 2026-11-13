@@ -728,13 +728,19 @@ impl ConsensusSessionOwned {
         expected_state_root: Option<[u8; 32]>,
         mut rx: tokio::sync::mpsc::Receiver<Vec<[u8; 32]>>,
     ) -> PruningImportResult<()> {
-        if let Some(import) = self.staging_import() {
-            self.consensus
-                .check_verified_staging_component(import, StagingImportComponent::Shielded)
-                .map_err(|error| kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string()))?;
-        }
         let nullifier_batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator =
             &mut std::iter::from_fn(move || rx.blocking_recv());
+        if let Some(import) = self.staging_import() {
+            let expected = expected_state_root.ok_or_else(|| {
+                kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(
+                    "staging shielded import requires an authenticated state root".into(),
+                )
+            })?;
+            return self
+                .consensus
+                .import_verified_staging_shielded(import, new_pruning_point, metadata, expected, nullifier_batches)
+                .map_err(|error| kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string()));
+        }
         self.consensus.import_pruning_point_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches)
     }
 

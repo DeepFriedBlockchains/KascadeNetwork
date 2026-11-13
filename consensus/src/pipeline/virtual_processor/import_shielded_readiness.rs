@@ -33,6 +33,29 @@ pub(super) fn verify_pruning_shielded_at_tip(
 ) -> StoreResult<()> {
     let expected = authenticated_commitment(db, point.hash, child, trusted_child)?;
     let store = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
+    // Isolated import completion must not materialize the global set merely to
+    // issue or consume a lease. Descendant projection retains its stricter path.
+    if selected_tip.is_none() || selected_tip.is_some_and(|(tip, _)| tip == point.hash) {
+        if let Some((_, tip_child)) = selected_tip {
+            if tip_child.hash() != trusted_child {
+                return Err(inconsistent("restart supplied different children for the same state"));
+            }
+            let tip_commitment = authenticated_commitment(db, point.hash, tip_child, tip_child.hash())?;
+            if tip_commitment != expected {
+                return Err(inconsistent("restart commitment changed"));
+            }
+        }
+        if let Some(metadata) = store.export_pruning_point_shielded(point.hash)? {
+            ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
+            store.verify_import_rows(&metadata)?;
+        } else if expected != PruningPointShieldedMetadata::empty_state_root()
+            || store.state_root_at(point.hash)? != expected
+            || store.nullifiers().iter_all().next().transpose()?.is_some()
+        {
+            return Err(inconsistent("committed shielded state does not match the authenticated empty commitment"));
+        }
+        return Ok(());
+    }
     let mut nullifiers = store.nullifier_set_snapshot()?;
     if let Some((tip, tip_child)) = selected_tip {
         if tip == point.hash && tip_child.hash() != trusted_child {
