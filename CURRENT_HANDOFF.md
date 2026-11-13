@@ -357,3 +357,26 @@ also explicitly propagate iterator errors without collecting a full set.
 The replacement full run must pass before this candidate is validated.
 Follow-up memory work also includes bounded deletion during failed-import
 cleanup; the legacy clear still constructs one full-set deletion batch.
+
+## Current executable checkpoint
+
+Source `acba224032ab7613ac805bcb33160fc696436f2c` is pushed on
+`feature/phase6-bounded-shielded-ingestion-20261113`, draft PR #12 above PR #11.
+The borrowed-Arc test correction is in ffe3ba69cfbbc30b2d39d2b70b478ece19f18a42;
+acba224 matches the one CI formatter wrap exactly.
+
+Authoritative full run: [43511658558](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43511658558).
+Push 43511647206 was superseded. Run 43511360104 stopped at the single
+formatter wrap before Clippy; it is superseded. No new native tests have
+yet completed. Require the eight new bounded_shielded_ regressions and
+all 23 existing authority_integration_ cases, then the full workspace,
+strict Clippy and all eight jobs. Do not treat earlier WASM/no-std passes
+as a native or combined validation pass. This documentation commit does
+not alter the validating source.
+
+After that run is green, the next implementation task is bounded
+failed-import cleanup: replace the legacy full membership deletion batch
+with bounded durable deletions under the same owner permit and a false
+readiness marker, preserving no-validated-descendants preconditions.
+Then address descendant recovery/export snapshots independently. No
+other Phase 6 milestone has been declared complete by this checkpoint.
