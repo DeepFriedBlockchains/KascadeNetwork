@@ -404,3 +404,27 @@ fixture initialization correction. The job has continued to workspace
 build; the broader 31-case selection and full workspace suite are still
 pending. PR #12 remains unvalidated until all eight jobs finish
 successfully. Bounded cleanup remains gated on that result.
+
+## PR #12 verified eight-job result
+
+Validation commit `fa229e6524a78bb3bcd032d08e861f62a926637e` passed
+all eight jobs in [run 43516463729](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43516463729).
+The completed native job 132199538931 confirms the dedicated persistent
+reopen regression passed first, all 31 authority/bounded cases passed,
+1,576 workspace tests passed (25 existing skips), and all 32 no-asm tests
+passed. Workspace and no-asm doc tests, cargo doc, the kip-10 example,
+formatting, strict Clippy and platform/build checks also passed.
+
+This independently validates the fixture-only correction at
+`f1808f1231697474de66bf3f99bad0c2f01ead0d`: populated-database reopen
+skips duplicate genesis initialization exactly as production Factory does.
+No assertion, authentication check, header insertion rule or restart
+guarantee was weakened. The exact persisted false marker assertion passed.
+
+GitHub comparison from the validating commit through handoff head
+`3ef81662656decfb6ba89595c0c82cdc4c38bf29` contains only the two
+handoff documents. This milestone commit also changes documentation only.
+PR #12 remains draft, unmerged and inactive. Its source is validated.
+
+Next: a new stacked draft PR for bounded failed-import cleanup.
+Keep descendant recovery and export snapshots as later milestones.
