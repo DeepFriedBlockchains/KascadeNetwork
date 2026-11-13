@@ -25,7 +25,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use kaspa_consensus_core::BlockHasher;
-use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DeferredDbBatch, DB, StoreError, StoreResult};
+use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DB, DeferredDbBatch, StoreError, StoreResult};
 use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::Hash;
 use kaspa_math::Uint3072;
@@ -499,7 +499,11 @@ pub struct DbShieldedNullifierMuHashStore {
 
 impl DbShieldedNullifierMuHashStore {
     pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, muhash: MuHash) -> StoreResult<()> {
-        self.access.write_deferred(batch, block, muhash.try_into().map_err(|_| StoreError::DataInconsistency("invalid imported nullifier accumulator".into()))?)
+        self.access.write_deferred(
+            batch,
+            block,
+            muhash.try_into().map_err(|_| StoreError::DataInconsistency("invalid imported nullifier accumulator".into()))?,
+        )
     }
 
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
@@ -682,7 +686,12 @@ pub struct DbAnchorProducersStore {
 }
 
 impl DbAnchorProducersStore {
-    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, anchor: [u8; 32], producers: Vec<Hash>) -> StoreResult<()> {
+    pub(crate) fn set_deferred<'a>(
+        &'a self,
+        batch: &mut DeferredDbBatch<'a>,
+        anchor: [u8; 32],
+        producers: Vec<Hash>,
+    ) -> StoreResult<()> {
         self.access.write_deferred(batch, AnchorKey(anchor), producers)
     }
 

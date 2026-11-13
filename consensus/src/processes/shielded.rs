@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use kaspa_consensus_core::BlockHashSet;
 use kaspa_consensus_core::tx::Transaction;
-use kaspa_database::prelude::{CachePolicy, DeferredDbBatch, DB, StoreError, StoreResult};
+use kaspa_database::prelude::{CachePolicy, DB, DeferredDbBatch, StoreError, StoreResult};
 use kaspa_hashes::Hash;
 use kaspa_shielded_core::ExtractedNoteCommitment;
 use kaspa_shielded_core::coinbase::{coinbase_note, derive_coinbase_note_desc};
@@ -1213,7 +1213,8 @@ impl ShieldedStateManager {
         self.tree_store.set_deferred(batch, block, md.frontier.clone())?;
         let anchor = GlobalTree::from_state(&md.frontier)
             .map_err(|e| StoreError::DataInconsistency(format!("malformed shielded frontier: {e:?}")))?
-            .anchor().to_bytes();
+            .anchor()
+            .to_bytes();
         // Deferred writes cannot observe other writes in this batch. Group the
         // producers explicitly so shared historical roots retain every producer.
         let mut producers = std::collections::BTreeMap::new();
@@ -2501,11 +2502,14 @@ mod tests {
         let mgr = manager(&db);
         let anchor = GlobalTree::from_state(&FrontierState::default()).unwrap().anchor().to_bytes();
         let md = PruningPointShieldedMetadata {
-            frontier: FrontierState::default(), supply: SupplyTotals::default(),
-            nullifier_muhash: MuHash::new(), burns: BurnReceipts::default(),
+            frontier: FrontierState::default(),
+            supply: SupplyTotals::default(),
+            nullifier_muhash: MuHash::new(),
+            burns: BurnReceipts::default(),
             state_root: PruningPointShieldedMetadata::empty_state_root(),
             in_window_anchors: vec![(anchor, h(2)), (anchor, h(3)), (anchor, h(2))],
-            dev_accrued: 7, in_window_anchor_source_scores: vec![(h(2), 10), (h(3), 11)],
+            dev_accrued: 7,
+            in_window_anchor_source_scores: vec![(h(2), 10), (h(3), 11)],
         };
         let mut batch = DeferredDbBatch::new(db.clone());
         mgr.stage_import_metadata(&mut batch, h(1), &md).unwrap();
@@ -2520,5 +2524,4 @@ mod tests {
         assert_eq!(mgr.dev_accrued_at(h(1)).unwrap(), 7);
         assert_eq!(mgr.anchor_source_block(&anchor).unwrap(), Some(h(2)));
     }
-
 }

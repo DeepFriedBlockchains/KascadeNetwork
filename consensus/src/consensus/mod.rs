@@ -2488,7 +2488,9 @@ impl ConsensusApi for Consensus {
             return Err(PruningImportError::ShieldedStateError("staging receiver requires an authenticated import session".into()));
         }
         self.virtual_processor
-            .import_bounded_pruning_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches, |batch| batch.commit())
+            .import_bounded_pruning_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches, |batch| {
+                batch.commit()
+            })
             .map_err(PruningImportError::ShieldedStateError)
     }
 
@@ -2755,8 +2757,14 @@ mod tests {
         let burns = Default::default();
         let state_root = PruningPointShieldedMetadata::recompute_state_root(&frontier, &supply, &nullifier_muhash, &burns).unwrap();
         let metadata = PruningPointShieldedMetadata {
-            frontier, supply, burns, nullifier_muhash, state_root,
-            in_window_anchors: vec![], dev_accrued: 0, in_window_anchor_source_scores: vec![],
+            frontier,
+            supply,
+            burns,
+            nullifier_muhash,
+            state_root,
+            in_window_anchors: vec![],
+            dev_accrued: 0,
+            in_window_anchor_source_scores: vec![],
         };
         ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: count }
     }
@@ -2782,7 +2790,9 @@ mod tests {
                 assert!(committed.contains(&bounded_nullifier(next - 1)).unwrap());
                 assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
             }
-            if next == count { return None; }
+            if next == count {
+                return None;
+            }
             let end = (next + limit).min(count);
             let frame = (next..end).map(bounded_nullifier).collect::<Vec<_>>();
             assert!(frame.len() <= SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT);
@@ -2884,20 +2894,20 @@ mod tests {
         let before = consensus.get_shielded_state_root(pp).unwrap();
         let mut source = vec![vec![bounded_nullifier(0)]].into_iter();
         let mut writes = 0;
-        let error = consensus.virtual_processor.import_bounded_pruning_shielded(
-            pp, bounded_metadata(1), None, &mut source, |batch| {
+        let error = consensus
+            .virtual_processor
+            .import_bounded_pruning_shielded(pp, bounded_metadata(1), None, &mut source, |batch| {
                 writes += 1;
                 if writes == 3 {
                     return Err(StoreError::DataInconsistency("injected final-batch rejection".into()));
                 }
                 batch.commit()
-            },
-        ).unwrap_err();
+            })
+            .unwrap_err();
         assert!(error.contains("injected final-batch rejection"));
         assert_eq!(writes, 3);
         assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), before);
         assert_eq!(consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), Some(vec![0]));
     }
-
 }

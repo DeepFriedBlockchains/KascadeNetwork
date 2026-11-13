@@ -63,7 +63,9 @@ fn arm(component: StagingImportComponent, after_payload: bool) -> TransferPause 
             StagingImportComponent::Shielded => Some(kaspa_consensus_core::test_staging_write::pause_shielded()),
             _ => None,
         }
-    } else { None };
+    } else {
+        None
+    };
     TransferPause {
         case,
         write_pause,

@@ -79,3 +79,12 @@ after this candidate passes.
 
 The preview remains default-off and Simnet-only. No consensus, emission,
 monetary, merge-mining or KRN activation; no merge or release.
+
+## Initial Actions checkpoint
+
+Draft PR #12: https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12.
+Initial implementation `d13ba931018f08ca71ddb78c242a42432d4d3431` was
+pushed and its remote head verified. PR run 43509749012 superseded push
+43509739189. Lints reported 22 Rustfmt layout hunks; the exact formatter
+output has been applied without altering checks or assertions. Full
+validation is pending for the replacement source. No pass is claimed.

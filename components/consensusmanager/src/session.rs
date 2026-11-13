@@ -736,7 +736,9 @@ impl ConsensusSessionOwned {
                     "staging shielded import requires an authenticated state root".into(),
                 )
             })?;
-            return self.consensus.import_verified_staging_shielded(import, new_pruning_point, metadata, expected, nullifier_batches)
+            return self
+                .consensus
+                .import_verified_staging_shielded(import, new_pruning_point, metadata, expected, nullifier_batches)
                 .map_err(|error| kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string()));
         }
         self.consensus.import_pruning_point_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches)

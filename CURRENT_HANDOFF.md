@@ -327,3 +327,12 @@ weakening membership projection or authenticated evidence checks.
 The public repository and GitHub Actions are the exclusive environment.
 PRs #1–#11 remain intact. Preview stays default-off and Simnet-only.
 No merge, release, force-push or consensus activation is authorized.
+
+## Initial Actions checkpoint
+
+Draft PR #12: https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12.
+Initial implementation `d13ba931018f08ca71ddb78c242a42432d4d3431` was
+pushed and its remote head verified. PR run 43509749012 superseded push
+43509739189. Lints reported 22 Rustfmt layout hunks; the exact formatter
+output has been applied without altering checks or assertions. Full
+validation is pending for the replacement source. No pass is claimed.

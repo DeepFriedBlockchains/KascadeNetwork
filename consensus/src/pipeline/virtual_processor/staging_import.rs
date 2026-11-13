@@ -312,9 +312,11 @@ impl Consensus {
         }
         let mut operation = import.start_guarded_operation(StagingComponent::Shielded).map_err(rejected)?;
         *import.progress.lock() = StagingProgress::Failed;
-        self.virtual_processor.import_bounded_pruning_shielded(point, metadata, Some(expected_state_root), batches, |batch| {
-            self.virtual_processor.commit_guarded_shielded_batch(&mut operation, batch)
-        }).map_err(|error| rejected(inconsistent(&error)))?;
+        self.virtual_processor
+            .import_bounded_pruning_shielded(point, metadata, Some(expected_state_root), batches, |batch| {
+                self.virtual_processor.commit_guarded_shielded_batch(&mut operation, batch)
+            })
+            .map_err(|error| rejected(inconsistent(&error)))?;
         *import.progress.lock() = StagingProgress::Writing(StagingComponent::Shielded);
         Ok(())
     }
@@ -581,13 +583,20 @@ mod tests {
         let foreign = TestConsensus::new(&config);
         let session = StagingImportSession::new(Mutex::new(import));
         let metadata = PruningPointShieldedMetadata {
-            frontier: Default::default(), supply: Default::default(), burns: Default::default(),
-            nullifier_muhash: MuHash::new(), state_root: PruningPointShieldedMetadata::empty_state_root(),
-            in_window_anchors: vec![], dev_accrued: 0, in_window_anchor_source_scores: vec![],
+            frontier: Default::default(),
+            supply: Default::default(),
+            burns: Default::default(),
+            nullifier_muhash: MuHash::new(),
+            state_root: PruningPointShieldedMetadata::empty_state_root(),
+            in_window_anchors: vec![],
+            dev_accrued: 0,
+            in_window_anchor_source_scores: vec![],
         };
         let wire = ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: 0 };
         let mut forbidden = std::iter::from_fn(|| -> Option<Vec<[u8; 32]>> { panic!("foreign session consumed input") });
-        assert!(foreign.import_owned_staging_shielded(&session, DEVNET_GENESIS.hash, wire, metadata.state_root, &mut forbidden).is_err());
+        assert!(
+            foreign.import_owned_staging_shielded(&session, DEVNET_GENESIS.hash, wire, metadata.state_root, &mut forbidden).is_err()
+        );
 
         import = session.downcast::<Mutex<StagingImport>>().unwrap().into_inner();
         let mut operation = import.start_guarded_operation(StagingComponent::Shielded).unwrap();
@@ -598,8 +607,12 @@ mod tests {
         let mut metadata = metadata;
         metadata.nullifier_muhash = accumulator;
         metadata.state_root = PruningPointShieldedMetadata::recompute_state_root(
-            &metadata.frontier, &metadata.supply, &metadata.nullifier_muhash, &metadata.burns,
-        ).unwrap();
+            &metadata.frontier,
+            &metadata.supply,
+            &metadata.nullifier_muhash,
+            &metadata.burns,
+        )
+        .unwrap();
         let mut frame = 0;
         let mut source = std::iter::from_fn(|| {
             frame += 1;
@@ -615,7 +628,8 @@ mod tests {
         let error = processor.import_bounded_pruning_shielded(
             DEVNET_GENESIS.hash,
             ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: 2 },
-            Some(metadata.state_root), &mut source,
+            Some(metadata.state_root),
+            &mut source,
             |batch| processor.commit_guarded_shielded_batch(&mut operation, batch),
         );
         assert!(error.is_err());
@@ -628,5 +642,4 @@ mod tests {
         drop(import);
         assert!(StagingImport::begin_fixture(processor, proof).is_ok());
     }
-
 }

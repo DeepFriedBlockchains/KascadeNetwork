@@ -2588,7 +2588,8 @@ impl VirtualStateProcessor {
         operation: &mut super::import_operation::ImportOperation,
         batch: kaspa_database::prelude::DeferredDbBatch<'_>,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        let prefixes: Vec<_> = super::staging_import::StagingComponent::Shielded.write_prefixes().iter().copied().map(u8::from).collect();
+        let prefixes: Vec<_> =
+            super::staging_import::StagingComponent::Shielded.write_prefixes().iter().copied().map(u8::from).collect();
         batch.ensure_key_prefixes(&prefixes)?;
         operation.apply(&self.branch_authority, batch)
     }
