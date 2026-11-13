@@ -2804,7 +2804,10 @@ mod tests {
         assert_eq!(frames, 4);
         assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         let committed = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
-        assert_eq!(committed.iter_all().map(Result::unwrap).count(), count as usize);
+        assert_eq!(
+            committed.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(),
+            count as usize
+        );
     }
 
     #[test]
@@ -2838,7 +2841,7 @@ mod tests {
         let mut retry = (0..2).map(|i| vec![bounded_nullifier(i)]);
         consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry).unwrap();
         assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
-        assert_eq!(fresh.iter_all().count(), 2);
+        assert_eq!(fresh.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(), 2);
     }
 
     #[test]

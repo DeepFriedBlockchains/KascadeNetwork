@@ -346,3 +346,14 @@ Push run 43510024178 was superseded. Formatting passed; strict Clippy,
 Check, native focused tests and full validation are still running.
 This documentation-only continuation preserves the exact source above.
 Resume that run before changing code or repeating completed work.
+
+## Compiler correction
+
+Run 43510035150 passed formatting, no-std, WASM checking and WASM tests,
+but Check reported E0308 in the new stale-authority test: its last
+begin_fixture call passed a borrowed Arc. The correction clones the
+processor handle; it changes no safety assertion. Row-count assertions
+also explicitly propagate iterator errors without collecting a full set.
+The replacement full run must pass before this candidate is validated.
+Follow-up memory work also includes bounded deletion during failed-import
+cleanup; the legacy clear still constructs one full-set deletion batch.

@@ -640,6 +640,6 @@ mod tests {
         assert!(StagingImport::begin_fixture(processor.clone(), proof.clone()).is_err());
         drop(operation);
         drop(import);
-        assert!(StagingImport::begin_fixture(processor, proof).is_ok());
+        assert!(StagingImport::begin_fixture(processor.clone(), proof).is_ok());
     }
 }
