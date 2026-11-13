@@ -67,3 +67,14 @@ validation. The original persistent-reopen regression, all existing
 authority/bounded tests and all eight CI jobs remain required.
 Candidate source, PR and run IDs will be recorded after push. No cleanup
 validation pass is claimed until the corresponding complete run succeeds.
+
+## Initial cleanup validation checkpoint
+
+Initial source `dafe86c7cde41e613a7666b9e2068c58fdda902c` is in draft
+[PR #13](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/13),
+stacked directly on PR #12.
+[Run 43522414095](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43522414095)
+reported four Rustfmt layout hunks. Their exact output is applied here,
+without changing assertions or behavior. Replacement focused and complete
+eight-job validation are required; no cleanup pass is claimed.
+The PR #12 validation recorded above remains complete and unchanged.

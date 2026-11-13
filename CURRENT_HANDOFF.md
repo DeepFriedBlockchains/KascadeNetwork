@@ -452,3 +452,14 @@ All eight CI jobs remain required; cleanup source is not yet validated.
 Exact PR, source and run IDs will be appended after push. Descendant
 recovery and export snapshots remain subsequent milestones. No merge,
 release or consensus activation.
+
+## Initial cleanup validation checkpoint
+
+Initial source `dafe86c7cde41e613a7666b9e2068c58fdda902c` is in draft
+[PR #13](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/13),
+stacked directly on PR #12.
+[Run 43522414095](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43522414095)
+reported four Rustfmt layout hunks. Their exact output is applied here,
+without changing assertions or behavior. Replacement focused and complete
+eight-job validation are required; no cleanup pass is claimed.
+The PR #12 validation recorded above remains complete and unchanged.

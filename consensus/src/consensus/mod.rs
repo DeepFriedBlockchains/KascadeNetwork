@@ -2876,9 +2876,9 @@ mod tests {
             let (sender, _receiver) = async_channel::unbounded();
             let tc = TestConsensus::with_db(connect(), &config, sender);
             let consensus = tc.consensus_clone();
-            let mut source = (0..count).step_by(limit).map(|start| {
-                (start..(start + limit).min(count)).map(|i| bounded_nullifier(i as u64)).collect()
-            });
+            let mut source = (0..count)
+                .step_by(limit)
+                .map(|start| (start..(start + limit).min(count)).map(|i| bounded_nullifier(i as u64)).collect());
             consensus.import_pruning_point_shielded(pp, bounded_metadata(count as u64), None, &mut source).unwrap();
             let rows = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
             let mut writes = 0;
@@ -2931,9 +2931,9 @@ mod tests {
         consensus.import_pruning_point_shielded(pp, bounded_metadata(1), None, &mut source).unwrap();
         let before = consensus.get_shielded_state_root(pp).unwrap();
         assert_ne!(before, consensus.empty_shielded_state_root());
-        let rejected_marker = consensus.virtual_processor.clear_bounded_pruning_shielded(pp, |_batch| {
-            Err(StoreError::DataInconsistency("rejected cleanup marker".into()))
-        });
+        let rejected_marker = consensus
+            .virtual_processor
+            .clear_bounded_pruning_shielded(pp, |_batch| Err(StoreError::DataInconsistency("rejected cleanup marker".into())));
         assert!(rejected_marker.is_err());
         assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), before);

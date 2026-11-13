@@ -310,9 +310,7 @@ impl Consensus {
         let mut operation = import.start_guarded_operation(StagingComponent::Shielded).map_err(rejected)?;
         *import.progress.lock() = StagingProgress::Failed;
         self.virtual_processor
-            .clear_bounded_pruning_shielded(point, |batch| {
-                self.virtual_processor.commit_guarded_shielded_batch(&mut operation, batch)
-            })
+            .clear_bounded_pruning_shielded(point, |batch| self.virtual_processor.commit_guarded_shielded_batch(&mut operation, batch))
             .map_err(rejected)?;
         *import.progress.lock() = StagingProgress::Writing(StagingComponent::Shielded);
         Ok(())

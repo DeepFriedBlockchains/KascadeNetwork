@@ -706,10 +706,9 @@ impl ConsensusSessionOwned {
         self.clone()
             .spawn_blocking(move |c| {
                 if let Some(import) = import {
-                    c.clear_verified_staging_shielded(&import, c.pruning_point())
-                        .map_err(|error| {
-                            kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string())
-                        })
+                    c.clear_verified_staging_shielded(&import, c.pruning_point()).map_err(|error| {
+                        kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string())
+                    })
                 } else {
                     c.clear_pruning_shielded_stores()
                 }
