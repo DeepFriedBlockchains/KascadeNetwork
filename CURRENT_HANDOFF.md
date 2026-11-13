@@ -283,8 +283,9 @@ Draft [PR #12](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/12)
 is stacked directly on PR #11 at
 `9612aac2ebca91f384591c3c135fa9df57dbc6d3`.
 Branch: `feature/phase6-bounded-shielded-ingestion-20261113`.
-Current implementation: `acba224032ab7613ac805bcb33160fc696436f2c`.
-Subsequent handoff commits contain documentation only.
+Bounded ingestion implementation: `acba224032ab7613ac805bcb33160fc696436f2c`.
+Current reopen test/CI correction: `f1808f1231697474de66bf3f99bad0c2f01ead0d`.
+Later checkpoint commits contain documentation only.
 
 Spent-nullifier ingestion no longer accumulates the full set or one
 full-set membership batch. Frames are capped at 4,096 entries (128 KiB
@@ -360,3 +361,20 @@ focused or full validation result is claimed. Native job order is the
 single persistent-reopen regression, then workspace build, 31 focused
 cases and full workspace validation. Resume this run rather than rerunning
 the prior known-bad source. PR #12 stays draft and unvalidated.
+
+## Isolated validation branch for stalled Actions cancellation
+
+The push run 43515643677 has seven cancelled jobs but Lints job
+132196802751 still reports in_progress with no steps. PR run 43515652940
+remains pending with no jobs. The GitHub connector has no cancellation
+action; no local or browser access is used as a workaround.
+
+Branch `validation/phase6-bounded-reopen-20261113` carries the exact
+same corrected Rust source and eight-job workflow as f1808f1, plus this
+documentation checkpoint. Its push uses a different existing concurrency
+group, avoiding the stuck group without modifying the workflow or its
+checks. PR #12 is fast-forwarded to the same commit so that the exact
+latest head is tested. No history rewrite or additional PR is involved.
+The new validation push run is authoritative once its exact SHA and all
+eight results are verified. Source and workflow equivalence will be
+checked through GitHub's commit comparison. No pass is claimed yet.
