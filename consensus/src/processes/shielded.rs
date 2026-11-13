@@ -1338,6 +1338,7 @@ impl ShieldedStateManager {
     /// Per-block diffs and historical anchor indexes remain intact.
     pub(crate) fn clear_for_pruning_reimport(
         &self,
+        db: &Arc<DB>,
         pruning_point: Hash,
         mut commit: impl for<'a> FnMut(DeferredDbBatch<'a>) -> StoreResult<()>,
     ) -> StoreResult<()> {
@@ -1345,7 +1346,7 @@ impl ShieldedStateManager {
 
         let mut rows = self.nullifiers.iter_all();
         loop {
-            let mut batch = DeferredDbBatch::new(self.db.clone());
+            let mut batch = DeferredDbBatch::new(db.clone());
             let mut count = 0;
             for row in rows.by_ref().take(SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT) {
                 self.nullifiers.delete_deferred(&mut batch, row?)?;
@@ -1359,7 +1360,7 @@ impl ShieldedStateManager {
         if self.nullifiers.iter_all().next().transpose()?.is_some() {
             return Err(StoreError::DataInconsistency("shielded cleanup left committed membership".into()));
         }
-        let mut batch = DeferredDbBatch::new(self.db.clone());
+        let mut batch = DeferredDbBatch::new(db.clone());
         self.tree_store.delete_deferred(&mut batch, pruning_point)?;
         self.supply_store.delete_deferred(&mut batch, pruning_point)?;
         self.nullifier_muhash.delete_deferred(&mut batch, pruning_point)?;
@@ -2462,7 +2463,7 @@ mod tests {
         assert_eq!(mgr.nullifiers().count(), 2);
 
         // Clear for a from-scratch re-import (what the IBD flow now does before seeding).
-        mgr.clear_for_pruning_reimport(pp, |batch| batch.commit()).unwrap();
+        mgr.clear_for_pruning_reimport(&db, pp, |batch| batch.commit()).unwrap();
 
         // The global set is empty and the pruning point's snapshots are gone (the
         // root reads back as the empty-state root). The anchor→block index is

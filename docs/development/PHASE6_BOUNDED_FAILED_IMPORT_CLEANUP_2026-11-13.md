@@ -78,3 +78,13 @@ reported four Rustfmt layout hunks. Their exact output is applied here,
 without changing assertions or behavior. Replacement focused and complete
 eight-job validation are required; no cleanup pass is claimed.
 The PR #12 validation recorded above remains complete and unchanged.
+
+## Cleanup compiler correction
+
+Check job 132219833598 in run 43522414095 reported E0609 at the two
+new batch constructors: ShieldedStateManager owns typed stores, not a
+database field. The bounded helper now accepts the processor's existing
+database handle explicitly; every typed deferred delete still verifies
+database identity before any commit. The four formatter hunks are also
+applied. No assertions, authentication or restart checks were relaxed.
+Focused cleanup and full eight-job validation remain pending.

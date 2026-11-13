@@ -600,7 +600,7 @@ impl VirtualStateProcessor {
             metadata.stage_pruning_shielded_stable(&mut batch, false)?;
             commit(batch)?;
         }
-        self.shielded_state_manager.clear_for_pruning_reimport(pp, |batch| {
+        self.shielded_state_manager.clear_for_pruning_reimport(&self.db, pp, |batch| {
             let _point = check_point()?;
             let _metadata = self.pruning_meta_stores.write();
             commit(batch)
