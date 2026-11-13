@@ -2804,10 +2804,7 @@ mod tests {
         assert_eq!(frames, 4);
         assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         let committed = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
-        assert_eq!(
-            committed.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(),
-            count as usize
-        );
+        assert_eq!(committed.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(), count as usize);
     }
 
     #[test]
