@@ -88,3 +88,13 @@ pushed and its remote head verified. PR run 43509749012 superseded push
 43509739189. Lints reported 22 Rustfmt layout hunks; the exact formatter
 output has been applied without altering checks or assertions. Full
 validation is pending for the replacement source. No pass is claimed.
+
+## Replacement validation checkpoint
+
+Current implementation: `454ec2fb37bed61562f1e2a598d522d299558c78`.
+Remote PR #12 head was verified after push. Authoritative PR run:
+[43510035150](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43510035150).
+Push run 43510024178 was superseded. Formatting passed; strict Clippy,
+Check, native focused tests and full validation are still running.
+This documentation-only continuation preserves the exact source above.
+Resume that run before changing code or repeating completed work.

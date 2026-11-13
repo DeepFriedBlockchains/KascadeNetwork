@@ -63,3 +63,13 @@ Lints stopped on five Rustfmt layout hunks; strict Clippy did not run.
 The exact CI formatter output was applied without changing assertions.
 The replacement source/run will be recorded in the PR description.
 Native validation is pending.
+
+## Verified final result — November 13, 2026
+
+Implementation `9612aac2ebca91f384591c3c135fa9df57dbc6d3` passed all
+eight jobs in [run 43309997530](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43309997530).
+The completed native log confirms 23 focused regressions, 1,568 workspace
+tests (25 skips) and 32 no-asm tests. Both tampered-nullifier cases passed
+with exact accumulator rejection, worker draining, fresh retry and verified
+promotion assertions intact. This supersedes the pending checkpoints
+above. PR #11 retains its validated head; continuation is draft PR #12.
