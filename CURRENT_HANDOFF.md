@@ -652,3 +652,7 @@ The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-
 Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
 tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
 contains post-launch post-quantum wallet and transaction research on a separate branch.
+
+## Three-node partition and rejoin candidate
+
+November 22, 2026. Branch `test/phase6-three-node-partition-rejoin-20261122` stacks on draft PR #16 at documentation checkpoint `049ffaf17d3fdc74c93a36b399edb0b4b66cb0b3`. The [three-node report](docs/development/PHASE6_THREE_NODE_PARTITION_REJOIN_2026-11-22.md) records scope and execution. The Simnet fixture requires authenticated pruning-point sync, two independently mined branches, selected-chain rollback, convergence of committed state, and the same recovered checkpoint after reopening one receiver. CI validation is pending. Run the preview authority integration selection and check all eight jobs on the exact implementation SHA.

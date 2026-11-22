@@ -1,0 +1,7 @@
+# Phase 6 three-node Simnet partition and rejoin
+
+November 22, 2026. Parent PR #16 passed all eight jobs at `c9f378177c0ddd25f3152b55c8d34b593c3cfcc4` in [run 45063994270](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45063994270). This candidate stacks on the documentation-only parent `049ffaf17d3fdc74c93a36b399edb0b4b66cb0b3`.
+
+Three independent daemons use the existing shielded Simnet parameters. The first mines beyond pruning depth. Both receivers perform authenticated IBD. One receiver disconnects while it and the remaining two nodes mine competing branches. After rejoin, the test proves the isolated selected tip was rolled back and the majority gap tip was UTXO-validated. A block relayed from the rejoined node gives all peers a common checkpoint. The test compares the selected tip, pruning point, finality point, shielded commitment, UTXO commitment, and complete virtual UTXO rows for the fixture. It restarts one receiver with its existing data directory, verifies preserved state and promotion, then requires live relay on all three nodes.
+
+The existing CI selection runs `authority_integration_preview_three_node_partition_rejoin` under the Phase 6 preview. The candidate has no production changes. Validation is pending on the exact implementation commit. After a green run, record all eight jobs, native test results and the validated SHA. Keep the stack draft and unmerged.
