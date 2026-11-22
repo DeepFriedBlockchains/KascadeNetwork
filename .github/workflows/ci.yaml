@@ -130,6 +130,9 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview -E 'test(authority_integration_preview_recovers_descendants_after_header_sync)'
 
+      - name: Run isolated Simnet native proof-of-work regression
+        run: cargo nextest run -p kaspa-testing-integration --test phase6_native_pow_relay --features phase6-staging-preview
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
