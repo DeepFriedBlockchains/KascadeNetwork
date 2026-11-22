@@ -79,7 +79,7 @@ pub(super) fn verify_pruning_shielded_at_tip(
     verify_commitment(&store, point.hash, expected, pruning_accumulator, pruning_rows)
 }
 
-fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_child: Hash) -> StoreResult<[u8; 32]> {
+pub(super) fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_child: Hash) -> StoreResult<[u8; 32]> {
     let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
     let header = headers.get_header(trusted_child)?;
     if trusted_child == point
@@ -124,7 +124,7 @@ fn verify_commitment(
     Ok(())
 }
 
-fn descendant_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash) -> StoreResult<HashSet<[u8; 32]>> {
+pub(super) fn descendant_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash) -> StoreResult<HashSet<[u8; 32]>> {
     let chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
     let point_index = chain.get_by_hash(point)?;
     let (tip_index, committed_tip) = chain.get_tip()?;

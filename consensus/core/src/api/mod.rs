@@ -181,6 +181,12 @@ pub struct ShieldedExportMetadata {
     pub nullifier_count: u64,
 }
 
+/// Authenticated metadata and nullifiers captured together for one transfer.
+pub struct ShieldedExportSnapshot {
+    pub metadata: Option<ShieldedExportMetadata>,
+    pub nullifiers: Vec<[u8; 32]>,
+}
+
 /// Upper bound on [`ShieldedExportMetadata::nullifier_count`] accepted on import
 /// (audit finding F-08). The count is declared by an untrusted sync peer; the cap
 /// bounds the memory/CPU the import can be made to spend (2^26 ≈ 67M entries ≈
@@ -653,6 +659,11 @@ pub trait ConsensusApi: Send + Sync {
     /// Compute SMT metadata for the pruning point (for P2P streaming).
     fn get_pruning_point_smt_metadata(&self, _expected_pruning_point: Hash) -> ConsensusResult<SmtExportMetadata> {
         unimplemented!()
+    }
+
+    /// Return a verified export when the Phase 6 preview is available.
+    fn capture_shielded_export_snapshot(&self, _point: Hash) -> ConsensusResult<Option<ShieldedExportSnapshot>> {
+        Ok(None)
     }
 
     /// Compute the shielded-state export metadata at the pruning point (for P2P

@@ -120,7 +120,7 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(bounded_cleanup_)'
 
-      - name: Run descendant recovery regression
+      - name: Run descendant recovery and export regression
         env:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_promotes_and_recovers_a_committed_descendant_chain)'
