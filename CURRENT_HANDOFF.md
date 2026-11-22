@@ -688,3 +688,21 @@ from job logs before changing implementation. Keep both drafts unmerged.
 The [5-BPS report](KASCADE_5BPS_REPORT.md) records inherited candidate constants and separates paced relay, actual mining, retention and workload evidence. It contains no runtime measurements. Use it after the isolated acceptance tests to record a first measured baseline.
 
 An opt-in three-node measurement harness is prepared on this branch. The first runner result is pending.
+
+## Actions resumed after billing interruption
+
+November 22, 2026. Draft PR #16 remains the fully validated baseline.
+GitHub Actions has resumed executing steps after the billing lock. The
+following PR heads were held stable while their jobs executed.
+
+| Draft | Exact source | Run |
+| --- | --- | --- |
+| [#17 archive](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) | `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` | [45069228114](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114), attempt 3 |
+| [#19 partition/rejoin](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/19) | `978584bbd91e81b8b637bbebb6655426fe207d9d` | [45069680867](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069680867), attempt 3 |
+| [#20 profile audit](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/20) | `50b0d19290c54ffef5df3e0919d99645bb528e19` | [45078524217](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45078524217), attempt 2 |
+| [#21 native work](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/21) | `bd4f65851c0267f70aced3602f61391c5fdfc578` | [45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178), attempt 1 |
+
+Draft [PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) completed a post-launch
+shielded threat and migration research addendum at
+`d0d7e90bb2d3e4378328716c74580d3942e46a86`. No implementation or activation is
+part of that work. The opt-in 5-BPS harness has no runner result yet.
