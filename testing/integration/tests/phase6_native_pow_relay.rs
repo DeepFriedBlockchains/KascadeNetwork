@@ -65,9 +65,8 @@ async fn submit_auxpow_block(client: &GrpcClient, miner: &Address) -> Hash {
     parent.finalize();
 
     let expected = child.hash;
-    block.header = child
-        .with_aux_pow(AuxPow { parent_header: parent, parent_coinbase: coinbase, coinbase_merkle_branch: vec![] })
-        .into();
+    let witness = AuxPow { parent_header: parent, parent_coinbase: coinbase, coinbase_merkle_branch: vec![] };
+    block.header = child.with_aux_pow(witness).into();
     assert_eq!(Header::try_from(&block.header).unwrap().hash, expected);
     let result = client.submit_block(block, false).await.unwrap();
     assert!(result.report.is_success(), "valid auxiliary proof of work rejected: {}", result.reject_detail);
