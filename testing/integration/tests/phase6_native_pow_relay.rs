@@ -1,7 +1,9 @@
 #![cfg(feature = "phase6-staging-preview")]
 
 use kaspa_addresses::{Address, Version};
-use kaspa_consensus_core::header::Header;
+use kaspa_consensus_core::{
+    auxpow::AuxPow, header::Header, merkle::calc_hash_merkle_root, subnets::SUBNETWORK_ID_COINBASE, tx::Transaction,
+};
 use kaspa_grpc_client::GrpcClient;
 use kaspa_hashes::Hash;
 use kaspa_pow::State;
@@ -45,8 +47,35 @@ async fn submit_native_block(client: &GrpcClient, miner: &Address, reject_invali
     expected
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn authority_integration_native_pow_rejects_invalid_nonce_and_relays_valid_blocks() {
+async fn submit_auxpow_block(client: &GrpcClient, miner: &Address) -> Hash {
+    let mut block = client.get_block_template(miner.clone(), vec![]).await.unwrap().block;
+    let candidate = Header::try_from(&block.header).unwrap();
+    let native = State::new(&candidate);
+    block.header.nonce = (0..16_384).find(|nonce| !native.check_pow(*nonce).0).expect("child must fail native proof of work");
+    let child = Header::try_from(&block.header).unwrap();
+
+    let commitment = AuxPow::embed_commitment(&[], child.hash, &[]);
+    let coinbase = Transaction::new(0, vec![], vec![], 0, SUBNETWORK_ID_COINBASE, 0, commitment);
+    let mut parent = Header::from_precomputed_hash(Hash::from_bytes([0; 32]), vec![Hash::from_bytes([1; 32])]);
+    parent.hash_merkle_root = calc_hash_merkle_root(std::iter::once(&coinbase));
+    parent.bits = child.bits;
+    parent.timestamp = child.timestamp;
+    let work = State::new(&parent);
+    parent.nonce = (0..16_384).find(|nonce| work.check_pow(*nonce).0).expect("fixture should mine an easy parent nonce");
+    parent.finalize();
+
+    let expected = child.hash;
+    block.header = child
+        .with_aux_pow(AuxPow { parent_header: parent, parent_coinbase: coinbase, coinbase_merkle_branch: vec![] })
+        .into();
+    assert_eq!(Header::try_from(&block.header).unwrap().hash, expected);
+    let result = client.submit_block(block, false).await.unwrap();
+    assert!(result.report.is_success(), "valid auxiliary proof of work rejected: {}", result.reject_detail);
+    wait_for_sink(client, expected).await;
+    expected
+}
+
+async fn run_pow_relay(auxpow: bool) {
     kaspa_alloc::init_allocator_with_default_settings();
     let temp = tempfile::tempdir().unwrap();
     let params = temp.path().join("native-pow.json");
@@ -77,7 +106,11 @@ async fn authority_integration_native_pow_rejects_invalid_nonce_and_relays_valid
 
     let first_hash = submit_native_block(&first_client, &miner, true).await;
     wait_for_sink(&second_client, first_hash).await;
-    let second_hash = submit_native_block(&second_client, &miner, false).await;
+    let second_hash = if auxpow {
+        submit_auxpow_block(&second_client, &miner).await
+    } else {
+        submit_native_block(&second_client, &miner, false).await
+    };
     assert_ne!(first_hash, second_hash);
     wait_for_sink(&first_client, second_hash).await;
 
@@ -85,4 +118,14 @@ async fn authority_integration_native_pow_rejects_invalid_nonce_and_relays_valid
     second_client.disconnect().await.unwrap();
     first.shutdown();
     second.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_native_pow_rejects_invalid_nonce_and_relays_valid_blocks() {
+    run_pow_relay(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_auxpow_relays_block_without_native_proof() {
+    run_pow_relay(true).await;
 }

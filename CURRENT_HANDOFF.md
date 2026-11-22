@@ -656,3 +656,5 @@ contains post-launch post-quantum wallet and transaction research on a separate 
 ## Isolated native proof-of-work acceptance
 
 The [native PoW report](docs/development/PHASE6_NATIVE_POW_RELAY_2026-11-22.md) describes a focused two-node Simnet test on its own draft branch. The fixture enables native kHeavyHash verification for its isolated nodes, rejects a nonce above target, then requires valid blocks to become selected and relay in both directions. The run must pass on the exact source before it counts as acceptance evidence. Public network settings and shielded activation are unchanged.
+
+A separate [AuxPoW relay fixture](docs/development/PHASE6_AUXPOW_RELAY_2026-11-22.md) is prepared for the same isolated daemons. Validate it after the native-work baseline is green.
