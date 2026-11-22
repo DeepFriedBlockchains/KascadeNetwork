@@ -1043,28 +1043,26 @@ impl ConsensusApi for Consensus {
         // whatever the serving peer put in the message; without a bound, a first chunk
         // claiming an absurd index (say u64::MAX/2) re-bases our entries sky-high and then
         // wedges this node for good: both the verification enumeration and the Mismatch
-        // purge walk `0..anchor_index` densely. The invariant that caps it needs no trust:
-        // a selected-chain block's genesis-based index can never exceed its DAA score
-        // (every chain step advances DAA by at least its own mergeset, i.e. >= 1). And a
-        // rebase only ever happens on the FIRST chunk, whose anchor is our own pruning
-        // point - a block whose header we hold - so the DAA bound comes from local data,
-        // not from the peer. Later chunks anchor at blocks we already numbered (shift 0)
-        // and never hit this path.
+        // purge walk `0..anchor_index` densely. An honest continuation uses an
+        // already indexed anchor. Any claim that requires a rebase must be
+        // bounded by locally committed data.
         if shift > 0 {
-            let anchor_daa = self
-                .headers_store
-                .get_compact_header_data(anchor)
-                .optional()
-                .unwrap()
-                .map(|h| h.daa_score)
-                .ok_or_else(|| {
-                    ConsensusError::GeneralOwned(format!(
-                        "shielded history anchor {anchor} needs a re-base but its header is not available to sanity-check the peer's index claim"
-                    ))
-                })?;
-            if anchor_index > anchor_daa {
+            // Every selected-chain step counts its selected parent as a blue.
+            // The first DAA window excludes genesis, so DAA can be lower than
+            // the genesis-based chain index even on an honest linear chain.
+            let (score_limit, score_name) = if self.supports_phase6_descendant_recovery() {
+                (self.ghostdag_store.get_blue_score(anchor), "blue score")
+            } else {
+                (self.headers_store.get_compact_header_data(anchor).map(|header| header.daa_score), "DAA score")
+            };
+            let score_limit = score_limit.map_err(|error| {
+                ConsensusError::GeneralOwned(format!(
+                    "cannot bound the shielded history index at {anchor} using its local {score_name}: {error}"
+                ))
+            })?;
+            if anchor_index > score_limit {
                 return Err(ConsensusError::GeneralOwned(format!(
-                    "peer claims chain index {anchor_index} for anchor {anchor}, but its DAA score is {anchor_daa} - a chain index can never exceed the DAA score; rejecting the backfill chunk"
+                    "peer claims chain index {anchor_index} for anchor {anchor}, but a chain index can never exceed the {score_name} ({score_limit}); rejecting the backfill chunk"
                 )));
             }
         }
@@ -2694,8 +2692,8 @@ mod tests {
     /// that window was reported live as `history_complete: true` at 20% of the replay.
     /// A malicious backfill peer must not be able to re-number our chain index with an
     /// absurd claimed anchor index: the wedge is that verification and the purge both walk
-    /// 0..anchor_index densely. The bound is trustless - a chain index can never exceed
-    /// the anchor blocks DAA score, read from our own header store.
+    /// 0..anchor_index densely. A first claim beyond the locally stored
+    /// score bound must be rejected before it can shift the chain index.
     #[test]
     fn backfill_rejects_impossible_peer_anchor_index() {
         let config = Config::new(MAINNET_PARAMS);

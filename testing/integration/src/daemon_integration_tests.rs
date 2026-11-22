@@ -1293,6 +1293,12 @@ async fn authority_integration_preview_recovers_descendants_after_header_sync() 
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_verifies_shielded_archive_backfill() {
+    run_payload_ibd(true, None, false, IbdPayloadFixture::ShieldedHistoryBackfill).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_cancels_interrupted_smt_peer() {
     run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Smt), false).await;
 }
@@ -1436,6 +1442,8 @@ enum IbdPayloadFixture {
     Transparent,
     #[cfg(feature = "phase6-staging-preview")]
     DescendantRecovery,
+    #[cfg(feature = "phase6-staging-preview")]
+    ShieldedHistoryBackfill,
 }
 
 async fn run_shielded_ibd(
@@ -1879,6 +1887,32 @@ async fn run_payload_ibd_at(
             .unwrap();
         actual.sort_unstable();
         assert_eq!(actual, expected, "retry failed to import the authenticated spent-nullifier set");
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    if fixture == IbdPayloadFixture::ShieldedHistoryBackfill {
+        let (source_index, blue_score, records) = {
+            let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
+            let sender = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+            let session = sender.consensus().unguarded_session_blocking();
+            let header = session.get_header(target_pruning_point).unwrap();
+            let (records, _, index) = session.get_shielded_history_indexed_below(target_pruning_point, 1).unwrap();
+            assert!(index > header.daa_score && index <= header.blue_score, "fixture must exceed the historical DAA bound");
+            assert!(!records.is_empty());
+            (index, header.blue_score, records)
+        };
+
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let receiver = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let active = receiver.consensus();
+        let session = active.unguarded_session_blocking();
+        assert_eq!(session.get_shielded_history_status().unwrap(), (0, true));
+        assert_eq!(session.get_shielded_history_indexed_below(target_pruning_point, 1).unwrap().2, source_index);
+
+        let result = active.session().await.async_backfill_shielded_history(target_pruning_point, blue_score + 1, records).await;
+        assert!(result.unwrap_err().to_string().contains("can never exceed the blue score"));
+        assert_eq!(session.get_shielded_history_indexed_below(target_pruning_point, 1).unwrap().2, source_index);
+        assert_eq!(session.get_shielded_history_status().unwrap(), (0, true));
     }
 
     #[cfg(feature = "phase6-staging-preview")]

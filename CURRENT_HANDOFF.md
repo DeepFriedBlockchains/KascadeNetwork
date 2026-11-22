@@ -652,3 +652,17 @@ The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-
 Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
 tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
 contains post-launch post-quantum wallet and transaction research on a separate branch.
+
+## Simnet shielded archive backfill candidate
+
+November 22, 2026. Draft [PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) follows the validated two-node recovery in PR #16. It corrects the archive index bound in the default-off Simnet preview. Rebase admission uses committed GHOSTDAG blue score, so a valid linear chain may backfill through genesis even when its index exceeds DAA score. Archive replay still verifies the authenticated frontier.
+
+Candidate source `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` is running the focused archive and descendant-recovery regressions, followed by the existing native suite and all eight jobs in [Actions run 45069228114](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114). Review the exact run before claiming validation. See [the dated archive report](docs/development/PHASE6_SIMNET_SHIELDED_ARCHIVE_2026-11-22.md).
+
+Next, apply the reviewed archive checkpoint to the staged branch only after preserving validation evidence. Continue the separate three-node partition/rejoin acceptance case and retain the same Simnet-only, default-off activation policy.
+
+## Verified Simnet shielded archive milestone
+
+All eight jobs passed on implementation `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` in [run 45069228114, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114/attempts/3). Native job 137388298498 passed both focused two-node scenarios, 36 combined Phase 6 regressions, 1,579 workspace tests (25 skips), and 32 no-asm tests. The recipient verified archive history through genesis and retained the authenticated anchor index when it rejected an out-of-range claim.
+
+The [resumed-work handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/CURRENT_HANDOFF.md) tracks the separate partition/rejoin, native PoW, and profile work. This checkpoint adds only documentation to the validated implementation.
