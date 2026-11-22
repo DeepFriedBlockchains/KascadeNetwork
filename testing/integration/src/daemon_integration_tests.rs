@@ -1287,6 +1287,12 @@ async fn authority_integration_production_preview_promotes_shielded_ibd() {
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_recovers_descendants_after_header_sync() {
+    run_payload_ibd(true, None, false, IbdPayloadFixture::DescendantRecovery).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_cancels_interrupted_smt_peer() {
     run_shielded_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Smt), false).await;
 }
@@ -1428,6 +1434,8 @@ enum IbdPayloadFixture {
     SpentNullifiers,
     TamperedNullifiers,
     Transparent,
+    #[cfg(feature = "phase6-staging-preview")]
+    DescendantRecovery,
 }
 
 async fn run_shielded_ibd(
@@ -1874,6 +1882,71 @@ async fn run_payload_ibd_at(
             .unwrap();
         actual.sort_unstable();
         assert_eq!(actual, expected, "retry failed to import the authenticated spent-nullifier set");
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    if fixture == IbdPayloadFixture::DescendantRecovery {
+        let peer_ip = "127.0.0.1".parse().unwrap();
+        rpc_client2.ban(peer_ip).await.unwrap();
+        let disconnected = rpc_client2.clone();
+        wait_for(
+            50,
+            100,
+            move || {
+                let client = disconnected.clone();
+                Box::pin(async move { client.get_connected_peer_info().await.unwrap().peer_info.is_empty() })
+            },
+            "receiver did not disconnect before the recovery gap",
+        )
+        .await;
+
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        {
+            let active = manager.consensus();
+            let session = active.unguarded_session_blocking();
+            assert_eq!(session.get_sink(), session.get_headers_selected_tip());
+            assert_ne!(session.get_sink(), target_pruning_point);
+            session.set_pruning_shielded_stable_flag(false);
+            assert!(!session.is_pruning_shielded_stable());
+        }
+        // Exceed the relay orphan lookup depth while the receiver has no peers.
+        for _ in 0..20 {
+            let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+            rpc_client1.submit_block(template.block, false).await.unwrap();
+        }
+        rpc_client2.unban(peer_ip).await.unwrap();
+        rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+        let connected = rpc_client2.clone();
+        wait_for(
+            50,
+            100,
+            move || {
+                let client = connected.clone();
+                Box::pin(async move { client.get_connected_peer_info().await.unwrap().peer_info.len() == 1 })
+            },
+            "receiver did not reconnect to the recovery peer",
+        )
+        .await;
+        let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
+        rpc_client1.submit_block(template.block, false).await.unwrap();
+        let target = rpc_client1.get_server_info().await.unwrap().virtual_daa_score;
+        let recovering_node = rpc_client2.clone();
+        wait_for(
+            100,
+            300,
+            move || {
+                let client = recovering_node.clone();
+                Box::pin(async move { client.get_server_info().await.unwrap().virtual_daa_score >= target })
+            },
+            "receiver could not reconcile shielded readiness and sync descendant bodies",
+        )
+        .await;
+        let active = manager.consensus();
+        let session = active.unguarded_session_blocking();
+        assert!(session.is_pruning_shielded_stable());
+        assert!(session.has_verified_staging_promotion().unwrap());
+        assert!(!session.supports_verified_staging_import());
     }
 
     // Phase 4 / assertion 3: mine finality_depth + buffer blocks on the syncer and

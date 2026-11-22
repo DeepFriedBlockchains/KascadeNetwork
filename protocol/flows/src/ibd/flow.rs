@@ -246,6 +246,23 @@ impl IbdFlow {
                     session.async_set_pruning_smt_stable().await;
                 }
 
+                // A descendant is authenticated by its selected child. Learn
+                // that child's header before checking shielded readiness.
+                let recover_after_headers = !is_shielded_stable
+                    && is_utxo_stable
+                    && is_smt_stable
+                    && session.async_get_sink().await != pruning_point
+                    && session.clone().spawn_blocking(|c| c.supports_phase6_descendant_recovery()).await;
+                if recover_after_headers {
+                    self.sync_headers(
+                        &session,
+                        negotiation_output.syncer_virtual_selected_parent,
+                        highest_known_syncer_chain_hash,
+                        &relay_block,
+                    )
+                    .await?;
+                }
+
                 if !is_shielded_stable {
                     info!(
                         "shielded state corresponding to the current pruning point {} is incomplete, attempting to download it from {}",
@@ -267,14 +284,15 @@ impl IbdFlow {
                     self.sync_new_utxo_set(&session, pruning_point).await?;
                 }
 
-                // Once utxo is valid, simply sync missing headers
-                self.sync_headers(
-                    &session,
-                    negotiation_output.syncer_virtual_selected_parent,
-                    highest_known_syncer_chain_hash,
-                    &relay_block,
-                )
-                .await?;
+                if !recover_after_headers {
+                    self.sync_headers(
+                        &session,
+                        negotiation_output.syncer_virtual_selected_parent,
+                        highest_known_syncer_chain_hash,
+                        &relay_block,
+                    )
+                    .await?;
+                }
             }
             IbdType::DownloadHeadersProof => {
                 drop(session); // Avoid holding the previous consensus throughout the staging IBD
@@ -461,7 +479,8 @@ impl IbdFlow {
                 // shielded state, so reading it unconditionally is safe.
                 let is_shielded_stable = consensus.async_is_pruning_shielded_stable().await;
 
-                return match (syncer_skew, is_utxo_stable && is_smt_stable && is_shielded_stable && is_pp_anticone_synced) {
+                let other_state_stable = is_utxo_stable && is_smt_stable && is_pp_anticone_synced;
+                return match (syncer_skew, other_state_stable && is_shielded_stable) {
                     (SyncerSkew::Aligned, _) => Ok(IbdType::Sync {
                         highest_known_syncer_chain_hash,
                         is_utxo_stable,
@@ -494,7 +513,29 @@ impl IbdFlow {
                             Ok(IbdType::PruningCatchUp { highest_known_syncer_chain_hash })
                         }
                     }
-                    (SyncerSkew::Leading, false) => Ok(IbdType::PruningCatchUp { highest_known_syncer_chain_hash }),
+                    (SyncerSkew::Leading, false) => {
+                        // An already committed remote point needs only a normal
+                        // header sync and shielded readiness reconciliation.
+                        if other_state_stable
+                            && sink != pruning_point
+                            && consensus.clone().spawn_blocking(|c| c.supports_phase6_descendant_recovery()).await
+                            && consensus.async_is_chain_ancestor_of(syncer_pruning_point, sink).await?
+                            && consensus
+                                .async_get_block_status(syncer_pruning_point)
+                                .await
+                                .is_some_and(|status| status == kaspa_consensus_core::blockstatus::BlockStatus::StatusUTXOValid)
+                        {
+                            Ok(IbdType::Sync {
+                                highest_known_syncer_chain_hash,
+                                is_utxo_stable,
+                                is_smt_stable,
+                                is_shielded_stable,
+                                is_pp_anticone_synced,
+                            })
+                        } else {
+                            Ok(IbdType::PruningCatchUp { highest_known_syncer_chain_hash })
+                        }
+                    }
                 };
             }
 

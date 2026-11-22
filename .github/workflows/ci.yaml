@@ -125,6 +125,11 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_promotes_and_recovers_a_committed_descendant_chain)'
 
+      - name: Run two-node Simnet descendant recovery regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview -E 'test(authority_integration_preview_recovers_descendants_after_header_sync)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
