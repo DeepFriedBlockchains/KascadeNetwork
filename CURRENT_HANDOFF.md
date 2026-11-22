@@ -656,3 +656,9 @@ contains post-launch post-quantum wallet and transaction research on a separate 
 ## Three-node partition and rejoin candidate
 
 November 22, 2026. Branch `test/phase6-three-node-partition-rejoin-20261122` stacks on draft PR #16 at documentation checkpoint `049ffaf17d3fdc74c93a36b399edb0b4b66cb0b3`. The [three-node report](docs/development/PHASE6_THREE_NODE_PARTITION_REJOIN_2026-11-22.md) records scope and execution. The Simnet fixture requires authenticated pruning-point sync, two independently mined branches, selected-chain rollback, convergence of committed state, and the same recovered checkpoint after reopening one receiver. CI validation is pending. Run the preview authority integration selection and check all eight jobs on the exact implementation SHA.
+
+## Verified three-node Simnet acceptance
+
+All eight jobs passed on implementation `978584bbd91e81b8b637bbebb6655426fe207d9d` in [run 45069680867, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069680867/attempts/3). Native job 137387238295 ran the three-node test successfully in 26.487 seconds. All 36 Phase 6 cases, 1,579 workspace tests (25 skips), and 32 no-asm tests passed. The case verifies authenticated sync, rollback of the isolated branch, convergence on the same persisted state, and block relay after reopening the receiver.
+
+The [resumed-work handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/CURRENT_HANDOFF.md) links the independent profile checks, 5-BPS harness and native PoW follow-on. The PR remains draft and unmerged.
