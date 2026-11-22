@@ -652,3 +652,7 @@ The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-
 Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
 tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
 contains post-launch post-quantum wallet and transaction research on a separate branch.
+
+## Isolated native proof-of-work acceptance
+
+The [native PoW report](docs/development/PHASE6_NATIVE_POW_RELAY_2026-11-22.md) describes a focused two-node Simnet test on its own draft branch. The fixture enables native kHeavyHash verification for its isolated nodes, rejects a nonce above target, then requires valid blocks to become selected and relay in both directions. The run must pass on the exact source before it counts as acceptance evidence. Public network settings and shielded activation are unchanged.
