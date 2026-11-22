@@ -682,3 +682,7 @@ Once the account owner has resolved the lock, rerun the incomplete jobs
 on the exact SHAs, inspect the native regressions and full matrix, and
 record the results on each draft. Diagnose any actual test failures
 from job logs before changing implementation. Keep both drafts unmerged.
+
+## Follow-on testnet evidence
+
+The [5-BPS report](KASCADE_5BPS_REPORT.md) records inherited candidate constants and separates paced relay, actual mining, retention and workload evidence. It contains no runtime measurements. Use it after the isolated acceptance tests to record a first measured baseline.
