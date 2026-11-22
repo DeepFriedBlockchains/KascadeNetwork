@@ -654,3 +654,31 @@ tracks Simnet shielded archive backfill and status verification. [Draft PR #18](
 contains post-launch post-quantum wallet and transaction research on a separate branch.
 
 The [testnet profile audit](docs/development/PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) records inherited testnet defaults and identifies explicit network, address, work-rate and issuance checks before approval. This documentation branch has no consensus or launch changes. Next executable task: run the three-node Simnet partition/rejoin regression and separately verify shielded archive backfill on its draft PR.
+
+## GitHub Actions billing blocker
+
+November 22, 2026. The last fully validated implementation is still
+draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) at
+`c9f378177c0ddd25f3152b55c8d34b593c3cfcc4`, with eight successful
+jobs in [run 45063994270](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45063994270).
+Its documentation-only checkpoint is `049ffaf17d3fdc74c93a36b399edb0b4b66cb0b3`.
+
+- Archive backfill [PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) is pinned at
+  `11ab68a3be26fc9616a91d3d06ac5d99bc23679b`.
+  [Run 45069228114](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114)
+  retains six successful jobs. The replacement native and Linux release
+  jobs did not start. Documentation checkpoint
+  [81ce77b](https://github.com/DeepFriedBlockchains/KascadeNetwork/commit/81ce77bd7ca2593a84be294f37c50f88b651e424)
+  includes the parent handoff.
+- Three-node partition/rejoin and restart [PR #19](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/19)
+  is pinned at `978584bbd91e81b8b637bbebb6655426fe207d9d`.
+  [Run 45069680867](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069680867)
+  retains four successful jobs. Linux release, WASM SDK, Check and the
+  native suite did not start on retry.
+
+GitHub Actions annotations identify an account billing lock and report
+that the jobs did not start. Neither implementation has full validation.
+Once the account owner has resolved the lock, rerun the incomplete jobs
+on the exact SHAs, inspect the native regressions and full matrix, and
+record the results on each draft. Diagnose any actual test failures
+from job logs before changing implementation. Keep both drafts unmerged.
