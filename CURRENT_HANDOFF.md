@@ -686,3 +686,5 @@ from job logs before changing implementation. Keep both drafts unmerged.
 ## Follow-on testnet evidence
 
 The [5-BPS report](KASCADE_5BPS_REPORT.md) records inherited candidate constants and separates paced relay, actual mining, retention and workload evidence. It contains no runtime measurements. Use it after the isolated acceptance tests to record a first measured baseline.
+
+An opt-in three-node measurement harness is prepared on this branch. The first runner result is pending.
