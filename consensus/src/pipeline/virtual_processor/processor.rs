@@ -2729,10 +2729,7 @@ impl VirtualStateProcessor {
         child: &kaspa_consensus_core::block::Block,
         tip_child: &kaspa_consensus_core::block::Block,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        use crate::model::stores::{
-            headers_selected_tip::HeadersSelectedTipStoreReader,
-            virtual_state::DbVirtualStateStore,
-        };
+        use crate::model::stores::{headers_selected_tip::HeadersSelectedTipStoreReader, virtual_state::DbVirtualStateStore};
         use kaspa_database::prelude::DeferredDbBatch;
 
         let pruning = self.pruning_point_store.read();

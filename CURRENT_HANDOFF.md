@@ -520,3 +520,8 @@ Draft [PR #14](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/14) f
 Rustfmt reported three layout changes, applied in this revision. The
 revision also pins the latest selected header tip through the final ancestry
 check and marker commit. Complete validation is pending.
+
+[Run 45049094412](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45049094412) at
+`a2cdd7a21fc2283af7e2f0e41c787b1592e6e2f2` reported one import layout change in Lints job 137290088805.
+This revision applies the exact Rustfmt output. Verify the replacement
+run for this branch head before treating descendant recovery as validated.
