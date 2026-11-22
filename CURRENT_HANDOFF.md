@@ -656,3 +656,9 @@ contains post-launch post-quantum wallet and transaction research on a separate 
 ## Isolated native proof-of-work acceptance
 
 The [native PoW report](docs/development/PHASE6_NATIVE_POW_RELAY_2026-11-22.md) describes a focused two-node Simnet test on its own draft branch. The fixture enables native kHeavyHash verification for its isolated nodes, rejects a nonce above target, then requires valid blocks to become selected and relay in both directions. The run must pass on the exact source before it counts as acceptance evidence. Public network settings and shielded activation are unchanged.
+
+## Verified native mining acceptance
+
+All eight jobs passed on implementation `bd4f65851c0267f70aced3602f61391c5fdfc578` in [run 45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178). Native job 137388968702 passed the dedicated two-node native-work test and reran it in the 36-case Phase 6 suite. It also passed 1,579 workspace tests (25 skips), and 32 no-asm tests. The test rejected above-target native PoW and confirmed valid work was accepted and relayed in both directions.
+
+The separately prepared [AuxPoW fixture](https://github.com/DeepFriedBlockchains/KascadeNetwork/commit/384d0bd221d05077f1afc66f03a552819a3fd798) is the next focused mining acceptance test. Its result is pending. This checkpoint changes documentation only.
