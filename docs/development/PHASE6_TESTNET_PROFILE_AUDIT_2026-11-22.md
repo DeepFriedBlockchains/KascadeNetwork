@@ -15,3 +15,7 @@ Sources: [network identifiers and port defaults](../../consensus/core/src/networ
 ## Isolated profile acceptance
 
 Use separate app directories and explicit loopback peer and RPC bindings for Actions. Keep each node's configuration digest with the run. For the three-node partition exercise, record the exact branch tips and common ancestor, both active peer sets at each partition stage, and the selected tip, pruning point, and state commitments after rejoin and restart. Treat any lingering inherited prefix, net ID, genesis, or reward policy as an open acceptance item. Execute the profile and negative checks only in isolated GitHub Actions until a public profile has owner approval. See the [acceptance matrix](PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md).
+
+## Documentation validation
+
+Exact documentation source `50b0d19290c54ffef5df3e0919d99645bb528e19` passed all eight jobs in [run 45078524217, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45078524217/attempts/3). The single WASM retry succeeded. This confirms the documentation checkpoint's CI result. The production profile and quantitative testnet gates remain open.
