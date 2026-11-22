@@ -20,4 +20,10 @@ The focused two-node scenario mines a shielded Simnet chain and requires its arc
 
 Use the validated Simnet base to add restart or reorg coverage that ties archive completeness, selected-chain ancestry, and persisted promotion authority to the same node. Keep shielded consensus activation disabled and the Phase 6 feature default-off and Simnet-only.
 
-Validation is pending. The branch head remains stable while Actions runs.
+
+
+## Verified Simnet shielded archive milestone
+
+All eight jobs passed on implementation `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` in [run 45069228114, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114/attempts/3). Native job 137388298498 passed both focused two-node scenarios, 36 combined Phase 6 regressions, 1,579 workspace tests (25 skips), and 32 no-asm tests. The recipient verified archive history through genesis and retained the authenticated anchor index when it rejected an out-of-range claim.
+
+The [resumed-work handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/CURRENT_HANDOFF.md) tracks the separate partition/rejoin, native PoW, and profile work. This checkpoint adds only documentation to the validated implementation.
