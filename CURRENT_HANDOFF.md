@@ -572,3 +572,20 @@ Draft [PR #15](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/15) i
 Lints job 137308268988 identified two Rustfmt layout changes. This
 revision applies both formatter hunks. Review the focused regression and
 the full workflow on the replacement head before validating this milestone.
+
+## Verified shielded export milestone
+
+Verified November 22, 2026. Draft [PR #15](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/15)
+passed all eight jobs at exact source `6f3466f2e030934ffae9d926a2478fe25e1d7b60` in
+[run 45055166221](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45055166221). Native job
+137308724299 passed the dedicated recovery/export regression, 34 focused
+regressions, 1,579 workspace tests (25 skipped), 32 no-asm tests, docs
+and the kip-10 example. Strict Clippy, formatting, Linux release,
+WASM checks/tests and SDK build, Check, and no-std passed.
+
+Next executable task: normal IBD on an active consensus must obtain the
+verified header of the committed tip's selected child before attempting
+shielded readiness reconciliation. Add a two-node Simnet regression that
+reconnects an unready receiver with committed descendants and requires it
+to resume validation while preserving the promotion record. The preview
+remains default-off and Simnet-only. Testnet activation remains pending.
