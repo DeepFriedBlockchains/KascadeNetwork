@@ -1883,6 +1883,8 @@ async fn run_payload_ibd_at(
 
     #[cfg(feature = "phase6-staging-preview")]
     if fixture == IbdPayloadFixture::DescendantRecovery {
+        use kaspa_consensus_core::blockstatus::BlockStatus::StatusUTXOValid;
+
         let peer_ip = "127.0.0.1".parse().unwrap();
         rpc_client2.ban(peer_ip).await.unwrap();
         let disconnected = rpc_client2.clone();
@@ -1912,6 +1914,10 @@ async fn run_payload_ibd_at(
             let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
             rpc_client1.submit_block(template.block, false).await.unwrap();
         }
+        let gap_target = rpc_client1.get_server_info().await.unwrap().virtual_daa_score;
+        let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
+        let sender = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let gap_tip = sender.consensus().unguarded_session_blocking().get_sink();
         rpc_client2.unban(peer_ip).await.unwrap();
         rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
         let connected = rpc_client2.clone();
@@ -1927,20 +1933,20 @@ async fn run_payload_ibd_at(
         .await;
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
         rpc_client1.submit_block(template.block, false).await.unwrap();
-        let target = rpc_client1.get_server_info().await.unwrap().virtual_daa_score;
         let recovering_node = rpc_client2.clone();
         wait_for(
             100,
             300,
             move || {
                 let client = recovering_node.clone();
-                Box::pin(async move { client.get_server_info().await.unwrap().virtual_daa_score >= target })
+                Box::pin(async move { client.get_server_info().await.unwrap().virtual_daa_score >= gap_target })
             },
             "receiver could not reconcile shielded readiness and sync descendant bodies",
         )
         .await;
         let active = manager.consensus();
         let session = active.unguarded_session_blocking();
+        assert_eq!(session.get_block_status(gap_tip), Some(StatusUTXOValid));
         assert!(session.is_pruning_shielded_stable());
         assert!(session.has_verified_staging_promotion().unwrap());
         assert!(!session.supports_verified_staging_import());

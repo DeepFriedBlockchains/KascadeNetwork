@@ -619,3 +619,13 @@ permanent connection. The descendant fixture now opens its first peer as
 temporary and still requires actual disconnect, readiness reconciliation,
 and validated catchup. Production code is identical. Verify the replacement
 focused regression and all eight jobs before validating this milestone.
+
+[Run 45060976100](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45060976100) at `55cad3df2695ba27f8286a24ebb2a30f207a6d88`
+passed the focused two-node test and seven jobs. In native job 137326618985
+the test's combined-suite run logged successful recovery IBD and 20
+validated blocks, then timed out waiting for the additional announcing
+block. That block can be announced while the preceding IBD is already
+processing a bounded request. The fixture now checks the exact pre-reconnect
+gap tip by its UTXO-valid status, plus readiness and promotion preservation.
+The subsequent finality-depth catch-up assertions still verify live relay
+of newly mined blocks. The production patch is unchanged. Rerun all jobs.
