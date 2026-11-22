@@ -18,6 +18,7 @@ use crate::{
 use kaspa_consensus_core::{block::Block, hashing, merkle::calc_hash_merkle_root, zkas_state_binding::extract_state_root};
 use kaspa_database::prelude::{CachePolicy, DB, StoreError, StoreResult};
 use kaspa_hashes::Hash;
+use kaspa_muhash::MuHash;
 use std::{collections::HashSet, sync::Arc};
 
 pub(super) fn verify_pruning_shielded(db: &Arc<DB>, point: ReadinessPoint, child: &Block, trusted_child: Hash) -> StoreResult<()> {
@@ -33,8 +34,6 @@ pub(super) fn verify_pruning_shielded_at_tip(
 ) -> StoreResult<()> {
     let expected = authenticated_commitment(db, point.hash, child, trusted_child)?;
     let store = ShieldedStateManager::new(db.clone(), CachePolicy::Empty);
-    // Isolated import completion must not materialize the global set merely to
-    // issue or consume a lease. Descendant projection retains its stricter path.
     if selected_tip.is_none() || selected_tip.is_some_and(|(tip, _)| tip == point.hash) {
         if let Some((_, tip_child)) = selected_tip {
             if tip_child.hash() != trusted_child {
@@ -56,16 +55,28 @@ pub(super) fn verify_pruning_shielded_at_tip(
         }
         return Ok(());
     }
-    let mut nullifiers = store.nullifier_set_snapshot()?;
-    if let Some((tip, tip_child)) = selected_tip {
-        if tip == point.hash && tip_child.hash() != trusted_child {
-            return Err(inconsistent("restart supplied different children for the same state"));
+    let (tip, tip_child) = selected_tip.expect("descendant tip checked above");
+    let tip_commitment = authenticated_commitment(db, tip, tip_child, tip_child.hash())?;
+    let mut added = descendant_nullifiers(db, point.hash, trusted_child, tip)?;
+    let mut tip_accumulator = MuHash::new();
+    let mut pruning_accumulator = MuHash::new();
+    let (mut tip_rows, mut pruning_rows) = (0u64, 0u64);
+    // The live set may include the entire shielded history. Only the selected
+    // descendants' additions are indexed in memory for exact duplicate checks.
+    for row in store.nullifiers().iter_all() {
+        let nullifier = row?;
+        tip_accumulator.add_element(&nullifier);
+        tip_rows += 1;
+        if !added.remove(&nullifier) {
+            pruning_accumulator.add_element(&nullifier);
+            pruning_rows += 1;
         }
-        let tip_commitment = authenticated_commitment(db, tip, tip_child, tip_child.hash())?;
-        verify_commitment(&store, tip, tip_commitment, &nullifiers)?;
-        nullifiers = pruning_nullifiers(db, point.hash, trusted_child, tip, nullifiers)?;
     }
-    verify_commitment(&store, point.hash, expected, &nullifiers)
+    if !added.is_empty() {
+        return Err(inconsistent("descendant nullifier is missing from committed membership"));
+    }
+    verify_commitment(&store, tip, tip_commitment, tip_accumulator, tip_rows)?;
+    verify_commitment(&store, point.hash, expected, pruning_accumulator, pruning_rows)
 }
 
 fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_child: Hash) -> StoreResult<[u8; 32]> {
@@ -95,20 +106,28 @@ fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_ch
     extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))
 }
 
-fn verify_commitment(store: &ShieldedStateManager, point: Hash, expected: [u8; 32], nullifiers: &[[u8; 32]]) -> StoreResult<()> {
+fn verify_commitment(
+    store: &ShieldedStateManager,
+    point: Hash,
+    expected: [u8; 32],
+    mut accumulator: MuHash,
+    rows: u64,
+) -> StoreResult<()> {
     if let Some(metadata) = store.export_pruning_point_shielded(point)? {
         ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
-        ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter()).map_err(StoreError::DataInconsistency)?;
+        if accumulator.finalize() != metadata.nullifier_muhash.clone().finalize() {
+            return Err(inconsistent("committed nullifier projection differs from the authenticated accumulator"));
+        }
     } else if expected != PruningPointShieldedMetadata::empty_state_root()
         || store.state_root_at(point)? != expected
-        || !nullifiers.is_empty()
+        || rows != 0
     {
         return Err(inconsistent("committed shielded state does not match the authenticated empty commitment"));
     }
     Ok(())
 }
 
-fn pruning_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash, nullifiers: Vec<[u8; 32]>) -> StoreResult<Vec<[u8; 32]>> {
+fn descendant_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash) -> StoreResult<HashSet<[u8; 32]>> {
     let chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
     let point_index = chain.get_by_hash(point)?;
     let (tip_index, committed_tip) = chain.get_tip()?;
@@ -116,7 +135,7 @@ fn pruning_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash, nullifi
         return Err(inconsistent("committed selected chain does not match virtual restart state"));
     }
 
-    let mut nullifiers: HashSet<_> = nullifiers.into_iter().collect();
+    let mut nullifiers = HashSet::new();
     let diffs = DbNullifierDiffStore::new(db.clone(), CachePolicy::Empty);
     let ghostdag = DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty);
     let mut previous = point;
@@ -129,13 +148,13 @@ fn pruning_nullifiers(db: &Arc<DB>, point: Hash, child: Hash, tip: Hash, nullifi
             return Err(inconsistent("restart descendants are not the authenticated selected chain"));
         }
         for nullifier in diffs.get(block)? {
-            if !nullifiers.remove(&nullifier) {
-                return Err(inconsistent("descendant nullifier is missing or repeated in committed membership"));
+            if !nullifiers.insert(nullifier) {
+                return Err(inconsistent("descendant nullifier is repeated in committed chain diffs"));
             }
         }
         previous = block;
     }
-    Ok(nullifiers.into_iter().collect())
+    Ok(nullifiers)
 }
 
 fn inconsistent(reason: &str) -> StoreError {

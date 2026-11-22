@@ -14,7 +14,7 @@ use crate::{
         block::{BlockProcessResult, RuleError},
         coinbase::CoinbaseResult,
         consensus::ConsensusResult,
-        pruning::PruningImportResult,
+        pruning::{PruningImportError, PruningImportResult},
         tx::TxResult,
     },
     header::Header,
@@ -1067,6 +1067,22 @@ pub trait ConsensusApi: Send + Sync {
     /// Failure or interruption leaves readiness false and cleanup can restart.
     fn clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
         unimplemented!()
+    }
+
+    fn supports_phase6_descendant_recovery(&self) -> bool {
+        false
+    }
+
+    /// Recheck authenticated pruning-point and descendant state before restoring
+    /// the shielded readiness flag. The caller holds the pruning session.
+    fn reconcile_descendant_shielded_readiness(
+        &self,
+        _point: Hash,
+        _tip: Hash,
+        _child: &Block,
+        _tip_child: &Block,
+    ) -> PruningImportResult<()> {
+        Err(PruningImportError::ShieldedStateError("descendant shielded recovery is unavailable".into()))
     }
 
     fn set_pruning_shielded_stable_flag(&self, _val: bool) {

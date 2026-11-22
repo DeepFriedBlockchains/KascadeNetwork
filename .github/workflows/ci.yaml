@@ -120,6 +120,11 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(bounded_cleanup_)'
 
+      - name: Run descendant recovery regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_promotes_and_recovers_a_committed_descendant_chain)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
