@@ -1676,13 +1676,10 @@ async fn run_payload_ibd_at(
     #[cfg(not(feature = "phase6-staging-preview"))]
     let _ = (interruption, restart_receiver);
 
-    rpc_client2
-        .add_peer(
-            format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(),
-            interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers,
-        )
-        .await
-        .unwrap();
+    let permanent_peer = interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers;
+    #[cfg(feature = "phase6-staging-preview")]
+    let permanent_peer = permanent_peer && fixture != IbdPayloadFixture::DescendantRecovery;
+    rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), permanent_peer).await.unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
         50,

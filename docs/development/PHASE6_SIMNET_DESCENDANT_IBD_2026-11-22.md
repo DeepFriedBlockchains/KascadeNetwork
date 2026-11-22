@@ -17,3 +17,12 @@ blocks while preserving the promotion record and active role. The
 focused regression and all eight jobs are required. After validation,
 continue with the remaining consensus and testnet acceptance coverage in
 KASCADE-SPEC.md. Keep the preview default-off and Simnet-only.
+
+Draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) first ran at
+`e147119245e990531fc77f74051b5ceab7b75e08` in [run 45058650015](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45058650015).
+Seven jobs passed. Native job 137319441954 reached successful authenticated
+promotion, then the focused test panicked when the fixture tried to ban a
+permanent connection. The descendant fixture now opens its first peer as
+temporary and still requires actual disconnect, readiness reconciliation,
+and validated catchup. Production code is identical. Verify the replacement
+focused regression and all eight jobs before validating this milestone.
