@@ -629,3 +629,34 @@ processing a bounded request. The fixture now checks the exact pre-reconnect
 gap tip by its UTXO-valid status, plus readiness and promotion preservation.
 The subsequent finality-depth catch-up assertions still verify live relay
 of newly mined blocks. The production patch is unchanged. Rerun all jobs.
+
+## Verified Simnet descendant IBD milestone
+
+Verified November 22, 2026. Draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) passed all eight jobs
+at exact implementation SHA `c9f378177c0ddd25f3152b55c8d34b593c3cfcc4` in
+[Actions run 45063994270](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45063994270).
+Native job 137335973190 passed the focused two-node recovery test and
+the 35-case Phase 6 suite, which independently reran the two-node case.
+The persistent reopen, cleanup, and export regressions passed, as did
+1,579 workspace tests (25 existing skips), 32 no-asm tests, documentation,
+and the kip-10 example. Formatting, strict Clippy, Check, no-std, Linux
+release, and all WASM checks passed.
+
+The two-node case verifies the exact committed gap tip, restored
+shielded readiness, promotion preservation, and live block validation
+after reconnect. The preview stays default-off and Simnet-only.
+
+## Concurrent Phase 6 work
+
+The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) records current
+Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
+tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
+contains post-launch post-quantum wallet and transaction research on a separate branch.
+
+## Simnet shielded archive backfill candidate
+
+November 22, 2026. Draft [PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) follows the validated two-node recovery in PR #16. It corrects the archive index bound in the default-off Simnet preview. Rebase admission uses committed GHOSTDAG blue score, so a valid linear chain may backfill through genesis even when its index exceeds DAA score. Archive replay still verifies the authenticated frontier.
+
+Candidate source `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` is running the focused archive and descendant-recovery regressions, followed by the existing native suite and all eight jobs in [Actions run 45069228114](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114). Review the exact run before claiming validation. See [the dated archive report](docs/development/PHASE6_SIMNET_SHIELDED_ARCHIVE_2026-11-22.md).
+
+Next, apply the reviewed archive checkpoint to the staged branch only after preserving validation evidence. Continue the separate three-node partition/rejoin acceptance case and retain the same Simnet-only, default-off activation policy.

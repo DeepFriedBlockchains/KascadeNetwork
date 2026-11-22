@@ -36,3 +36,19 @@ processing a bounded request. The fixture now checks the exact pre-reconnect
 gap tip by its UTXO-valid status, plus readiness and promotion preservation.
 The subsequent finality-depth catch-up assertions still verify live relay
 of newly mined blocks. The production patch is unchanged. Rerun all jobs.
+
+## Verified Simnet descendant IBD milestone
+
+Verified November 22, 2026. Draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) passed all eight jobs
+at exact implementation SHA `c9f378177c0ddd25f3152b55c8d34b593c3cfcc4` in
+[Actions run 45063994270](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45063994270).
+Native job 137335973190 passed the focused two-node recovery test and
+the 35-case Phase 6 suite, which independently reran the two-node case.
+The persistent reopen, cleanup, and export regressions passed, as did
+1,579 workspace tests (25 existing skips), 32 no-asm tests, documentation,
+and the kip-10 example. Formatting, strict Clippy, Check, no-std, Linux
+release, and all WASM checks passed.
+
+The two-node case verifies the exact committed gap tip, restored
+shielded readiness, promotion preservation, and live block validation
+after reconnect. The preview stays default-off and Simnet-only.
