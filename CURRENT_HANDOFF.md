@@ -525,3 +525,22 @@ check and marker commit. Complete validation is pending.
 `a2cdd7a21fc2283af7e2f0e41c787b1592e6e2f2` reported one import layout change in Lints job 137290088805.
 This revision applies the exact Rustfmt output. Verify the replacement
 run for this branch head before treating descendant recovery as validated.
+
+## Verified descendant recovery milestone
+
+Verified November 22, 2026. Draft [PR #14](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/14)
+passed all eight jobs in [run 45049268981](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45049268981)
+at exact source `e312306bce7c603a20c0e9251c7e784ab1c7e715`. Native job 137290622323 passed the persistent
+reopen control, all three cleanup controls, the dedicated descendant
+recovery regression, 34 focused regressions, 1,579 workspace tests
+(25 skipped), 32 no-asm tests, docs and the kip-10 example. Strict Clippy,
+formatting, Check, Linux release, WASM checks and tests, the WASM SDK,
+and no-std passed.
+
+Readiness reconciliation accepts only a corroborated committed state. If
+the selected tip lacks an authenticated child or committed data diverges
+from its chain commitments, readiness stays closed. Next executable task:
+capture and verify shielded metadata, count and spent-nullifier rows in
+one server-side export snapshot before sending any frames. Stack this as a
+new draft PR on PR #14 and retain the Simnet-only preview gate. Remaining
+work includes consensus integration and end-to-end testnet validation.
