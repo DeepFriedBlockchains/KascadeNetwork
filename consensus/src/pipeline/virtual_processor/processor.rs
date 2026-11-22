@@ -170,6 +170,8 @@ pub struct VirtualStateProcessor {
     pub(super) body_tips_store: Arc<RwLock<DbTipsStore>>,
     pub(super) depth_store: Arc<DbDepthStore>,
     pub(super) selected_chain_store: Arc<RwLock<DbSelectedChainStore>>,
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    headers_selected_tip_store: Arc<RwLock<crate::model::stores::headers_selected_tip::DbHeadersSelectedTipStore>>,
     pub(super) pruning_samples_store: Arc<DbPruningSamplesStore>,
 
     // Utxo-related stores
@@ -304,6 +306,8 @@ impl VirtualStateProcessor {
             body_tips_store: storage.body_tips_store.clone(),
             depth_store: storage.depth_store.clone(),
             selected_chain_store: storage.selected_chain_store.clone(),
+            #[cfg(any(test, feature = "phase6-staging-preview"))]
+            headers_selected_tip_store: storage.headers_selected_tip_store.clone(),
             pruning_samples_store: storage.pruning_samples_store.clone(),
             utxo_diffs_store: storage.utxo_diffs_store.clone(),
             utxo_multisets_store: storage.utxo_multisets_store.clone(),
@@ -2714,6 +2718,65 @@ impl VirtualStateProcessor {
                 self.verify_authenticated_staging(db, point, proof, child, Some((tip, tip_child)))
             })
         })
+    }
+
+    /// Called with the proxy's pruning session pinned. Only the shielded flag
+    /// may change, after both committed views have been authenticated.
+    pub(crate) fn reconcile_descendant_shielded_readiness(
+        &self,
+        expected_point: Hash,
+        expected_tip: Hash,
+        child: &kaspa_consensus_core::block::Block,
+        tip_child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use crate::model::stores::{headers_selected_tip::HeadersSelectedTipStoreReader, virtual_state::DbVirtualStateStore};
+        use kaspa_database::prelude::DeferredDbBatch;
+
+        let pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        // The upgradable guard excludes virtual processing even before it commits
+        // its chain index, when it can already be writing shielded rows.
+        let _virtual = self
+            .virtual_stores
+            .try_upgradable_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during shielded reconciliation".into()))?;
+        let _chain = self
+            .selected_chain_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during shielded reconciliation".into()))?;
+        let (hash, index) = pruning.pruning_point_and_index()?;
+        let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+        if hash != expected_point || tip != expected_tip || hash == tip {
+            return Err(StoreError::DataInconsistency(
+                "pruning point or descendant tip changed during shielded reconciliation".into(),
+            ));
+        }
+
+        let point = super::branch_readiness::ReadinessPoint { hash, index };
+        super::import_shielded_readiness::verify_pruning_shielded_at_tip(
+            &self.db,
+            point,
+            child,
+            child.hash(),
+            Some((tip, tip_child)),
+        )?;
+        // Pin the latest selected header only during the final ancestry check
+        // and publication, so the history scan does not block header processing.
+        let header_tip_guard = self
+            .headers_selected_tip_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected header tip is busy during shielded reconciliation".into()))?;
+        let header_tip = header_tip_guard.get()?.hash;
+        if !self
+            .reachability_service
+            .try_is_chain_ancestor_of(tip_child.hash(), header_tip)
+            .map_err(|error| StoreError::DataInconsistency(error.to_string()))?
+        {
+            return Err(StoreError::DataInconsistency("descendant commitment child is off the selected header chain".into()));
+        }
+        let mut batch = DeferredDbBatch::new(self.db.clone());
+        metadata.stage_pruning_shielded_stable(&mut batch, true)?;
+        batch.commit()
     }
 
     fn verify_authenticated_staging(

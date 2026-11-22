@@ -451,9 +451,28 @@ mod tests {
         assert!(processor.recover_authenticated_staging(retention, &proof, &child, &tip_child).is_err());
         assert!(!readiness.is_ready(point).unwrap());
 
+        let mark_unready = || {
+            let metadata = processor.pruning_meta_stores.write();
+            let mut batch = DeferredDbBatch::new(db.clone());
+            metadata.stage_pruning_shielded_stable(&mut batch, false).unwrap();
+            batch.commit().unwrap();
+        };
+        mark_unready();
+        let before = db.get([u8::from(Prefix::ShieldedSyncFlag)]).unwrap();
+        assert!(processor.reconcile_descendant_shielded_readiness(point.hash, child.hash(), &child, &tip_child).is_err());
+        assert_eq!(db.get([u8::from(Prefix::ShieldedSyncFlag)]).unwrap(), before);
+        assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
+        assert!(!readiness.is_ready(point).unwrap());
+
         let mut batch = WriteBatch::default();
         diffs.delete_batch(&mut batch, child.hash()).unwrap();
         db.write(batch).unwrap();
+        assert!(processor.reconcile_descendant_shielded_readiness(point.hash, point.hash, &child, &tip_child).is_err());
+        assert!(processor.reconcile_descendant_shielded_readiness(point.hash, child.hash(), &child, &child).is_err());
+        assert_eq!(db.get([u8::from(Prefix::ShieldedSyncFlag)]).unwrap(), before);
+        processor.reconcile_descendant_shielded_readiness(point.hash, child.hash(), &child, &tip_child).unwrap();
+        assert!(processor.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert!(!readiness.is_ready(point).unwrap());
         assert!(processor.recover_authenticated_staging(retention, &proof, &child, &tip_child).is_ok());
         assert!(processor.authority_lease().is_ok());
     }

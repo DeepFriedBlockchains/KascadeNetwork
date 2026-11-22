@@ -2528,6 +2528,28 @@ impl ConsensusApi for Consensus {
             .map_err(|error| PruningImportError::ShieldedStateError(error.to_string()))
     }
 
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn supports_phase6_descendant_recovery(&self) -> bool {
+        !self.is_staging_receiver.load(Ordering::Acquire)
+            && self.config.params.net.network_type == kaspa_consensus_core::network::NetworkType::Simnet
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn reconcile_descendant_shielded_readiness(
+        &self,
+        point: Hash,
+        tip: Hash,
+        child: &Block,
+        tip_child: &Block,
+    ) -> PruningImportResult<()> {
+        if !self.supports_phase6_descendant_recovery() {
+            return Err(PruningImportError::ShieldedStateError("descendant shielded recovery is unavailable".into()));
+        }
+        self.virtual_processor
+            .reconcile_descendant_shielded_readiness(point, tip, child, tip_child)
+            .map_err(|error| PruningImportError::ShieldedStateError(error.to_string()))
+    }
+
     fn set_pruning_shielded_stable_flag(&self, val: bool) {
         let mut pruning_meta_write = self.pruning_meta_stores.write();
         let mut batch = rocksdb::WriteBatch::default();

@@ -1231,8 +1231,8 @@ impl IbdFlow {
             return Err(ProtocolError::Other("verified staging requires an authenticated shielded child"));
         }
 
-        if let Some((child, committed)) = binding.as_ref() {
-            let child = child.hash();
+        if let Some((binding_child, committed)) = binding.as_ref() {
+            let child = binding_child.hash();
             let committed = *committed;
             // F-15: if the locally held state root at the pruning point already equals the
             // PoW-committed root, the local state IS the committed state (the root binds the
@@ -1260,18 +1260,32 @@ impl IbdFlow {
             // F-15 SAFETY: the re-import below clears the global nullifier set. If the pruning
             // point's selected child was already UTXO-validated locally, validated chain blocks
             // above the pruning point have contributed nullifiers to that set which a clear
-            // would destroy without revalidation. An honest node in that situation matches the
-            // committed root (handled above), so reaching here means the local state is corrupt
-            // AND has validated descendants — no in-place re-import can repair that, and
-            // clearing would trade a detectable wedge for silent state loss.
+            // would destroy without revalidation. The preview may recover readiness
+            // from committed evidence without deleting or re-importing these rows.
             if consensus
                 .async_get_block_status(child)
                 .await
                 .is_some_and(|s| s == kaspa_consensus_core::blockstatus::BlockStatus::StatusUTXOValid)
             {
+                let recover = consensus.clone().spawn_blocking(|c| c.supports_phase6_descendant_recovery()).await;
+                if local_root == committed && recover {
+                    let tip = consensus.async_get_sink().await;
+                    let (tip_child, _) = self
+                        .shielded_pp_commitment(consensus, tip)
+                        .await?
+                        .ok_or(ProtocolError::Other("no authenticated child for the committed descendant tip"))?;
+                    let binding_child = binding_child.clone();
+                    consensus
+                        .clone()
+                        .spawn_blocking(move |c| {
+                            c.reconcile_descendant_shielded_readiness(pruning_point, tip, &binding_child, &tip_child)
+                        })
+                        .await?;
+                    return Ok(binding.map(|(child, _)| child));
+                }
                 return Err(ProtocolError::OtherOwned(format!(
-                    "local shielded state at pruning point {pruning_point} does not match the PoW-committed root, but chain \
-                     blocks above it are already validated; refusing to clear live shielded state — a full resync is required"
+                    "shielded state at pruning point {pruning_point} is unready with validated descendants; \
+                     refusing to clear live shielded state"
                 )));
             }
         } else {
