@@ -397,6 +397,33 @@ impl VirtualStateProcessor {
         &self,
         pp: kaspa_hashes::Hash,
     ) -> Result<Option<kaspa_consensus_core::api::ShieldedExportMetadata>, kaspa_database::prelude::StoreError> {
+        let Some(md) = self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &self.selected_chain_store.read()))?
+        else {
+            return Ok(None);
+        };
+        let nullifier_count = self.pruning_point_nullifier_set(pp)?.len() as u64;
+        Ok(Some(kaspa_consensus_core::api::ShieldedExportMetadata { data: md.to_wire_bytes(), nullifier_count }))
+    }
+
+    fn shielded_export_window_blocks(
+        &self,
+        pp: Hash,
+        chain: &DbSelectedChainStore,
+    ) -> kaspa_database::prelude::StoreResult<BlockHashSet> {
+        match chain.get_by_hash(pp).optional()? {
+            Some(pp_index) => {
+                let low_index = pp_index.saturating_sub(self.max_shielded_anchor_age);
+                Ok((low_index..pp_index).filter_map(|i| chain.get_by_index(i).optional().ok().flatten()).collect())
+            }
+            None => Ok(BlockHashSet::default()),
+        }
+    }
+
+    fn shielded_export_metadata(
+        &self,
+        pp: Hash,
+        window_blocks: impl FnOnce() -> kaspa_database::prelude::StoreResult<BlockHashSet>,
+    ) -> kaspa_database::prelude::StoreResult<Option<crate::processes::shielded::PruningPointShieldedMetadata>> {
         let Some(mut md) = self.shielded_state_manager.export_pruning_point_shielded(pp)? else {
             return Ok(None);
         };
@@ -407,17 +434,7 @@ impl VirtualStateProcessor {
         // `pp` over exactly the consensus window; stop early if the chain index does not reach that
         // far (a node that itself fast-synced), since anything we cannot resolve we simply do not
         // claim — the receiver is no worse off than today.
-        let window = self.max_shielded_anchor_age;
-        let window_blocks: BlockHashSet = {
-            let sc_read = self.selected_chain_store.read();
-            match sc_read.get_by_hash(pp).optional()? {
-                Some(pp_index) => {
-                    let low_index = pp_index.saturating_sub(window);
-                    (low_index..pp_index).filter_map(|i| sc_read.get_by_index(i).optional().ok().flatten()).collect()
-                }
-                None => BlockHashSet::default(),
-            }
-        };
+        let window_blocks = window_blocks()?;
         if !window_blocks.is_empty() {
             // Read the pairs out of the stored index rather than recomputing a tree root per
             // block: the derive-per-block version overran the 120s IBD timeout at 27,000 blocks
@@ -442,8 +459,7 @@ impl VirtualStateProcessor {
             }
             md.in_window_anchor_source_scores = scores;
         }
-        let nullifier_count = self.pruning_point_nullifier_set(pp)?.len() as u64;
-        Ok(Some(kaspa_consensus_core::api::ShieldedExportMetadata { data: md.to_wire_bytes(), nullifier_count }))
+        Ok(Some(md))
     }
 
     /// Server side: the spent-nullifier set **as of the pruning point** (for shielded
@@ -2718,6 +2734,78 @@ impl VirtualStateProcessor {
                 self.verify_authenticated_staging(db, point, proof, child, Some((tip, tip_child)))
             })
         })
+    }
+
+    /// Capture metadata and rows under one pinned pruning and virtual view.
+    pub(crate) fn capture_shielded_export_snapshot(
+        &self,
+        pp: Hash,
+    ) -> kaspa_database::prelude::StoreResult<kaspa_consensus_core::api::ShieldedExportSnapshot> {
+        use super::import_shielded_readiness::{authenticated_commitment, descendant_nullifiers};
+        use crate::{
+            model::stores::virtual_state::DbVirtualStateStore,
+            processes::shielded::{PruningPointShieldedMetadata, ShieldedStateManager},
+        };
+        use kaspa_consensus_core::{
+            api::{MAX_SHIELDED_NULLIFIER_IMPORT_COUNT, ShieldedExportMetadata, ShieldedExportSnapshot},
+            block::Block,
+        };
+
+        let pruning = self.pruning_point_store.read();
+        let metadata_guard = self.pruning_meta_stores.read();
+        if pruning.pruning_point()? != pp || !metadata_guard.pruning_shielded_stable_flag() {
+            return Err(StoreError::DataInconsistency("shielded export pruning point changed or is unready".into()));
+        }
+        let _virtual = self
+            .virtual_stores
+            .try_upgradable_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during shielded export".into()))?;
+        let chain = self
+            .selected_chain_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during shielded export".into()))?;
+        let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+        let (tip_index, indexed_tip) = chain.get_tip()?;
+        let pp_index = chain.get_by_hash(pp)?;
+        if tip != indexed_tip || pp_index >= tip_index {
+            return Err(StoreError::DataInconsistency("shielded export has no committed selected child".into()));
+        }
+        let child_hash = chain.get_by_index(pp_index + 1)?;
+        let child = Block::from_arcs(self.headers_store.get_header(child_hash)?, self.block_transactions_store.get(child_hash)?);
+        let expected = authenticated_commitment(&self.db, pp, &child, child_hash)?;
+        let mut added = descendant_nullifiers(&self.db, pp, child_hash, tip)?;
+        let mut nullifiers = Vec::new();
+        for row in self.shielded_state_manager.nullifiers().iter_all() {
+            let nullifier = row?;
+            if !added.remove(&nullifier) {
+                if nullifiers.len() as u64 == MAX_SHIELDED_NULLIFIER_IMPORT_COUNT {
+                    return Err(StoreError::DataInconsistency("shielded export exceeds the nullifier limit".into()));
+                }
+                nullifiers.push(nullifier);
+            }
+        }
+        if !added.is_empty() {
+            return Err(StoreError::DataInconsistency("shielded export is missing committed descendant nullifiers".into()));
+        }
+
+        let metadata = match self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &chain))? {
+            Some(metadata) => {
+                ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
+                ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter())
+                    .map_err(StoreError::DataInconsistency)?;
+                Some(ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: nullifiers.len() as u64 })
+            }
+            None => {
+                if !nullifiers.is_empty()
+                    || expected != PruningPointShieldedMetadata::empty_state_root()
+                    || self.shielded_state_manager.state_root_at(pp)? != expected
+                {
+                    return Err(StoreError::DataInconsistency("shielded export does not match the authenticated empty state".into()));
+                }
+                None
+            }
+        };
+        Ok(ShieldedExportSnapshot { metadata, nullifiers })
     }
 
     /// Called with the proxy's pruning session pinned. Only the shielded flag

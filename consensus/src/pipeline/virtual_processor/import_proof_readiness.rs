@@ -272,10 +272,11 @@ mod tests {
         };
         use crate::{
             model::stores::{
+                block_transactions::{BlockTransactionsStore, DbBlockTransactionsStore},
                 ghostdag::GhostdagData,
                 headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
                 selected_chain::{DbSelectedChainStore, SelectedChainStore},
-                shielded::DbNullifierDiffStore,
+                shielded::{DbNullifierDiffStore, DbNullifierSetStore, NullifierSetStore},
                 statuses::{DbStatusesStore, StatusesStore},
                 virtual_state::{VirtualState, VirtualStateStore},
             },
@@ -475,5 +476,22 @@ mod tests {
         assert!(!readiness.is_ready(point).unwrap());
         assert!(processor.recover_authenticated_staging(retention, &proof, &child, &tip_child).is_ok());
         assert!(processor.authority_lease().is_ok());
+
+        assert!(processor.capture_shielded_export_snapshot(point.hash).is_err());
+        DbBlockTransactionsStore::new(db.clone(), CachePolicy::Empty).insert(child.hash(), child.transactions.clone()).unwrap();
+        assert!(processor.capture_shielded_export_snapshot(retention.hash).is_err());
+        let captured = processor.capture_shielded_export_snapshot(point.hash).unwrap();
+        assert!(captured.metadata.is_none());
+        assert!(captured.nullifiers.is_empty());
+        mark_unready();
+        assert!(processor.capture_shielded_export_snapshot(point.hash).is_err());
+        processor.reconcile_descendant_shielded_readiness(point.hash, child.hash(), &child, &tip_child).unwrap();
+
+        let mut batch = WriteBatch::default();
+        DbNullifierSetStore::new(db.clone(), CachePolicy::Empty).insert_batch(&mut batch, [9; 32]).unwrap();
+        db.write(batch).unwrap();
+        assert!(processor.capture_shielded_export_snapshot(point.hash).is_err());
+        assert!(captured.nullifiers.is_empty());
+        assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
     }
 }

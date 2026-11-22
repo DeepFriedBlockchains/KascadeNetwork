@@ -2460,6 +2460,25 @@ impl ConsensusApi for Consensus {
 
     // -------------------- Shielded-pool pruning-point state (IBD) --------------------
 
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn capture_shielded_export_snapshot(
+        &self,
+        point: Hash,
+    ) -> ConsensusResult<Option<kaspa_consensus_core::api::ShieldedExportSnapshot>> {
+        if !self.supports_phase6_descendant_recovery() {
+            return Ok(None);
+        }
+        let pruning_point =
+            self.pruning_point_store.read().pruning_point().map_err(|error| ConsensusError::GeneralOwned(error.to_string()))?;
+        if pruning_point != point {
+            return Err(ConsensusError::UnexpectedPruningPoint);
+        }
+        self.virtual_processor
+            .capture_shielded_export_snapshot(point)
+            .map(Some)
+            .map_err(|error| ConsensusError::GeneralOwned(format!("shielded snapshot export failed: {error}")))
+    }
+
     fn get_pruning_point_shielded_metadata(
         &self,
         expected_pruning_point: Hash,

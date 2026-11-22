@@ -3,7 +3,7 @@ use crate::{
     flow_trait::Flow,
     ibd::{SHIELDED_CHUNK_SIZE, SMT_FLOW_CONTROL_WINDOW},
 };
-use kaspa_consensus_core::{api::ShieldedExportMetadata, errors::consensus::ConsensusError};
+use kaspa_consensus_core::{api::{ShieldedExportMetadata, ShieldedExportSnapshot}, errors::consensus::ConsensusError};
 use kaspa_core::{debug, info};
 use kaspa_hashes::Hash;
 use kaspa_p2p_lib::{
@@ -51,10 +51,20 @@ impl RequestPruningPointShieldedStateFlow {
         let consensus = self.ctx.consensus();
         let session = consensus.session().await;
 
-        let metadata = match session.async_get_pruning_point_shielded_metadata(expected_pp).await {
+        let captured = match session.clone().spawn_blocking(move |c| c.capture_shielded_export_snapshot(expected_pp)).await {
             Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point().await,
             res => res,
         }?;
+        let (metadata, captured_rows) = match captured {
+            Some(ShieldedExportSnapshot { metadata, nullifiers }) => (metadata, Some(nullifiers)),
+            None => {
+                let metadata = match session.async_get_pruning_point_shielded_metadata(expected_pp).await {
+                    Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point().await,
+                    res => res,
+                }?;
+                (metadata, None)
+            }
+        };
         drop(session);
 
         // No shielded state at the pruning point: signal it with empty metadata.
@@ -78,12 +88,16 @@ impl RequestPruningPointShieldedStateFlow {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<[u8; 32]>>(256);
 
-        let session_for_reader = consensus.unguarded_session();
-        let stream = match session_for_reader.open_pruning_point_shielded_nullifier_stream(expected_pp) {
-            Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point().await,
-            res => res,
-        }?;
-        drop(session_for_reader);
+        let stream: Box<dyn Iterator<Item = Result<[u8; 32], ConsensusError>> + Send> = match captured_rows {
+            Some(rows) => Box::new(rows.into_iter().map(Ok)),
+            None => {
+                let session_for_reader = consensus.unguarded_session();
+                match session_for_reader.open_pruning_point_shielded_nullifier_stream(expected_pp) {
+                    Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point().await,
+                    res => res,
+                }?
+            }
+        };
         let reader_handle = tokio::task::spawn_blocking(move || -> Result<u64, ConsensusError> {
             let mut count: u64 = 0;
             let mut batch: Vec<[u8; 32]> = Vec::with_capacity(SHIELDED_CHUNK_SIZE);
@@ -137,10 +151,8 @@ impl RequestPruningPointShieldedStateFlow {
             Err(e) => return Err(ProtocolError::OtherOwned(format!("shielded nullifier reader task panicked: {e}"))),
         };
 
-        // F-03: the metadata (count) and the stream are produced by two separate
-        // consensus calls; a concurrent virtual update (e.g. a reorg walk) can
-        // transiently desync them. Abort the transfer cleanly — the peer detects the
-        // torn stream and retries — rather than panicking the whole node.
+        // Check either stream against the declared count before completing
+        // the transfer.
         if sent != reader_count || sent != nullifier_count {
             return Err(ProtocolError::OtherOwned(format!(
                 "shielded nullifier stream for pruning point {expected_pp} drifted during transfer: \
