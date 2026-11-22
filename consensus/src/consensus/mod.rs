@@ -789,6 +789,18 @@ impl ConsensusApi for Consensus {
     }
 
     #[cfg(any(test, feature = "phase6-staging-preview"))]
+    fn clear_verified_staging_shielded(
+        &self,
+        session: &kaspa_consensus_core::api::StagingImportSession,
+        point: Hash,
+    ) -> Result<(), kaspa_consensus_core::api::StagingPromotionError> {
+        if !self.supports_verified_staging_import() {
+            return Err(kaspa_consensus_core::api::StagingPromotionError::Unsupported);
+        }
+        self.clear_owned_staging_shielded(session, point)
+    }
+
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
     fn import_verified_staging_shielded(
         &self,
         session: &kaspa_consensus_core::api::StagingImportSession,
@@ -2504,19 +2516,16 @@ impl ConsensusApi for Consensus {
         crate::processes::shielded::PruningPointShieldedMetadata::empty_state_root()
     }
 
-    /// F-15: really clear the shielded import state — the whole global nullifier
-    /// set and the per-block snapshots at the current pruning point, together with
-    /// the stable flag, in one atomic batch. Call ONLY immediately before a full
-    /// re-seed, and only when no locally UTXO-validated chain blocks exist above
-    /// the pruning point (their nullifier contributions would be lost without
-    /// revalidation); the IBD flow enforces both preconditions.
-    fn clear_pruning_shielded_stores(&self) {
-        let pruning_point = self.pruning_point_store.read().pruning_point().unwrap();
-        let mut batch = rocksdb::WriteBatch::default();
-        self.virtual_processor.clear_shielded_state_for_pruning_reimport(&mut batch, pruning_point).unwrap();
-        let mut pruning_meta_write = self.pruning_meta_stores.write();
-        pruning_meta_write.set_pruning_shielded_stable_flag(&mut batch, false).unwrap();
-        self.db.write(batch).unwrap();
+    /// Clear only immediately before a full re-seed, after IBD's existing
+    /// no-validated-descendants check. Isolated receivers require their permit.
+    fn clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
+        if self.supports_verified_staging_import() {
+            return Err(PruningImportError::ShieldedStateError("staging cleanup requires an authenticated import session".into()));
+        }
+        let point = self.pruning_point_store.read().pruning_point().unwrap();
+        self.virtual_processor
+            .clear_bounded_pruning_shielded(point, |batch| batch.commit())
+            .map_err(|error| PruningImportError::ShieldedStateError(error.to_string()))
     }
 
     fn set_pruning_shielded_stable_flag(&self, val: bool) {
@@ -2844,11 +2853,111 @@ mod tests {
         assert!(!consensus.supports_verified_staging_import());
         let mut retry_without_clear = vec![vec![bounded_nullifier(0), bounded_nullifier(1)]].into_iter();
         assert!(consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry_without_clear).is_err());
-        consensus.clear_pruning_shielded_stores();
+        consensus.clear_pruning_shielded_stores().unwrap();
         let mut retry = (0..2).map(|i| vec![bounded_nullifier(i)]);
         consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry).unwrap();
         assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
         assert_eq!(fresh.iter_all().try_fold(0usize, |count, row| row.map(|_| count + 1)).unwrap(), 2);
+    }
+
+    #[test]
+    fn bounded_cleanup_interruption_reopens_unready_and_retries_fresh() {
+        use crate::model::stores::shielded::{DbNullifierSetStore, NullifierSetStoreReader};
+        use kaspa_consensus_core::api::SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT;
+        use kaspa_database::prelude::{CachePolicy, ConnBuilder, StoreError};
+        let config = Config::new(MAINNET_PARAMS);
+        let pp = config.genesis.hash;
+        let limit = SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT;
+        let count = limit * 2 + 7;
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let marker;
+        {
+            let (sender, _receiver) = async_channel::unbounded();
+            let tc = TestConsensus::with_db(connect(), &config, sender);
+            let consensus = tc.consensus_clone();
+            let mut source = (0..count)
+                .step_by(limit)
+                .map(|start| (start..(start + limit).min(count)).map(|i| bounded_nullifier(i as u64)).collect());
+            consensus.import_pruning_point_shielded(pp, bounded_metadata(count as u64), None, &mut source).unwrap();
+            let rows = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+            let mut writes = 0;
+            let error = consensus.virtual_processor.clear_bounded_pruning_shielded(pp, |batch| {
+                writes += 1;
+                if writes == 3 {
+                    return Err(StoreError::DataInconsistency("injected cleanup interruption".into()));
+                }
+                batch.commit()
+            });
+            assert!(error.unwrap_err().to_string().contains("cleanup interruption"));
+            assert_eq!(writes, 3, "one false marker and one bounded deletion must commit before rejection");
+            assert_eq!(rows.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), count - limit);
+            marker = consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap();
+            assert!(marker.is_some());
+            assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        }
+        let reopen_config = config.to_builder().skip_adding_genesis().build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let tc = TestConsensus::with_db(connect(), &reopen_config, sender);
+        let consensus = tc.consensus_clone();
+        let rows = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+        assert_eq!(consensus.db.get(kaspa_database::registry::DatabaseStorePrefixes::ShieldedSyncFlag).unwrap(), marker);
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert_eq!(rows.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), count - limit);
+        let mut dirty_retry = vec![vec![bounded_nullifier(0)]].into_iter();
+        assert!(consensus.import_pruning_point_shielded(pp, bounded_metadata(1), None, &mut dirty_retry).is_err());
+        consensus.clear_pruning_shielded_stores().unwrap();
+        assert!(rows.iter_all().next().is_none());
+        assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), consensus.empty_shielded_state_root());
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        let mut retry = vec![vec![bounded_nullifier(0), bounded_nullifier(1)]].into_iter();
+        consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut retry).unwrap();
+        assert!(rows.contains(&bounded_nullifier(0)).unwrap());
+        assert!(rows.contains(&bounded_nullifier(1)).unwrap());
+        assert_eq!(rows.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), 2);
+        assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+    }
+
+    #[test]
+    fn bounded_cleanup_rejected_final_batch_keeps_snapshot_caches_and_unready() {
+        use crate::model::stores::shielded::DbNullifierSetStore;
+        use crate::processes::shielded::ShieldedStateManager;
+        use kaspa_database::prelude::{CachePolicy, StoreError};
+        let config = Config::new(MAINNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let pp = config.genesis.hash;
+        let mut source = vec![vec![bounded_nullifier(0)]].into_iter();
+        consensus.import_pruning_point_shielded(pp, bounded_metadata(1), None, &mut source).unwrap();
+        let before = consensus.get_shielded_state_root(pp).unwrap();
+        assert_ne!(before, consensus.empty_shielded_state_root());
+        let rejected_marker = consensus
+            .virtual_processor
+            .clear_bounded_pruning_shielded(pp, |_batch| Err(StoreError::DataInconsistency("rejected cleanup marker".into())));
+        assert!(rejected_marker.is_err());
+        assert!(consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), before);
+        let membership = DbNullifierSetStore::new(consensus.db.clone(), CachePolicy::Empty);
+        assert_eq!(membership.iter_all().try_fold(0usize, |n, row| row.map(|_| n + 1)).unwrap(), 1);
+        let mut writes = 0;
+        let result = consensus.virtual_processor.clear_bounded_pruning_shielded(pp, |batch| {
+            writes += 1;
+            if writes == 3 {
+                return Err(StoreError::DataInconsistency("rejected cleanup snapshots".into()));
+            }
+            batch.commit()
+        });
+        assert!(result.unwrap_err().to_string().contains("rejected cleanup snapshots"));
+        assert_eq!(writes, 3);
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
+        assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), before, "abandoned deletes must not alter warm caches");
+        let fresh = ShieldedStateManager::new(consensus.db.clone(), CachePolicy::Empty);
+        assert_eq!(fresh.state_root_at(pp).unwrap(), before);
+        assert!(fresh.nullifiers().iter_all().next().is_none());
+        consensus.clear_pruning_shielded_stores().unwrap();
+        assert_eq!(consensus.get_shielded_state_root(pp).unwrap(), consensus.empty_shielded_state_root());
+        assert_eq!(fresh.state_root_at(pp).unwrap(), consensus.empty_shielded_state_root());
+        assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
     }
 
     #[test]
@@ -2861,7 +2970,7 @@ mod tests {
         let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(2), None, &mut duplicates).unwrap_err();
         assert!(error.to_string().contains("duplicate nullifier"));
         assert!(!consensus.pruning_meta_stores.read().pruning_shielded_stable_flag());
-        consensus.clear_pruning_shielded_stores();
+        consensus.clear_pruning_shielded_stores().unwrap();
         let mut corrupt = vec![vec![bounded_nullifier(1)]].into_iter();
         let error = consensus.import_pruning_point_shielded(pp, bounded_metadata(1), None, &mut corrupt).unwrap_err();
         assert!(error.to_string().contains("committed accumulator"));

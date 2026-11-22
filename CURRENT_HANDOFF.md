@@ -428,3 +428,68 @@ PR #12 remains draft, unmerged and inactive. Its source is validated.
 
 Next: a new stacked draft PR for bounded failed-import cleanup.
 Keep descendant recovery and export snapshots as later milestones.
+
+## Bounded failed-import cleanup candidate
+
+Branch: `feature/phase6-bounded-failed-import-cleanup-20261113`,
+stacked on the validated PR #12 handoff checkpoint
+`3734e6fa30d2d5e4c82b30034f42dbedcf30bbd6`.
+See [the cleanup report](docs/development/PHASE6_BOUNDED_FAILED_IMPORT_CLEANUP_2026-11-13.md).
+
+The candidate persists false readiness before deleting membership in
+synchronous batches of at most 4,096 nullifiers under the same authenticated
+worker permit. It uses no full-set snapshot or deletion batch. Deferred
+typed deletes invalidate caches only after persistence. Wrong owner,
+point, component, busy worker or stale revision rejects writes; failure
+requires a fresh session after worker drain. Existing validated-descendant
+refusal is retained. Matching old snapshot roots cannot bypass the false
+readiness left by interrupted cleanup.
+
+Three new cleanup regressions cover durable interruption/reopen/retry,
+rejected marker and snapshot batches, cache behavior and exact permit
+ownership/reservations. The existing F-15 test retains every assertion.
+All eight CI jobs remain required; cleanup source is not yet validated.
+Exact PR, source and run IDs will be appended after push. Descendant
+recovery and export snapshots remain subsequent milestones. No merge,
+release or consensus activation.
+
+## Initial cleanup validation checkpoint
+
+Initial source `dafe86c7cde41e613a7666b9e2068c58fdda902c` is in draft
+[PR #13](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/13),
+stacked directly on PR #12.
+[Run 43522414095](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43522414095)
+reported four Rustfmt layout hunks. Their exact output is applied here,
+without changing assertions or behavior. Replacement focused and complete
+eight-job validation are required; no cleanup pass is claimed.
+The PR #12 validation recorded above remains complete and unchanged.
+
+## Cleanup compiler correction
+
+Check job 132219833598 in run 43522414095 reported E0609 at the two
+new batch constructors: ShieldedStateManager owns typed stores, not a
+database field. The bounded helper now accepts the processor's existing
+database handle explicitly; every typed deferred delete still verifies
+database identity before any commit. The four formatter hunks are also
+applied. No assertions, authentication or restart checks were relaxed.
+Focused cleanup and full eight-job validation remain pending.
+
+## PR #13 verified cleanup milestone
+
+Verified November 22, 2026. Draft [PR #13](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/13) implements bounded
+failed shielded-import cleanup and is stacked on draft PR #12.
+Exact tested source: `8084f0e2edff50741e1781bd7a8b2495f7bebd01`.
+[Actions run 43523739668](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/43523739668)
+completed successfully in all eight jobs. In native job 132224353099,
+the dedicated persistent-reopen test and three cleanup regressions passed
+before the workspace build. The 34 focused tests, all 1,579 workspace
+tests (25 skipped), and 32 no-asm tests passed. Strict Clippy, formatting,
+Check, Linux release, WASM checks and tests, WASM SDK, no-std, and docs passed.
+
+The runtime continues to reject destructive cleanup when validated
+descendants exist. Next executable task: trace the persisted shielded
+readiness and post-pruning nullifier evidence through descendant recovery
+and IBD, then add a fail-closed reconciliation path and focused restart
+coverage on a draft branch stacked on PR #13. Authenticated export
+snapshots and testnet integration remain pending. Keep preview default-off
+and Simnet-only. Keep all PRs unmerged.

@@ -78,6 +78,10 @@ pub struct DbNullifierSetStore {
 }
 
 impl DbNullifierSetStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, nullifier: [u8; 32]) -> StoreResult<()> {
+        self.access.delete_deferred(batch, NullifierKey(nullifier))
+    }
+
     pub(crate) fn insert_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, nullifier: [u8; 32]) -> StoreResult<()> {
         self.access.write_deferred(batch, NullifierKey(nullifier), 1u8)
     }
@@ -198,6 +202,10 @@ pub struct DbShieldedTreeStore {
 }
 
 impl DbShieldedTreeStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
     pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, state: FrontierState) -> StoreResult<()> {
         self.access.write_deferred(batch, block, StoredFrontier(state))
     }
@@ -253,6 +261,10 @@ pub struct DbShieldedSupplyStore {
 }
 
 impl DbShieldedSupplyStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
     pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, totals: SupplyTotals) -> StoreResult<()> {
         self.access.write_deferred(batch, block, totals)
     }
@@ -438,6 +450,10 @@ pub struct DbShieldedBurnStore {
 }
 
 impl DbShieldedBurnStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
     pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, receipts: BurnReceipts) -> StoreResult<()> {
         self.access.write_deferred(batch, block, receipts)
     }
@@ -498,6 +514,10 @@ pub struct DbShieldedNullifierMuHashStore {
 }
 
 impl DbShieldedNullifierMuHashStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
     pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, muhash: MuHash) -> StoreResult<()> {
         self.access.write_deferred(
             batch,

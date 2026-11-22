@@ -1331,40 +1331,41 @@ impl ShieldedStateManager {
         Ok(())
     }
 
-    /// F-15: actually clear the shielded import state before a full re-seed —
-    /// delete the whole global nullifier set and the per-block snapshots keyed at
-    /// `pruning_point` into `batch` (the caller writes the stable-flag reset into
-    /// the same batch, so the clear is atomic with the flag flip).
-    ///
-    /// SAFETY: this destroys live state. Call only on a path that immediately
-    /// re-seeds the pruning point from scratch, and only when no locally
-    /// UTXO-validated chain blocks above `pruning_point` exist (their nullifier
-    /// contributions to the global set would be lost without revalidation). The
-    /// IBD flow enforces both preconditions (see
-    /// `protocol/flows/src/ibd/flow.rs::sync_new_shielded_state`).
-    ///
-    /// Note: the staged deletes become visible to store reads only once `batch` is
-    /// written (`CachedDbAccess` removes the cache entry but RocksDB deletes land
-    /// with the batch — the same semantics behind the F-01 two-batch reorg fix),
-    /// so the caller MUST write the batch before any subsequent seed/validation.
-    ///
-    /// The per-block nullifier diffs and the anchor→block index are deliberately
-    /// retained: diffs of chain blocks above the pruning point stay valid (the
-    /// re-seeded set is their base state), and the anchor index is append-only by
-    /// design with canonicality re-checked via reachability on every query.
-    pub fn clear_for_pruning_reimport(&self, batch: &mut WriteBatch, pruning_point: Hash) -> StoreResult<()> {
-        // The whole global membership set. `iter_all` is a pure RocksDB iterator
-        // (no cache), and the deletions are only staged in `batch`, so iterating
-        // while staging deletes is safe.
-        for nf in self.nullifiers.iter_all() {
-            self.nullifiers.delete_batch(batch, nf?)?;
+    /// Clear membership in bounded durable batches, then remove the fixed-size
+    /// pruning-point snapshots. The caller persists false readiness before entry
+    /// and checks the owner permit, point and metadata locks for every commit.
+    /// Only call immediately before re-seeding and without validated descendants.
+    /// Per-block diffs and historical anchor indexes remain intact.
+    pub(crate) fn clear_for_pruning_reimport(
+        &self,
+        db: &Arc<DB>,
+        pruning_point: Hash,
+        mut commit: impl for<'a> FnMut(DeferredDbBatch<'a>) -> StoreResult<()>,
+    ) -> StoreResult<()> {
+        use kaspa_consensus_core::api::SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT;
+
+        let mut rows = self.nullifiers.iter_all();
+        loop {
+            let mut batch = DeferredDbBatch::new(db.clone());
+            let mut count = 0;
+            for row in rows.by_ref().take(SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT) {
+                self.nullifiers.delete_deferred(&mut batch, row?)?;
+                count += 1;
+            }
+            if count == 0 {
+                break;
+            }
+            commit(batch)?;
         }
-        // Per-block snapshots at the pruning point (absent keys are no-op deletes).
-        self.tree_store.delete_batch(batch, pruning_point)?;
-        self.supply_store.delete_batch(batch, pruning_point)?;
-        self.nullifier_muhash.delete_batch(batch, pruning_point)?;
-        self.burn_store.delete_batch(batch, pruning_point)?;
-        Ok(())
+        if self.nullifiers.iter_all().next().transpose()?.is_some() {
+            return Err(StoreError::DataInconsistency("shielded cleanup left committed membership".into()));
+        }
+        let mut batch = DeferredDbBatch::new(db.clone());
+        self.tree_store.delete_deferred(&mut batch, pruning_point)?;
+        self.supply_store.delete_deferred(&mut batch, pruning_point)?;
+        self.nullifier_muhash.delete_deferred(&mut batch, pruning_point)?;
+        self.burn_store.delete_deferred(&mut batch, pruning_point)?;
+        commit(batch)
     }
 }
 
@@ -2462,9 +2463,7 @@ mod tests {
         assert_eq!(mgr.nullifiers().count(), 2);
 
         // Clear for a from-scratch re-import (what the IBD flow now does before seeding).
-        let mut cb = WriteBatch::default();
-        mgr.clear_for_pruning_reimport(&mut cb, pp).unwrap();
-        db.write(cb).unwrap();
+        mgr.clear_for_pruning_reimport(&db, pp, |batch| batch.commit()).unwrap();
 
         // The global set is empty and the pruning point's snapshots are gone (the
         // root reads back as the empty-state root). The anchor→block index is

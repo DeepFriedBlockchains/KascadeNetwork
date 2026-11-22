@@ -1237,16 +1237,18 @@ impl IbdFlow {
             // F-15: if the locally held state root at the pruning point already equals the
             // PoW-committed root, the local state IS the committed state (the root binds the
             // frontier, supply totals, burns and the nullifier-set accumulator) — skip the
-            // import entirely. This covers the fully-synced PruningCatchUp node (whose global
-            // nullifier set reflects its old tip; the pre-fix unconditional re-import UNIONED
-            // the seeded PP-time set into it, freezing spends of unspent notes), a crash
-            // between seed and stable-flag write, and the default-true flag on a network with
-            // no shielded activity.
+            // import entirely when readiness is stable. This covers the fully-synced
+            // PruningCatchUp node (whose global nullifier set reflects its old tip; the
+            // pre-fix unconditional re-import UNIONED the seeded PP-time set into it,
+            // freezing spends of unspent notes) and the default-true flag on a network
+            // with no shielded activity. Interrupted imports must finish a fresh re-seed.
             let local_root = consensus
                 .async_get_shielded_state_root(pruning_point)
                 .await
                 .map_err(|e| ProtocolError::OtherOwned(format!("local shielded state root at pruning point {pruning_point}: {e}")))?;
-            if local_root == committed {
+            // A failed bounded clear can leave old snapshots beside partially
+            // deleted membership. Never revive that state from its root alone.
+            if local_root == committed && consensus.async_is_pruning_shielded_stable().await {
                 info!(
                     "local shielded state at pruning point {} already matches the PoW-committed root; skipping re-import",
                     pruning_point
@@ -1282,10 +1284,10 @@ impl IbdFlow {
             );
         }
 
-        // F-15: the real clear (global nullifier set + pruning-point snapshots + stable flag,
-        // atomically) — only here, immediately before the re-seed, and only after the
+        // F-15: persist unready, then clear membership in bounded durable batches.
+        // Keep this immediately before re-seeding and after the unchanged
         // no-validated-descendants check above.
-        consensus.async_clear_pruning_shielded_stores().await;
+        consensus.async_clear_pruning_shielded_stores().await?;
 
         info!("downloading the pruning point shielded state from {}", self.router);
 
