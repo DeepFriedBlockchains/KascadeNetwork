@@ -652,3 +652,5 @@ The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-
 Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
 tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
 contains post-launch post-quantum wallet and transaction research on a separate branch.
+
+The [testnet profile audit](docs/development/PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) records inherited testnet defaults and identifies explicit network, address, work-rate and issuance checks before approval. This documentation branch has no consensus or launch changes. Next executable task: run the three-node Simnet partition/rejoin regression and separately verify shielded archive backfill on its draft PR.

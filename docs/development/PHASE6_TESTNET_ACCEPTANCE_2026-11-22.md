@@ -27,3 +27,5 @@ Record these fields in the development report for each completed check.
 - Focused regression and full GitHub Actions run identifiers with pass counts and expected skips. Distinguish failure, skipped coverage, and checks still in progress.
 
 A change to the implementation or consensus configuration requires rechecking the affected rows. A test tied to Simnet's simulated PoW does not establish real PoW progress, production network isolation, or throughput under public traffic.
+
+See [the source audit](PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) for the inherited settings and candidate-profile checks.
