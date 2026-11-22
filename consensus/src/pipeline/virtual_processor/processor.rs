@@ -397,7 +397,8 @@ impl VirtualStateProcessor {
         &self,
         pp: kaspa_hashes::Hash,
     ) -> Result<Option<kaspa_consensus_core::api::ShieldedExportMetadata>, kaspa_database::prelude::StoreError> {
-        let Some(md) = self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &self.selected_chain_store.read()))?
+        let Some(md) =
+            self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &self.selected_chain_store.read()))?
         else {
             return Ok(None);
         };

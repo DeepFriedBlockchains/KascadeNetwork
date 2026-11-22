@@ -18,3 +18,9 @@ state changes. The preview retains one projected nullifier vector per
 active export. All eight jobs and the focused regression are pending.
 Next, validate this candidate, then continue consensus integration and
 end-to-end testnet readiness. Keep preview default-off and Simnet-only.
+
+Draft [PR #15](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/15) initial source
+`47a4f69a42e955a85036b5089ca7b24d4aa0ce72` reached [run 45055027648](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45055027648).
+Lints job 137308268988 identified two Rustfmt layout changes. This
+revision applies both formatter hunks. Review the focused regression and
+the full workflow on the replacement head before validating this milestone.
