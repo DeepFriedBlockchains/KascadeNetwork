@@ -589,3 +589,66 @@ shielded readiness reconciliation. Add a two-node Simnet regression that
 reconnects an unready receiver with committed descendants and requires it
 to resume validation while preserving the promotion record. The preview
 remains default-off and Simnet-only. Testnet activation remains pending.
+
+## Simnet descendant IBD integration candidate
+
+November 22, 2026. Branch `feature/phase6-simnet-descendant-ibd-20261122`, based on
+draft [PR #15](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/15) at `8bd8fff703f612618b151358800f54c71cc636c7`.
+See [the dated report](docs/development/PHASE6_SIMNET_DESCENDANT_IBD_2026-11-22.md).
+
+The active Simnet preview obtains missing headers before shielded
+reconciliation when the receiver already has a committed descendant
+tip and stable SMT and UTXO state. It authenticates the committed tip
+against its selected child before any missing descendant body is applied.
+An already UTXO-validated peer pruning point on the local selected chain
+also permits normal IBD when only shielded readiness is unstable.
+
+A two-node Simnet regression performs an authenticated IBD promotion,
+disconnects the receiver, sets its shielded readiness false, mines a
+header gap, and requires the receiver to reconnect and resume validating
+blocks while preserving the promotion record and active role. The
+focused regression and all eight jobs are required. After validation,
+continue with the remaining consensus and testnet acceptance coverage in
+KASCADE-SPEC.md. Keep the preview default-off and Simnet-only.
+
+Draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) first ran at
+`e147119245e990531fc77f74051b5ceab7b75e08` in [run 45058650015](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45058650015).
+Seven jobs passed. Native job 137319441954 reached successful authenticated
+promotion, then the focused test panicked when the fixture tried to ban a
+permanent connection. The descendant fixture now opens its first peer as
+temporary and still requires actual disconnect, readiness reconciliation,
+and validated catchup. Production code is identical. Verify the replacement
+focused regression and all eight jobs before validating this milestone.
+
+[Run 45060976100](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45060976100) at `55cad3df2695ba27f8286a24ebb2a30f207a6d88`
+passed the focused two-node test and seven jobs. In native job 137326618985
+the test's combined-suite run logged successful recovery IBD and 20
+validated blocks, then timed out waiting for the additional announcing
+block. That block can be announced while the preceding IBD is already
+processing a bounded request. The fixture now checks the exact pre-reconnect
+gap tip by its UTXO-valid status, plus readiness and promotion preservation.
+The subsequent finality-depth catch-up assertions still verify live relay
+of newly mined blocks. The production patch is unchanged. Rerun all jobs.
+
+## Verified Simnet descendant IBD milestone
+
+Verified November 22, 2026. Draft [PR #16](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/16) passed all eight jobs
+at exact implementation SHA `c9f378177c0ddd25f3152b55c8d34b593c3cfcc4` in
+[Actions run 45063994270](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45063994270).
+Native job 137335973190 passed the focused two-node recovery test and
+the 35-case Phase 6 suite, which independently reran the two-node case.
+The persistent reopen, cleanup, and export regressions passed, as did
+1,579 workspace tests (25 existing skips), 32 no-asm tests, documentation,
+and the kip-10 example. Formatting, strict Clippy, Check, no-std, Linux
+release, and all WASM checks passed.
+
+The two-node case verifies the exact committed gap tip, restored
+shielded readiness, promotion preservation, and live block validation
+after reconnect. The preview stays default-off and Simnet-only.
+
+## Concurrent Phase 6 work
+
+The [testnet acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) records current
+Simnet evidence and the remaining acceptance criteria. [Draft PR #17](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17)
+tracks Simnet shielded archive backfill and status verification. [Draft PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18)
+contains post-launch post-quantum wallet and transaction research on a separate branch.
