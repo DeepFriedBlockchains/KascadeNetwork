@@ -118,10 +118,7 @@ fn verify_commitment(
         if accumulator.finalize() != metadata.nullifier_muhash.clone().finalize() {
             return Err(inconsistent("committed nullifier projection differs from the authenticated accumulator"));
         }
-    } else if expected != PruningPointShieldedMetadata::empty_state_root()
-        || store.state_root_at(point)? != expected
-        || rows != 0
-    {
+    } else if expected != PruningPointShieldedMetadata::empty_state_root() || store.state_root_at(point)? != expected || rows != 0 {
         return Err(inconsistent("committed shielded state does not match the authenticated empty commitment"));
     }
     Ok(())

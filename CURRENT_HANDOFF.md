@@ -514,3 +514,9 @@ wrong commitment child, gated readiness publication and promotion record
 preservation. GitHub Actions must pass the dedicated regression and all
 eight jobs before advancing to authenticated export snapshots. The preview
 remains default-off and Simnet-only.
+
+Draft [PR #14](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/14) first ran at
+`e9dd9376c6bc8d8e0fbfe1c354315133a4c5a715` in [run 45048948814](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45048948814).
+Rustfmt reported three layout changes, applied in this revision. The
+revision also pins the latest selected header tip through the final ancestry
+check and marker commit. Complete validation is pending.
