@@ -77,6 +77,28 @@ impl IssuanceCommitmentField {
     ) -> Result<(), VerificationError> {
         checkpoint.verify(network, selected_parent, supply_cap, self.digest)
     }
+
+    /// Compare the field to a checkpoint derived entirely from a bounded,
+    /// locally verified settlement replay. The caller supplies the selected
+    /// path and consensus-validated reward and release records independently
+    /// of the block carrying this field. No import checkpoint enters here.
+    pub fn verify_local_settlement(
+        self,
+        network: Hash,
+        selected_parent: Hash,
+        supply_cap: u64,
+        selected_path: &[Hash],
+        claims: &[IssuanceClaim],
+        releases: &[DeveloperPayoutRelease],
+    ) -> Result<IssuanceCheckpoint, VerificationError> {
+        if selected_path.first() != Some(&network) {
+            return Err(VerificationError::WrongContext);
+        }
+        let local =
+            IssuanceCheckpoint::derive_from_settlements(network, selected_parent, supply_cap, selected_path, claims, releases)?;
+        self.verify_checkpoint(network, selected_parent, supply_cap, &local)?;
+        Ok(local)
+    }
 }
 
 /// One unique reward source attributed to the selected block that settles it.
