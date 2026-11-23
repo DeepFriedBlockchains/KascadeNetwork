@@ -285,6 +285,7 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     record_node_metrics(&c_rpc, "c", "before_stop").await;
     c_rpc.disconnect().await.unwrap();
     c.stop().await;
+    let offline_started = std::time::Instant::now();
     expect_peers(&a_rpc, 1).await;
     for _ in 0..6 {
         let next = submit_real_pow_block(&a_rpc, false).await;
@@ -295,16 +296,28 @@ async fn phase6_loopback_cli_real_pow_recovery() {
         }
     }
 
+    let offline_ms = offline_started.elapsed().as_millis();
+    let reopen_started = std::time::Instant::now();
     let mut c = Node::start(binary, data.path(), log_dir, 3, "c-real-pow-reopen", false, params);
     let c_rpc = connect(19310).await;
+    let rpc_ready_ms = reopen_started.elapsed().as_millis();
     expect_peers(&a_rpc, 2).await;
     let recovered = expect_tip(&c_rpc, tip).await;
+    let converged_ms = reopen_started.elapsed().as_millis();
     let authority = expect_tip(&a_rpc, tip).await;
     assert_eq!(recovered.block_count, before.block_count + 6);
     assert_eq!(recovered.block_count, authority.block_count);
     assert_eq!(recovered.pruning_point_hash, authority.pruning_point_hash);
     assert_eq!(recovered.virtual_daa_score, authority.virtual_daa_score);
-    eprintln!("three real-PoW daemons converged to {tip} after follower reopened with six missing blocks");
+    let recovery = serde_json::json!({
+        "follower": "c",
+        "missed_blocks": recovered.block_count - before.block_count,
+        "offline_ms": offline_ms,
+        "reopen_to_rpc_ready_ms": rpc_ready_ms,
+        "reopen_to_tip_convergence_ms": converged_ms,
+        "final_tip": tip.to_string(),
+    });
+    eprintln!("phase6_recovery,{recovery}");
 
     for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
         record_node_metrics(client, name, "converged").await;
