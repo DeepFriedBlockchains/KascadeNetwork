@@ -265,3 +265,28 @@ fn issuance_checkpoint_decoder_rejects_short_oversized_and_trailing_records() {
     extended.push(0);
     assert!(decode_checkpoint(&extended).is_none());
 }
+
+pub(crate) fn check_issuance_fixture_with_child_anchor(
+    authenticate: impl FnOnce(&std::sync::Arc<kaspa_database::prelude::DB>, Hash, Hash) -> Hash,
+) {
+    use kaspa_database::prelude::ConnBuilder;
+
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let network = id(1);
+    let subsidy = cumulative_kazmi(1);
+    let checkpoint = Checkpoint::genesis(network).advance(id(3), &[id(2)], subsidy - 5, 0, 5).unwrap();
+    let db = connect();
+    db.write(checkpoint_batch(&checkpoint)).unwrap();
+    let anchor = authenticate(&db, checkpoint.point, checkpoint.commitment());
+    drop(db);
+
+    let db = connect();
+    assert_eq!(read_ready_checkpoint(&db, network, checkpoint.point, anchor), Some(checkpoint.clone()));
+    let mut changed = checkpoint;
+    changed.balance.deferred -= 1;
+    changed.balance.paid += 1;
+    assert!(changed.balance.valid());
+    db.put(CHECKPOINT_ROW, checkpoint_bytes(&changed)).unwrap();
+    assert!(read_ready_checkpoint(&db, network, changed.point, anchor).is_none());
+}
