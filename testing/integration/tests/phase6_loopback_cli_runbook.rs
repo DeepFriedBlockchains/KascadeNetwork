@@ -237,8 +237,18 @@ async fn submit_real_pow_block(client: &GrpcClient, prove_pow_enabled: bool) -> 
 
     block.header.nonce = (0..native_limit).find(|nonce| state.check_pow(*nonce).0).expect("need an easy valid nonce");
     let hash = Header::try_from(&block.header).unwrap().hash;
+    let duplicate = prove_pow_enabled.then(|| block.clone());
     let accepted = client.submit_block(block, false).await.unwrap();
     assert!(accepted.report.is_success(), "real Simnet proof rejected: {}", accepted.reject_detail);
+    if let Some(duplicate) = duplicate {
+        let before = expect_tip(client, hash).await;
+        let replay = client.submit_block(duplicate, false).await.unwrap();
+        let after = expect_tip(client, hash).await;
+        assert_eq!(after.block_count, before.block_count);
+        assert_eq!(after.virtual_daa_score, before.virtual_daa_score);
+        assert_eq!(after.pruning_point_hash, before.pruning_point_hash);
+        eprintln!("duplicate native-PoW submission left DAG state unchanged: {:?}", replay.report);
+    }
     hash
 }
 
