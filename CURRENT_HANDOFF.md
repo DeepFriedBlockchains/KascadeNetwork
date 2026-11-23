@@ -2,6 +2,13 @@
 
 Updated November 23, 2026.
 
+## Validation and persistent reward accounting checkpoint — November 23, 2026
+
+- #41 at `724687069469e0ad18e9e97c32a8549513fe6442` passed all eight jobs, six focused checkpoint tests, 1,591 workspace tests and 32 no-asm tests. [45146341474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146341474)
+- #45 at `900ced8a25a2e704a93ee2f7c26b2d67147bd7ff` now includes the validated #41 parent. [45153573720](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45153573720) pending. #47 remains gated on #45.
+- #43 and #44 remained 7/8 with their focused steps green. #48 remains gated on full #43. #46's corrected payout selector is pending. #49's focused verifier and #50's focused canonical claim step passed, with full matrices active. Their exact prior runs are recorded below.
+- Independent work is limited to a single authenticated settlement checkpoint record in the existing RocksDB authority batch namespace. Production activation, monetary parameters and launch remain gated.
+
 ## Ordered issuance claims and corrected native-PoW evidence — November 23, 2026
 
 | Draft | Exact head | Verified Actions state |
