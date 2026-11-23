@@ -12,14 +12,26 @@ use std::{
     fs::File,
     path::Path,
     process::{Child, Command},
+    sync::Arc,
     time::Duration,
 };
-use tokio::time::{sleep, timeout};
+use tokio::{
+    io::copy_bidirectional,
+    net::{TcpListener, TcpStream},
+    task::JoinSet,
+    time::{sleep, timeout},
+};
+
+#[derive(Clone, Copy, Default)]
+struct NodeOptions<'a> {
+    params: Option<&'a Path>,
+    upstream_port: Option<u16>,
+}
 
 struct Node(Child);
 
 impl Node {
-    fn start(binary: &Path, data_root: &Path, logs: &Path, index: u16, label: &str, test_mining: bool, params: Option<&Path>) -> Self {
+    fn start(binary: &Path, data_root: &Path, logs: &Path, index: u16, label: &str, test_mining: bool, options: NodeOptions<'_>) -> Self {
         let name = ["a", "b", "c"][usize::from(index - 1)];
         let base_port = 19_000 + index * 100;
         let mut command = Command::new(binary);
@@ -32,13 +44,13 @@ impl Node {
         if index == 1 {
             command.arg("--outpeers=0");
         } else {
-            command.arg("--connect=127.0.0.1:19111");
+            command.arg(format!("--connect=127.0.0.1:{}", options.upstream_port.unwrap_or(19111)));
         }
         if test_mining {
             command.arg("--enable-unsynced-mining");
         }
 
-        if let Some(params) = params {
+        if let Some(params) = options.params {
             command.arg(format!("--override-params-file={}", params.display()));
             command.args(["--perf-metrics", "--perf-metrics-interval-sec=1"]);
         }
@@ -143,11 +155,11 @@ async fn phase6_loopback_cli_runbook() {
     let log_dir = Path::new(&log_dir);
     let data = tempfile::tempdir().unwrap();
 
-    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-start", false, None);
+    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-start", false, NodeOptions::default());
     let a_rpc = connect(19110).await;
-    let mut b = Node::start(binary, data.path(), log_dir, 2, "b-start", false, None);
+    let mut b = Node::start(binary, data.path(), log_dir, 2, "b-start", false, NodeOptions::default());
     let b_rpc = connect(19210).await;
-    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-start", false, None);
+    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-start", false, NodeOptions::default());
     let c_rpc = connect(19310).await;
 
     expect_peers(&a_rpc, 2).await;
@@ -160,7 +172,7 @@ async fn phase6_loopback_cli_runbook() {
 
     a_rpc.disconnect().await.unwrap();
     a.stop().await;
-    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-test-mining", true, None);
+    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-test-mining", true, NodeOptions::default());
     let a_rpc = connect(19110).await;
     expect_peers(&a_rpc, 2).await;
     let first = submit_block(&a_rpc).await;
@@ -173,7 +185,7 @@ async fn phase6_loopback_cli_runbook() {
     let second = submit_block(&a_rpc).await;
     assert_ne!(first, second);
     expect_tip(&b_rpc, second).await;
-    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-reopen", false, None);
+    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-reopen", false, NodeOptions::default());
     let c_rpc = connect(19310).await;
     expect_peers(&a_rpc, 2).await;
     let recovered = expect_tip(&c_rpc, second).await;
@@ -254,13 +266,13 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     let data = tempfile::tempdir().unwrap();
     let params_file = data.path().join("real-pow.json");
     std::fs::write(&params_file, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
-    let params = Some(params_file.as_path());
+    let options = NodeOptions { params: Some(params_file.as_path()), ..Default::default() };
 
-    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-real-pow", true, params);
+    let mut a = Node::start(binary, data.path(), log_dir, 1, "a-real-pow", true, options);
     let a_rpc = connect(19110).await;
-    let mut b = Node::start(binary, data.path(), log_dir, 2, "b-real-pow", false, params);
+    let mut b = Node::start(binary, data.path(), log_dir, 2, "b-real-pow", false, options);
     let b_rpc = connect(19210).await;
-    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-real-pow", false, params);
+    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-real-pow", false, options);
     let c_rpc = connect(19310).await;
     expect_peers(&a_rpc, 2).await;
 
@@ -304,7 +316,7 @@ async fn phase6_loopback_cli_real_pow_recovery() {
 
     let offline_ms = offline_started.elapsed().as_millis();
     let reopen_started = std::time::Instant::now();
-    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-real-pow-reopen", false, params);
+    let mut c = Node::start(binary, data.path(), log_dir, 3, "c-real-pow-reopen", false, options);
     let c_rpc = connect(19310).await;
     let rpc_ready_ms = reopen_started.elapsed().as_millis();
     expect_peers(&a_rpc, 2).await;
@@ -336,6 +348,101 @@ async fn phase6_loopback_cli_real_pow_recovery() {
 
     for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
         record_node_metrics(client, name, "converged").await;
+        client.disconnect().await.unwrap();
+    }
+    c.stop().await;
+    b.stop().await;
+    a.stop().await;
+}
+
+async fn forward_peer(listener: Arc<TcpListener>) -> std::io::Result<()> {
+    loop {
+        let (mut downstream, _) = listener.accept().await?;
+        if let Ok(mut upstream) = TcpStream::connect("127.0.0.1:19111").await {
+            // At most one forwarded session, with no queue of forwarding tasks.
+            let _ = copy_bidirectional(&mut downstream, &mut upstream).await;
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires a built kaspad binary and isolated Linux runner"]
+async fn phase6_loopback_cli_live_peer_reconnect() {
+    let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
+    let binary = Path::new(&binary);
+    let logs = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
+    let logs = Path::new(&logs);
+    let data = tempfile::tempdir().unwrap();
+    let params = data.path().join("real-pow.json");
+    std::fs::write(&params, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
+    let options = NodeOptions { params: Some(&params), ..Default::default() };
+    let listener = Arc::new(TcpListener::bind("127.0.0.1:0").await.unwrap());
+    let follower_options = NodeOptions { upstream_port: Some(listener.local_addr().unwrap().port()), ..options };
+    let mut bridge = JoinSet::new();
+    bridge.spawn(forward_peer(listener.clone()));
+
+    let mut a = Node::start(binary, data.path(), logs, 1, "a-reconnect", true, options);
+    let a_rpc = connect(19110).await;
+    let mut b = Node::start(binary, data.path(), logs, 2, "b-reconnect", false, options);
+    let b_rpc = connect(19210).await;
+    let mut c = Node::start(binary, data.path(), logs, 3, "c-reconnect", false, follower_options);
+    let c_rpc = connect(19310).await;
+    expect_peers(&a_rpc, 2).await;
+    expect_peers(&c_rpc, 1).await;
+    for client in [&a_rpc, &b_rpc, &c_rpc] {
+        expect_tip(client, SIMNET_GENESIS.hash).await;
+    }
+
+    let first = submit_real_pow_block(&a_rpc, true).await;
+    expect_tip(&a_rpc, first).await;
+    expect_tip(&b_rpc, first).await;
+    let before = expect_tip(&c_rpc, first).await;
+    record_node_metrics(&c_rpc, "c", "before_partition").await;
+
+    bridge.shutdown().await;
+    expect_peers(&a_rpc, 1).await;
+    expect_peers(&c_rpc, 0).await;
+    let mut tip = first;
+    for _ in 0..3 {
+        tip = submit_real_pow_block(&a_rpc, false).await;
+        expect_tip(&a_rpc, tip).await;
+        expect_tip(&b_rpc, tip).await;
+    }
+    let isolated = c_rpc.get_block_dag_info().await.unwrap();
+    assert_eq!(isolated.sink, first);
+    assert_eq!(isolated.block_count, before.block_count);
+    assert!(c.0.try_wait().unwrap().is_none(), "follower must stay alive during link interruption");
+
+    bridge.spawn(forward_peer(listener.clone()));
+    expect_peers(&a_rpc, 2).await;
+    expect_peers(&c_rpc, 1).await;
+    let caught_up = expect_tip(&c_rpc, tip).await;
+    assert_eq!(caught_up.block_count, before.block_count + 3);
+    for peer in [&a_rpc, &b_rpc] {
+        let dag = expect_tip(peer, tip).await;
+        assert_eq!(dag.block_count, caught_up.block_count);
+        assert_eq!(dag.pruning_point_hash, caught_up.pruning_point_hash);
+        assert_eq!(dag.virtual_daa_score, caught_up.virtual_daa_score);
+    }
+    for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
+        record_node_metrics(client, name, "reconnected").await;
+    }
+
+    c_rpc.disconnect().await.unwrap();
+    c.stop().await;
+    bridge.shutdown().await;
+    expect_peers(&a_rpc, 1).await;
+    let mut c = Node::start(binary, data.path(), logs, 3, "c-reconnect-reopen", false, follower_options);
+    let c_rpc = connect(19310).await;
+    expect_peers(&c_rpc, 0).await;
+    let reopened = c_rpc.get_block_dag_info().await.unwrap();
+    assert_eq!(reopened.sink, tip);
+    assert_eq!(reopened.block_count, caught_up.block_count);
+    assert_eq!(reopened.pruning_point_hash, caught_up.pruning_point_hash);
+    assert_eq!(reopened.virtual_daa_score, caught_up.virtual_daa_score);
+    eprintln!("follower persisted {tip} after catching up three blocks with no process restart during the partition");
+
+    for client in [&a_rpc, &b_rpc, &c_rpc] {
         client.disconnect().await.unwrap();
     }
     c.stop().await;
