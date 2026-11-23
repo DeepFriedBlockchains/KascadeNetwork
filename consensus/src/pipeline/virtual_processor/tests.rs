@@ -1730,7 +1730,8 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
 #[tokio::test]
 async fn reward_claim_simnet_merge_aggregates_eligible_red_subsidy() {
     use crate::model::stores::ghostdag::GhostdagStoreReader;
-    use kaspa_consensus_core::config::params::SIMNET_PARAMS;
+    use kaspa_consensus_core::{config::params::SIMNET_PARAMS, merkle::calc_hash_merkle_root, tx::TransactionOutpoint};
+    use kaspa_database::prelude::ConnBuilder;
 
     fn script(tag: u8) -> ScriptPublicKey {
         ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x01, tag]))
@@ -1754,7 +1755,10 @@ async fn reward_claim_simnet_merge_aggregates_eligible_red_subsidy() {
             params.skip_proof_of_work = true;
         })
         .build();
-    let ctx = TestContext::new(TestConsensus::new(&config));
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let (sender, _receiver) = async_channel::unbounded();
+    let ctx = TestContext::new(TestConsensus::with_db(connect(), &config, sender));
     let split = build(&ctx, vec![config.genesis.hash], 1);
     ctx.consensus.validate_and_insert_block(split.clone()).virtual_state_task.await.unwrap();
 
@@ -1789,4 +1793,57 @@ async fn reward_claim_simnet_merge_aggregates_eligible_red_subsidy() {
     let red_output = &coinbase.outputs[2];
     assert_eq!(red_output.script_public_key, script(5));
     assert_eq!(red_output.value, subsidy(ghostdag.mergeset_reds[0]));
+
+    let expected_reward: u64 = siblings.iter().map(|block| subsidy(block.header.hash)).sum();
+    let child = build(&ctx, vec![merged.header.hash], 6);
+    ctx.consensus.validate_and_insert_block(child.clone()).virtual_state_task.await.unwrap();
+    assert_eq!(ctx.consensus.get_sink(), child.header.hash);
+
+    fn check_settlement(ctx: &TestContext, settled: Hash, tip: Hash, expected_reward: u64) {
+        assert_eq!(ctx.consensus.get_sink(), tip);
+        assert!(ctx.consensus.reachability_service().is_chain_ancestor_of(settled, tip));
+        let block = ctx.consensus.get_block(settled).unwrap();
+        assert_eq!(block.header.hash, settled);
+        assert_eq!(calc_hash_merkle_root(block.transactions.iter()), block.header.hash_merkle_root);
+        let coinbase = &block.transactions[0];
+        let coinbase_id = coinbase.id();
+
+        // The selected successor must credit this actual coinbase exactly once.
+        let accepted = ctx.consensus.get_block_acceptance_data(tip).unwrap();
+        let sources = accepted
+            .iter()
+            .flat_map(|source| {
+                source
+                    .accepted_transactions
+                    .iter()
+                    .filter(|entry| entry.index_within_block == 0)
+                    .map(move |entry| (source.block_hash, entry.transaction_id))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sources, vec![(settled, coinbase_id)]);
+
+        let utxos = ctx.consensus.get_virtual_utxos(None, 64, false);
+        assert!(utxos.len() < 64);
+        let payouts = utxos.iter().filter(|(outpoint, _)| outpoint.transaction_id == coinbase_id).collect::<Vec<_>>();
+        assert_eq!(payouts.len(), coinbase.outputs.len());
+        let mut paid = 0u64;
+        for (index, output) in coinbase.outputs.iter().enumerate() {
+            let expected = TransactionOutpoint::new(coinbase_id, index.try_into().unwrap());
+            let (_, entry) = payouts.iter().find(|(outpoint, _)| *outpoint == expected).unwrap();
+            assert!(entry.is_coinbase);
+            assert_eq!(entry.script_public_key, output.script_public_key);
+            assert_eq!(entry.amount, output.value);
+            paid = paid.checked_add(entry.amount).unwrap();
+        }
+        assert_eq!(paid, expected_reward);
+    }
+
+    check_settlement(&ctx, merged.header.hash, child.header.hash, expected_reward);
+    let snapshot = ctx.consensus.get_virtual_utxos(None, 64, false);
+    drop(ctx);
+    let reopen_config = config.to_builder().skip_adding_genesis().build();
+    let (sender, _receiver) = async_channel::unbounded();
+    let reopened = TestContext::new(TestConsensus::with_db(connect(), &reopen_config, sender));
+    check_settlement(&reopened, merged.header.hash, child.header.hash, expected_reward);
+    assert_eq!(reopened.consensus.get_virtual_utxos(None, 64, false), snapshot);
 }
