@@ -2,6 +2,26 @@
 
 Updated November 23, 2026.
 
+## Ordered issuance claims and corrected native-PoW evidence — November 23, 2026
+
+| Draft | Exact head | Verified Actions state |
+| --- | --- | --- |
+| [#41](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/41) | `724687069469e0ad18e9e97c32a8549513fe6442` | [45146341474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146341474), 7/8. Focused authenticated checkpoint step passed. Regular workspace tests running. |
+| [#44](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/44) | `29d78741ff436ede003f69f3d1a558069d846890` | [45144884093](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144884093), 7/8. Focused checkpoint suite passed. Regular workspace tests running. |
+| [#45](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/45) | `7fe95e5d3e6cf5e1cb994dbba0835f8c74069c5b` | Staged behind full green #41. |
+| [#47](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/47) | `1e486d66f9d7657387cb09bf0182d5f57d2ed6fe` | Staged behind full green #45. Guarded batch coverage is test-only. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `8b1a015b5de1d4a533a2e793bd67e17b977b9ca6` | [45151879030](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45151879030), running. Prior [45143838285](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143838285) passed seven jobs, then selected zero tests in the focused step. Corrected the Nextest exact selector to include the full Rust module path. Regression source and assertions unchanged. |
+| [#49](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/49) | `a4e79bb486418f6ff96b192370aac4db0f67867e` | [45146860835](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146860835), 7/8. Focused issuance verifier passed. Native authority tests running. |
+| [#50](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/50) | `143c3119b9ef0e4788329344299c11db9ef3befd` | [45152207805](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45152207805), queued. Branch `feat/phase6-ordered-issuance-claims-20261123` stacked on #49. |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` | [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224), 7/8. Both CLI cases, per-node resource validation, and [corrected artifact upload](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224/artifacts/14805407543) passed. The validator requires strictly positive RSS for each expected stage and node. Native authority tests running. |
+| [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/48) | `3eb8661274319e6edb17d27d27bffe1bb4cb4ee6` | Staged behind full green #43. |
+
+#50 derives a candidate checkpoint from ordered, unique reward sources and a separately verified selected path. It checks the selected settlement anchor, sorts by selected index then source hash, hashes with existing consensus primitives, and balances paid/deferred issuance at settlement boundaries with checked cap and overflow checks. The focused regression covers input permutation, duplicate sources, stale anchors, wrong point, modified payout, and arithmetic failure. The independent digest remains required.
+
+Production acceptance and persistence still need an authoritative incremental claim and deferred-payout view from actual settlement, a separately authenticated digest from selected-chain evidence, and a guarded batch that includes the verified state and ready revision. The next integration test must use actual subsidy, recycled fees, deferred obligations, selected-chain replacement, and restart or interrupted writes. #47's test-only row is evidence of the batch boundary. The 29B KCADE candidate with 21B primary and 8B finite tail remains inactive.
+
+**Next:** Review #50's focused derivation and #46's corrected focused payout result. On 8/8 #43, start #48 and inspect reconnect and offline reopen logs. On 8/8 #41, integrate its formatting-only change into #45 and start selected ancestry CI. Run #47 after #45 validates. Preserve all passing runs.
+
 ## Issuance commitment and native-PoW evidence — November 23, 2026
 
 | Draft | Exact head | GitHub Actions evidence |
