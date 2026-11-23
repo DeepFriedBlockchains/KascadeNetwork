@@ -3,7 +3,7 @@
 use super::selected_chain::{DbSelectedChainStore, SelectedChainStoreReader};
 use crate::processes::coinbase::CoinbaseSettlement;
 use bincode::Options;
-use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
+use kaspa_consensus_core::issuance_checkpoint::{DeveloperPayoutRelease, IssuanceCheckpoint, IssuanceClaim};
 use kaspa_database::{
     prelude::{CachePolicy, DB, DeferredDbBatch, StoreError, StoreResult},
     registry::DatabaseStorePrefixes,
@@ -25,6 +25,17 @@ pub struct IssuanceCheckpointAnchor {
     pub expected_commitment: Hash,
 }
 
+/// Complete local consensus replay through the checkpoint's pruning point.
+/// The path, claims and releases must come from local verified consensus.
+/// Imported checkpoint contents cannot serve as replay evidence.
+pub struct LocalIssuanceReplay<'a> {
+    pub network_genesis: Hash,
+    pub supply_cap: u64,
+    pub selected_path: &'a [Hash],
+    pub claims: &'a [IssuanceClaim],
+    pub releases: &'a [DeveloperPayoutRelease],
+}
+
 /// One replaceable summary. Per-source acceptance remains owned by consensus.
 pub struct DbIssuanceCheckpoint {
     db: Arc<DB>,
@@ -33,6 +44,51 @@ pub struct DbIssuanceCheckpoint {
 impl DbIssuanceCheckpoint {
     pub fn new(db: Arc<DB>) -> Self {
         Self { db }
+    }
+
+    /// Compute an expected digest without reading the checkpoint to import.
+    /// The caller holds its authoritative selected-chain guard across this
+    /// derivation and the batch commit. A pruned prefix fails closed.
+    pub fn derive_anchor_from_local_replay(
+        &self,
+        selected: &RwLockReadGuard<'_, DbSelectedChainStore>,
+        replay: LocalIssuanceReplay<'_>,
+    ) -> StoreResult<IssuanceCheckpointAnchor> {
+        if !selected.is_for_database(&self.db) {
+            return Err(inconsistent("selected-chain guard belongs to another database"));
+        }
+        let Some((&pruning_point, prefix)) = replay.selected_path.split_last() else {
+            return Err(inconsistent("issuance replay has no selected path"));
+        };
+        if replay.selected_path.first() != Some(&replay.network_genesis) {
+            return Err(inconsistent("issuance replay does not start at configured genesis"));
+        }
+        let selected_index = u64::try_from(prefix.len()).map_err(|_| inconsistent("issuance replay selected index overflow"))?;
+        let committed = DbSelectedChainStore::new(self.db.clone(), CachePolicy::Empty);
+        if committed.get_tip()?.0 < selected_index {
+            return Err(inconsistent("issuance replay extends past the committed selected tip"));
+        }
+        for (index, &block) in (0u64..).zip(replay.selected_path) {
+            if committed.get_by_index(index)? != block || committed.get_by_hash(block)? != index {
+                return Err(inconsistent("issuance replay path disagrees with committed selected ancestry"));
+            }
+        }
+        let expected = IssuanceCheckpoint::derive_from_settlements(
+            replay.network_genesis,
+            pruning_point,
+            replay.supply_cap,
+            replay.selected_path,
+            replay.claims,
+            replay.releases,
+        )
+        .map_err(|error| inconsistent(format!("issuance replay verification failed: {error:?}")))?;
+        Ok(IssuanceCheckpointAnchor {
+            network_id: replay.network_genesis,
+            pruning_point,
+            selected_index,
+            supply_cap: replay.supply_cap,
+            expected_commitment: expected.commitment(),
+        })
     }
 
     /// Stage a verified row without publishing it. The caller must hold the
@@ -137,7 +193,7 @@ fn inconsistent(reason: impl Into<String>) -> StoreError {
 mod tests {
     use super::*;
     use crate::model::stores::selected_chain::SelectedChainStore;
-    use kaspa_consensus_core::{ChainPath, issuance_checkpoint::IssuanceClaim};
+    use kaspa_consensus_core::ChainPath;
     use kaspa_database::prelude::ConnBuilder;
     use parking_lot::RwLock;
     use rocksdb::WriteBatch;
@@ -238,5 +294,96 @@ mod tests {
         let guard = selected.read();
         assert_eq!(store.load(&guard, replacement_anchor).unwrap(), Some(replacement));
         assert!(store.load(&guard, anchor).is_err());
+    }
+
+    #[test]
+    fn issuance_checkpoint_replay_anchor_rejects_substitution_and_reorg() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let [genesis, parent, tip, sibling, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
+        let path = [genesis, parent, tip];
+        let claim = IssuanceClaim { reward_source: source, settlement_block: parent, selected_index: 1, minted: CAP, paid: CAP - 20 };
+        let release = DeveloperPayoutRelease { settlement_block: tip, selected_index: 2, amount: 20 };
+        let claims = [claim];
+        let releases = [release];
+        let replay = || LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
+        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, tip, CAP, &path, &claims, &releases).unwrap();
+
+        let db = connect();
+        let mut chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+        let mut init = WriteBatch::default();
+        chain.init_with_pruning_point(&mut init, genesis).unwrap();
+        db.write(init).unwrap();
+        let mut add = WriteBatch::default();
+        chain.apply_changes(&mut add, &ChainPath { removed: vec![], added: vec![parent, tip] }).unwrap();
+        db.write(add).unwrap();
+        let selected = RwLock::new(chain);
+        let store = DbIssuanceCheckpoint::new(db.clone());
+        {
+            let guard = selected.read();
+            let anchor = store.derive_anchor_from_local_replay(&guard, replay()).unwrap();
+            let altered = IssuanceClaim { reward_source: sibling, ..claim };
+            let substituted = IssuanceCheckpoint::derive_from_settlements(genesis, tip, CAP, &path, &[altered], &releases).unwrap();
+            assert_eq!((substituted.minted, substituted.paid, substituted.deferred), (CAP, CAP, 0));
+            assert_ne!(substituted.commitment(), anchor.expected_commitment);
+
+            let mut rejected = DeferredDbBatch::new(db.clone());
+            rejected.put_raw(&db, BATCH_PROBE, b"must not publish").unwrap();
+            assert!(store.stage(&mut rejected, &guard, anchor, &substituted).is_err());
+            assert!(rejected.commit().is_err());
+            assert!(db.get(BATCH_PROBE).unwrap().is_none());
+            assert!(store.load(&guard, anchor).unwrap().is_none());
+
+            let mut abandoned = DeferredDbBatch::new(db.clone());
+            store.stage(&mut abandoned, &guard, anchor, &checkpoint).unwrap();
+            drop(abandoned);
+            assert!(store.load(&guard, anchor).unwrap().is_none());
+
+            let mut batch = DeferredDbBatch::new(db.clone());
+            store.stage(&mut batch, &guard, anchor, &checkpoint).unwrap();
+            batch.commit().unwrap();
+        }
+        drop(store);
+        drop(selected);
+        drop(db);
+
+        let db = connect();
+        let selected = RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+        let store = DbIssuanceCheckpoint::new(db.clone());
+        {
+            let guard = selected.read();
+            let anchor = store.derive_anchor_from_local_replay(&guard, replay()).unwrap();
+            assert_eq!(store.load(&guard, anchor).unwrap(), Some(checkpoint));
+        }
+        {
+            let mut chain = selected.write();
+            let mut reorg = WriteBatch::default();
+            chain.apply_changes(&mut reorg, &ChainPath { removed: vec![tip], added: vec![sibling] }).unwrap();
+            db.write(reorg).unwrap();
+        }
+        let guard = selected.read();
+        assert!(store.derive_anchor_from_local_replay(&guard, replay()).is_err());
+        let replacement_path = [genesis, parent, sibling];
+        let replacement_releases = [DeveloperPayoutRelease { settlement_block: sibling, ..release }];
+        let replacement_replay = LocalIssuanceReplay {
+            selected_path: &replacement_path,
+            releases: &replacement_releases,
+            ..replay()
+        };
+        let anchor = store.derive_anchor_from_local_replay(&guard, replacement_replay).unwrap();
+        assert!(store.load(&guard, anchor).is_err());
+        let replacement =
+            IssuanceCheckpoint::derive_from_settlements(genesis, sibling, CAP, &replacement_path, &claims, &replacement_releases)
+                .unwrap();
+        let mut batch = DeferredDbBatch::new(db);
+        store.stage(&mut batch, &guard, anchor, &replacement).unwrap();
+        batch.commit().unwrap();
+        assert_eq!(store.load(&guard, anchor).unwrap(), Some(replacement));
     }
 }

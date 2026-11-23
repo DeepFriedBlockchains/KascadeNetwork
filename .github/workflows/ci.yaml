@@ -131,6 +131,13 @@ jobs:
           -E 'test(=issuance_checkpoint::tests::commits_developer_releases_without_minting_or_replaying_stale_liabilities) |
           test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
 
+      - name: Verify issuance anchor from committed local selected replay
+        if: github.head_ref == 'feat/phase6-local-issuance-replay-anchor-20261123' || github.ref_name == 'feat/phase6-local-issuance-replay-anchor-20261123'
+        run: >-
+          cargo nextest run -p kaspa-consensus --lib
+          -E 'test(=model::stores::issuance_checkpoint::tests::issuance_checkpoint_replay_anchor_rejects_substitution_and_reorg) |
+          test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
