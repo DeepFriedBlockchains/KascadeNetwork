@@ -99,10 +99,7 @@ mod tests {
 
     #[tokio::test]
     async fn live_pruning_candidate_authenticates_selected_child_after_reorg() {
-        use super::super::{
-            branch_readiness::DbBranchReadiness,
-            import_shielded_readiness::authenticated_selected_child_coinbase,
-        };
+        use super::super::{branch_readiness::DbBranchReadiness, import_shielded_readiness::authenticated_selected_child_coinbase};
         use crate::model::services::reachability::ReachabilityService;
         use kaspa_consensus_core::{
             api::ConsensusApi,
@@ -162,10 +159,7 @@ mod tests {
         assert!(processor.pruning_point_manager.is_valid_pruning_point(point, tip));
         assert!(processor.reachability_service.is_chain_ancestor_of(child.hash(), tip));
         assert!(!processor.reachability_service.is_chain_ancestor_of(old_child.hash(), tip));
-        assert_eq!(
-            authenticated_selected_child_coinbase(&db, point, &child, child.hash()).unwrap().id(),
-            child.transactions[0].id()
-        );
+        assert_eq!(authenticated_selected_child_coinbase(&db, point, &child, child.hash()).unwrap().id(), child.transactions[0].id());
         assert!(authenticated_selected_child_coinbase(&db, parent.hash(), &child, child.hash()).is_err());
         let missing_body = Block::from_header_arc(child.header.clone());
         assert!(authenticated_selected_child_coinbase(&db, point, &missing_body, child.hash()).is_err());
