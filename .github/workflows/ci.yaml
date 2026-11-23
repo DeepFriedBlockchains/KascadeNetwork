@@ -143,7 +143,9 @@ jobs:
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(reward_claim_join_credits_distinct_sources_after_reorg)'
 
       - name: Run eligible and fee-only reward claim regression
-        if: github.head_ref == 'test/phase6-merge-fee-accounting-20261122' || github.ref_name == 'test/phase6-merge-fee-accounting-20261122'
+        if: >-
+          github.head_ref == 'test/phase6-merge-fee-accounting-20261122' || github.ref_name == 'test/phase6-merge-fee-accounting-20261122' ||
+          github.head_ref == 'test/phase6-merge-payout-boundary-20261122' || github.ref_name == 'test/phase6-merge-payout-boundary-20261122'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(reward_claim_excludes_non_daa_red_subsidy_but_returns_its_fees)'
 
       - name: Run cargo build with devnet-prealloc feature
