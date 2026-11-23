@@ -11,7 +11,8 @@ use kaspad_lib::args::Args;
 use std::{sync::Arc, time::Duration};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep, timeout};
 
-const SAMPLE_BLOCKS: usize = 50;
+const BASELINE_SAMPLE_BLOCKS: usize = 50;
+const SUSTAINED_SAMPLE_BLOCKS: usize = 1_500;
 const COLLECTION_INTERVAL: Duration = Duration::from_millis(5);
 
 fn manager(node: &Daemon) -> Arc<ConsensusManager> {
@@ -47,6 +48,16 @@ async fn connect(client: &GrpcClient, sender: &Daemon) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "opt-in 5-BPS measurement on an isolated runner"]
 async fn phase6_five_bps_loopback_baseline() {
+    run_five_bps_loopback(BASELINE_SAMPLE_BLOCKS).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "opt-in five-minute 5-BPS measurement on an isolated runner"]
+async fn phase6_five_bps_loopback_five_minutes() {
+    run_five_bps_loopback(SUSTAINED_SAMPLE_BLOCKS).await;
+}
+
+async fn run_five_bps_loopback(sample_blocks: usize) {
     kaspa_alloc::init_allocator_with_default_settings();
     let profile = BlockrateParams::new::<5>();
     let block_period = Duration::from_millis(profile.target_time_per_block);
@@ -79,10 +90,10 @@ async fn phase6_five_bps_loopback_baseline() {
     let mut clock = interval(block_period);
     clock.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let start = Instant::now();
-    let mut samples = Vec::with_capacity(SAMPLE_BLOCKS);
+    let mut samples = Vec::with_capacity(sample_blocks);
     let mut final_tip = None;
 
-    for index in 0..SAMPLE_BLOCKS {
+    for index in 0..sample_blocks {
         clock.tick().await;
         let block = submit.get_block_template(miner.clone(), vec![]).await.unwrap().block;
         let hash = Header::try_from(&block.header).unwrap().hash;
@@ -119,6 +130,7 @@ async fn phase6_five_bps_loopback_baseline() {
         .expect("sample node did not select the final tip");
         client.disconnect().await.unwrap();
     }
+    println!("phase6_tip,{tip}");
     drop(first_manager);
     drop(second_manager);
     second.shutdown();
