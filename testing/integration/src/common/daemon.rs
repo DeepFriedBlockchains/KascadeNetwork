@@ -134,10 +134,10 @@ impl Daemon {
         let rpc_json_port = free_port();
         let rpc_borsh_port = free_port();
 
-        args.rpclisten = Some(format!("0.0.0.0:{rpc_port}").try_into().unwrap());
-        args.listen = Some(format!("0.0.0.0:{p2p_port}").try_into().unwrap());
-        args.rpclisten_json = Some(format!("0.0.0.0:{rpc_json_port}").parse().unwrap());
-        args.rpclisten_borsh = Some(format!("0.0.0.0:{rpc_borsh_port}").parse().unwrap());
+        args.rpclisten = Some(format!("127.0.0.1:{rpc_port}").try_into().unwrap());
+        args.listen = Some(format!("127.0.0.1:{p2p_port}").try_into().unwrap());
+        args.rpclisten_json = Some(format!("127.0.0.1:{rpc_json_port}").parse().unwrap());
+        args.rpclisten_borsh = Some(format!("127.0.0.1:{rpc_borsh_port}").parse().unwrap());
     }
 
     pub fn new_random(fd_total_budget: i32) -> Daemon {
