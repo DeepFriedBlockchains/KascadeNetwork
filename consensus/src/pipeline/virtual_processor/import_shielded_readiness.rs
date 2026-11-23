@@ -246,4 +246,64 @@ mod tests {
         });
     }
 
+
+    #[test]
+    fn issuance_checkpoint_rejects_stale_child_after_selected_branch_changes() {
+        use crate::{
+            model::stores::selected_chain::SelectedChainStore,
+            processes::issuance_checkpoint_model::check_issuance_fixture_with_child_anchor,
+        };
+        use kaspa_consensus_core::ChainPath;
+
+        check_issuance_fixture_with_child_anchor(|db, point, fixture_commitment| {
+            let mut payload = vec![0; SHIELDED_COMMITMENT_OFFSET];
+            payload.extend_from_slice(&fixture_commitment.as_bytes());
+            payload.extend_from_slice(&[0; 3]);
+            let coinbase = Transaction::new(0, vec![], vec![], 0, SUBNETWORK_ID_COINBASE, 0, payload);
+            let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
+            let ghostdag = DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty);
+            let mut chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+            let make_child = |nonce| {
+                let mut header = Header::from(&DEVNET_GENESIS);
+                header.nonce = nonce;
+                header.hash_merkle_root = calc_hash_merkle_root(std::iter::once(&coinbase));
+                header.finalize();
+                let hash = header.hash;
+                headers.insert(hash, Arc::new(header.clone()), 0).unwrap();
+                ghostdag.insert(hash, Arc::new(GhostdagData::new_with_selected_parent(point, 5))).unwrap();
+                Block::new(header, vec![coinbase.clone()])
+            };
+            let first = make_child(1);
+            let second = make_child(2);
+            assert_ne!(first.hash(), second.hash());
+
+            let check_selected = |child: &Block, tip| -> StoreResult<Hash> {
+                let anchor = authenticated_commitment(db, point, child, child.hash())?;
+                descendant_nullifiers(db, point, child.hash(), tip)?;
+                Ok(Hash::from_bytes(anchor))
+            };
+
+            let mut batch = WriteBatch::default();
+            chain.init_with_pruning_point(&mut batch, point).unwrap();
+            db.write(batch).unwrap();
+
+            let mut batch = WriteBatch::default();
+            chain.apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![first.hash()] }).unwrap();
+            db.write(batch).unwrap();
+            assert_eq!(check_selected(&first, first.hash()).unwrap(), fixture_commitment);
+            assert!(check_selected(&second, first.hash()).is_err());
+
+            let mut batch = WriteBatch::default();
+            chain.apply_changes(&mut batch, &ChainPath { removed: vec![first.hash()], added: vec![second.hash()] }).unwrap();
+            db.write(batch).unwrap();
+            // The old body still matches its stored header and selected parent.
+            assert!(authenticated_commitment(db, point, &first, first.hash()).is_ok());
+            assert!(check_selected(&first, second.hash()).is_err());
+            assert!(check_selected(&first, first.hash()).is_err());
+            assert_eq!(check_selected(&second, second.hash()).unwrap(), fixture_commitment);
+
+            check_selected(&second, second.hash()).unwrap()
+        });
+    }
+
 }
