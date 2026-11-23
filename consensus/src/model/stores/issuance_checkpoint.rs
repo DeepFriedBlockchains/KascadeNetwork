@@ -371,11 +371,7 @@ mod tests {
         assert!(store.derive_anchor_from_local_replay(&guard, replay()).is_err());
         let replacement_path = [genesis, parent, sibling];
         let replacement_releases = [DeveloperPayoutRelease { settlement_block: sibling, ..release }];
-        let replacement_replay = LocalIssuanceReplay {
-            selected_path: &replacement_path,
-            releases: &replacement_releases,
-            ..replay()
-        };
+        let replacement_replay = LocalIssuanceReplay { selected_path: &replacement_path, releases: &replacement_releases, ..replay() };
         let anchor = store.derive_anchor_from_local_replay(&guard, replacement_replay).unwrap();
         assert!(store.load(&guard, anchor).is_err());
         let replacement =
