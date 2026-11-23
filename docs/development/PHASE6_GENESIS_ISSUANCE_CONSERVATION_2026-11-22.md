@@ -5,3 +5,7 @@ This test-only extension is stacked on the persistent reward replay draft. Simne
 The fee-free competing-tip fixture then enumerates all seven eligible source claims by distinct miner scripts and requires the entire final UTXO set to match those claims exactly, including scripts, per-source amounts, count, and total new issuance. The inherited replay and reopen assertions compare that UTXO set on the same block DAG. The exact total is computed in a wider accumulator. The fixture disables shielded mint and developer routing so these checks isolate transparent issuance. Authenticated pruning restoration, qualified red settlement at real DAA membership boundaries, accrual accounting and all-output production cap enforcement remain open.
 
 CI is deferred while the underlying #30 replay matrix runs. After it finishes, merge or fast-forward its validated source into this test branch if needed, then run the existing focused test `reward_claim_join_credits_distinct_sources_after_reorg` and the matrix.
+
+## CI trigger
+
+The parent passed all eight jobs on `29707a918033aa62a0d763509f8629ee0e6562c4` in [Actions 45103683081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45103683081). Trigger this draft’s full matrix on the unchanged staged fixture `2296bfd82903111bb629641c316c6f8484bc354d`.
