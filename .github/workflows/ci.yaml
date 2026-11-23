@@ -162,6 +162,10 @@ jobs:
         if: github.head_ref == 'test/phase6-live-developer-release-reorg-20261123' || github.ref_name == 'test/phase6-live-developer-release-reorg-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::tests::live_reorg_replaces_selected_developer_release)'
 
+      - name: Verify live pruning eligibility and selected-child authentication
+        if: github.head_ref == 'test/phase6-live-pruning-child-eligibility-20261123' || github.ref_name == 'test/phase6-live-pruning-child-eligibility-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::live_pruning_candidate_authenticates_selected_child_after_reorg)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

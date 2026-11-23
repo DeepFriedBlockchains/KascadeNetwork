@@ -97,6 +97,88 @@ mod tests {
     use kaspa_database::{create_temp_db, prelude::ConnBuilder};
     use kaspa_hashes::Hash;
 
+    #[tokio::test]
+    async fn live_pruning_candidate_authenticates_selected_child_after_reorg() {
+        use super::super::{
+            branch_readiness::DbBranchReadiness,
+            import_shielded_readiness::authenticated_selected_child_coinbase,
+        };
+        use crate::model::services::reachability::ReachabilityService;
+        use kaspa_consensus_core::{
+            api::ConsensusApi,
+            blockhash,
+            coinbase::MinerData,
+            config::params::SIMNET_PARAMS,
+            tx::{ScriptPublicKey, ScriptVec},
+        };
+
+        async fn append(tc: &TestConsensus, parent: Hash, tag: u8) -> Block {
+            let miner = MinerData::new(ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x51, tag])), vec![]);
+            let mut block = tc.build_utxo_valid_block_with_parents(blockhash::NONE, vec![parent], miner, vec![]);
+            let params = tc.params();
+            block.header.timestamp = params.genesis.timestamp + u64::from(tag) * params.target_time_per_block();
+            block.header.nonce = u64::from(tag);
+            block.header.finalize();
+            let block = block.to_immutable();
+            tc.validate_and_insert_block(block.clone()).virtual_state_task.await.unwrap();
+            block
+        }
+
+        let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
+        let config = ConfigBuilder::new(SIMNET_PARAMS)
+            .edit_consensus_params(|params| {
+                params.blockrate.finality_depth = 3;
+                params.blockrate.pruning_depth = 12;
+                params.skip_proof_of_work = true;
+            })
+            .set_archival()
+            .build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let tc = TestConsensus::with_db(db.clone(), &config, sender);
+        let workers = tc.init();
+        let consensus = tc.consensus_clone();
+        let processor = tc.virtual_processor();
+        let first = append(&tc, config.genesis.hash, 1).await;
+        let parent = append(&tc, first.hash(), 2).await;
+        let candidate = append(&tc, parent.hash(), 3).await;
+        let point = candidate.hash();
+        assert!(processor.pruning_point_manager.is_pruning_sample(candidate.header.blue_score, parent.header.blue_score, 3));
+
+        let old_child = append(&tc, point, 4).await;
+        let old_tip = append(&tc, old_child.hash(), 5).await;
+        assert_eq!(consensus.get_sink(), old_tip.hash());
+        assert!(!processor.pruning_point_manager.is_valid_pruning_point(point, old_tip.hash()));
+        assert_eq!(
+            authenticated_selected_child_coinbase(&db, point, &old_child, old_child.hash()).unwrap().id(),
+            old_child.transactions[0].id()
+        );
+
+        let child = append(&tc, point, 6).await;
+        let mut tip = child.hash();
+        for tag in 7..=19 {
+            tip = append(&tc, tip, tag).await.hash();
+        }
+        assert_eq!(consensus.get_sink(), tip);
+        assert!(processor.pruning_point_manager.is_valid_pruning_point(point, tip));
+        assert!(processor.reachability_service.is_chain_ancestor_of(child.hash(), tip));
+        assert!(!processor.reachability_service.is_chain_ancestor_of(old_child.hash(), tip));
+        assert_eq!(
+            authenticated_selected_child_coinbase(&db, point, &child, child.hash()).unwrap().id(),
+            child.transactions[0].id()
+        );
+        assert!(authenticated_selected_child_coinbase(&db, parent.hash(), &child, child.hash()).is_err());
+        let missing_body = Block::from_header_arc(child.header.clone());
+        assert!(authenticated_selected_child_coinbase(&db, point, &missing_body, child.hash()).is_err());
+        let wrong_body = Block::from_arcs(child.header.clone(), old_child.transactions.clone());
+        assert!(authenticated_selected_child_coinbase(&db, point, &wrong_body, child.hash()).is_err());
+        // Ordinary consensus advancement cannot stand in for completing an
+        // isolated import with independently verified UTXO and SMT evidence.
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(!readiness.is_ready(ReadinessPoint { hash: point, index: 1 }).unwrap());
+        assert!(processor.authority_lease().is_err());
+        tc.shutdown(workers);
+    }
+
     #[test]
     fn authenticated_completion_rejects_missing_committed_import_metadata() {
         let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
