@@ -992,7 +992,13 @@ mod tests {
         let settlement = CoinbaseManager::reconcile_settlement(&template, &ghostdag, &rewards, &non_daa, 30).unwrap();
         assert_eq!(
             settlement,
-            CoinbaseSettlement { new_subsidy: 3_000, paid_subsidy: 2_850, recycled_fees: 33, deferred_before: 30, deferred_after: 180 }
+            CoinbaseSettlement {
+                new_subsidy: 3_000,
+                paid_subsidy: 2_850,
+                recycled_fees: 33,
+                deferred_before: 30,
+                deferred_after: 180
+            }
         );
         let previous = IssuanceCheckpoint {
             network_id: network,
