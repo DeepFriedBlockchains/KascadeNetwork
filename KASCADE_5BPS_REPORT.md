@@ -33,3 +33,7 @@ Initial DAA and timestamp controls should be recorded alongside the profile. The
 The first executable step is a paced three-node loopback baseline at 200 ms with transparent blocks and measured propagation. Save raw per-block times and settings as artifacts. Agree on latency, resource, and sustained acceptance tolerances before measuring a launch candidate. Use the existing [acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) for rejoin, restart, wallet and public-profile gates. Keep production activation off.
 
 The [opt-in loopback harness](testing/integration/tests/phase6_five_bps_baseline.rs) paces a transparent three-node workload and prints per-block submit and observed peer-validation times as CSV. Run it in GitHub Actions with `cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate`. The test exercises simulated PoW and its result is still pending. It is a short measurement harness rather than a sustained-rate certification.
+
+## 5-BPS measurement candidate
+
+The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This is a short transparent Simnet sample with simulated PoW, not a sustained-rate or production mining claim. Record the exact commit, run, sample results and limitations before counting the measurement as evidence.

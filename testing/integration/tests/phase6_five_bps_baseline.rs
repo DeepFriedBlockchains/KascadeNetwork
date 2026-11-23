@@ -12,6 +12,7 @@ use std::{sync::Arc, time::Duration};
 use tokio::time::{Instant, MissedTickBehavior, interval, sleep, timeout};
 
 const SAMPLE_BLOCKS: usize = 50;
+const COLLECTION_INTERVAL: Duration = Duration::from_millis(5);
 
 fn manager(node: &Daemon) -> Arc<ConsensusManager> {
     let service = node.core.find(ConsensusManager::IDENT).unwrap();
@@ -25,7 +26,7 @@ async fn await_block(manager: &ConsensusManager, hash: Hash) {
             if active.unguarded_session_blocking().get_block_status(hash) == Some(StatusUTXOValid) {
                 return;
             }
-            sleep(Duration::from_millis(5)).await;
+            sleep(COLLECTION_INTERVAL).await;
         }
     })
     .await
@@ -101,6 +102,7 @@ async fn phase6_five_bps_loopback_baseline() {
         final_tip = Some(hash);
     }
 
+    println!("phase6_config,{config}");
     println!("index,block_hash,submit_offset_us,first_valid_us,second_valid_us");
     for sample in samples {
         let (index, hash, submit_us, first_us, second_us) = sample.await.unwrap();
@@ -108,7 +110,13 @@ async fn phase6_five_bps_loopback_baseline() {
     }
     let tip = final_tip.expect("measurement should submit blocks");
     for client in [&submit, &first_client, &second_client] {
-        assert_eq!(client.get_block_dag_info().await.unwrap().sink, tip);
+        timeout(Duration::from_secs(10), async {
+            while client.get_block_dag_info().await.unwrap().sink != tip {
+                sleep(COLLECTION_INTERVAL).await;
+            }
+        })
+        .await
+        .expect("sample node did not select the final tip");
         client.disconnect().await.unwrap();
     }
     drop(first_manager);

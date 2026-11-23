@@ -683,26 +683,32 @@ on the exact SHAs, inspect the native regressions and full matrix, and
 record the results on each draft. Diagnose any actual test failures
 from job logs before changing implementation. Keep both drafts unmerged.
 
-## Follow-on testnet evidence
+## Validated checkpoints after Actions resumed
 
-The [5-BPS report](KASCADE_5BPS_REPORT.md) records inherited candidate constants and separates paced relay, actual mining, retention and workload evidence. It contains no runtime measurements. Use it after the isolated acceptance tests to record a first measured baseline.
+November 22, 2026. CI is running again. The stack remains draft and
+unmerged, with the Phase 6 preview default-off and Simnet-only.
+Documentation-only checkpoints preserve each exact tested source.
 
-An opt-in three-node measurement harness is prepared on this branch. The first runner result is pending.
-
-## Actions resumed after billing interruption
-
-November 22, 2026. Draft PR #16 remains the fully validated baseline.
-GitHub Actions has resumed executing steps after the billing lock. The
-following PR heads were held stable while their jobs executed.
-
-| Draft | Exact source | Run |
+| PR | Validated source | Actions result |
 | --- | --- | --- |
-| [#17 archive](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) | `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` | [45069228114](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114), attempt 3 |
-| [#19 partition/rejoin](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/19) | `978584bbd91e81b8b637bbebb6655426fe207d9d` | [45069680867](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069680867), attempt 3 |
-| [#20 profile audit](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/20) | `50b0d19290c54ffef5df3e0919d99645bb528e19` | [45078524217](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45078524217), attempt 2 |
-| [#21 native work](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/21) | `bd4f65851c0267f70aced3602f61391c5fdfc578` | [45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178), attempt 1 |
+| [#17 archive backfill](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/17) | `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` | [45069228114, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114/attempts/3), 8/8. Both focused tests, 36 Phase 6 cases, 1,579 workspace tests (25 skipped), 32 no-asm. Docs checkpoint `f2aeedfeeabd4b9e9a6be75992ced2420ca48446`. |
+| [#19 three-node partition/rejoin](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/19) | `978584bbd91e81b8b637bbebb6655426fe207d9d` | [45069680867, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069680867/attempts/3), 8/8. The three-node case ran in 26.487 seconds, alongside the rest of the 36 Phase 6 cases, 1,579 workspace tests (25 skipped), and 32 no-asm. Docs checkpoint `80d94f049c976944df511e949afa101443940119`. |
+| [#20 testnet profile audit](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/20) | `50b0d19290c54ffef5df3e0919d99645bb528e19` | [45078524217, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45078524217/attempts/3), 8/8. Native evidence from attempt 2 includes 35 Phase 6 cases, 1,579 workspace tests (25 skipped) and 32 no-asm. Attempt 2's WASM job stalled on txscript, then failed with an unavailable log. The single-job retry succeeded on the exact SHA. |
+| [#21 native proof-of-work relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/21) | `bd4f65851c0267f70aced3602f61391c5fdfc578` | [45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178), 8/8. The dedicated native mining test, 36 Phase 6 cases, 1,579 workspace tests (25 skipped), and 32 no-asm passed. Docs checkpoint `8ac6725cc4fc69c1c688a8cf2398415b3ddfe5eb`. |
 
-Draft [PR #18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) completed a post-launch
-shielded threat and migration research addendum at
-`d0d7e90bb2d3e4378328716c74580d3942e46a86`. No implementation or activation is
-part of that work. The opt-in 5-BPS harness has no runner result yet.
+[Draft #22](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) at `3aae9a87e353b2a164fadc77528b0871500e34ee`
+is next. [Run 45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439)
+will run focused native and auxiliary mining regressions before the
+broader matrix. The AuxPoW test uses a synthetic parent and the inherited
+commitment domain. Approved KASCADE domain parameters and actual mining
+pool interoperability remain separate.
+
+The [5-BPS harness and evidence plan](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/KASCADE_5BPS_REPORT.md)
+are staged on a separate branch with no measured results yet. Execute the
+paced loopback baseline after the next focused acceptance run. The
+[post-quantum research](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) now also tracks
+shielded authorization, privacy, proving stack and migration work.
+
+## 5-BPS measurement candidate
+
+The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This is a short transparent Simnet sample with simulated PoW, not a sustained-rate or production mining claim. Record the exact commit, run, sample results and limitations before counting the measurement as evidence.
