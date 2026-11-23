@@ -2672,12 +2672,24 @@ mod tests {
 
     #[tokio::test]
     async fn live_reorg_replaces_selected_nonzero_issuance_checkpoint() {
+        exercise_live_issuance_reorg(false).await;
+    }
+
+    #[tokio::test]
+    async fn live_reorg_replaces_selected_developer_release() {
+        exercise_live_issuance_reorg(true).await;
+    }
+
+    async fn exercise_live_issuance_reorg(developer: bool) {
         use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
         use kaspa_consensus_core::{
             blockhash,
             coinbase::MinerData,
-            config::{ConfigBuilder, params::SIMNET_PARAMS},
-            issuance_checkpoint::{IssuanceCheckpoint, IssuanceClaim},
+            config::{
+                ConfigBuilder,
+                params::{ForkActivation, SIMNET_PARAMS, ZKAS_DEV_FEE_RECIPIENT},
+            },
+            issuance_checkpoint::{DeveloperPayoutRelease, IssuanceCheckpoint, IssuanceClaim, VerificationError},
             tx::{ScriptPublicKey, ScriptVec},
         };
         use kaspa_database::prelude::{ConnBuilder, DeferredDbBatch};
@@ -2696,23 +2708,44 @@ mod tests {
             tc.validate_and_insert_block(block.clone()).virtual_state_task.await.unwrap();
         }
 
-        // This fixture disables developer settlement and contains no fees. Each
-        // reward-bearing selected block pays exactly its eligible parent.
-        fn claim(source: &Block, settlement: &Block, selected_index: u64, tag: u8) -> IssuanceClaim {
+        fn claim(source: &Block, settlement: &Block, selected_index: u64, tag: u8, developer: bool) -> IssuanceClaim {
             let minted = u64::from_le_bytes(source.transactions[0].payload[8..16].try_into().unwrap());
+            let cut = if developer { minted / 20 } else { 0 };
             let outputs = &settlement.transactions[0].outputs;
-            assert_eq!(outputs.len(), 1);
+            assert!(!outputs.is_empty());
             assert!(minted > 0);
-            assert_eq!(outputs[0].value, minted);
+            assert_eq!(outputs[0].value, minted - cut);
             assert_eq!(outputs[0].script_public_key.script(), &[0x51, tag]);
-            IssuanceClaim { reward_source: source.hash(), settlement_block: settlement.hash(), selected_index, minted, paid: minted }
+            IssuanceClaim {
+                reward_source: source.hash(),
+                settlement_block: settlement.hash(),
+                selected_index,
+                minted,
+                paid: minted - cut,
+            }
+        }
+
+        fn release(tc: &TestConsensus, block: &Block, selected_index: u64, expected_accrued: u64) -> Option<DeveloperPayoutRelease> {
+            let processor = tc.virtual_processor();
+            let sm = processor.shielded_state_manager_ref();
+            assert_eq!(sm.dev_accrued_at(block.hash()).unwrap(), expected_accrued);
+            let outputs = &block.transactions[0].outputs;
+            assert!(outputs.len() <= 2);
+            outputs.get(1).map(|output| {
+                assert_eq!(output.script_public_key.script(), ZKAS_DEV_FEE_RECIPIENT.as_slice());
+                DeveloperPayoutRelease { settlement_block: block.hash(), selected_index, amount: output.value }
+            })
         }
 
         const CAP: u64 = 2_900_000_000_000_000_000;
         let config = ConfigBuilder::new(SIMNET_PARAMS.clone())
             .edit_consensus_params(|params| {
                 params.shielded_coinbase = false;
-                params.dev_fee_recipient = None;
+                params.dev_fee_recipient = developer.then_some(ZKAS_DEV_FEE_RECIPIENT);
+                params.dev_fee_permille = 50;
+                params.dev_fee_accrual_activation = ForkActivation::always();
+                // Simnet genesis is excluded from the DAA window, so the third block has DAA score 2.
+                params.dev_fee_payout_interval = 2;
                 params.skip_proof_of_work = true;
             })
             .build();
@@ -2732,11 +2765,16 @@ mod tests {
         let a2 = build(&tc, a1.hash(), 4);
         insert(&tc, &a2).await;
         assert_eq!(consensus.get_sink(), a2.hash());
+        assert_eq!([split.header.daa_score, a1.header.daa_score, a2.header.daa_score], [0, 1, 2]);
 
         let store = DbIssuanceCheckpoint::new(db.clone());
         let old_path = [genesis, split.hash(), a1.hash(), a2.hash()];
-        let old_claims = [claim(&split, &a1, 2, 1), claim(&a1, &a2, 3, 2)];
-        let old = IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &[]).unwrap();
+        let old_claims = [claim(&split, &a1, 2, 1, developer), claim(&a1, &a2, 3, 2, developer)];
+        assert!(release(&tc, &a1, 2, old_claims[0].minted - old_claims[0].paid).is_none());
+        let old_releases = release(&tc, &a2, 3, 0).into_iter().collect::<Vec<_>>();
+        assert_eq!(old_releases.len(), if developer { 1 } else { 0 });
+        let old = IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &old_releases).unwrap();
+        assert_eq!((old.paid, old.deferred), (old.minted, 0));
         {
             let selected = consensus.storage.selected_chain_store.read();
             let replay = LocalIssuanceReplay {
@@ -2744,7 +2782,7 @@ mod tests {
                 supply_cap: CAP,
                 selected_path: &old_path,
                 claims: &old_claims,
-                releases: &[],
+                releases: &old_releases,
             };
             let mut batch = DeferredDbBatch::new(db.clone());
             store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &old).unwrap();
@@ -2758,9 +2796,34 @@ mod tests {
         let b3 = build(&tc, b2.hash(), 6);
         insert(&tc, &b3).await;
         assert_eq!(consensus.get_sink(), b3.hash());
+        assert_eq!([b1.header.daa_score, b2.header.daa_score, b3.header.daa_score], [1, 2, 3]);
         let new_path = [genesis, split.hash(), b1.hash(), b2.hash(), b3.hash()];
-        let new_claims = [claim(&split, &b1, 2, 1), claim(&b1, &b2, 3, 3), claim(&b2, &b3, 4, 5)];
-        let replacement = IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &[]).unwrap();
+        let new_claims = [claim(&split, &b1, 2, 1, developer), claim(&b1, &b2, 3, 3, developer), claim(&b2, &b3, 4, 5, developer)];
+        let outstanding = new_claims[2].minted - new_claims[2].paid;
+        assert!(release(&tc, &b1, 2, new_claims[0].minted - new_claims[0].paid).is_none());
+        let new_releases = release(&tc, &b2, 3, 0).into_iter().collect::<Vec<_>>();
+        assert!(release(&tc, &b3, 4, outstanding).is_none());
+        assert_eq!(new_releases.len(), if developer { 1 } else { 0 });
+        let replacement =
+            IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &new_releases).unwrap();
+        if developer {
+            assert_ne!(old_releases[0].settlement_block, new_releases[0].settlement_block);
+            assert_eq!(
+                IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &old_releases),
+                Err(VerificationError::OffSelectedPath)
+            );
+            assert_eq!(
+                IssuanceCheckpoint::derive_from_settlements(
+                    genesis,
+                    b3.hash(),
+                    CAP,
+                    &new_path,
+                    &new_claims,
+                    &[new_releases[0], new_releases[0]]
+                ),
+                Err(VerificationError::DuplicateDeveloperRelease)
+            );
+        }
         {
             let selected = consensus.storage.selected_chain_store.read();
             assert!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).is_err());
@@ -2769,7 +2832,7 @@ mod tests {
                 supply_cap: CAP,
                 selected_path: &new_path,
                 claims: &new_claims,
-                releases: &[],
+                releases: &new_releases,
             };
             let mut batch = DeferredDbBatch::new(db.clone());
             store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &replacement).unwrap();
@@ -2777,7 +2840,7 @@ mod tests {
         }
         assert_eq!(replacement.claim_count, 3);
         assert_eq!(replacement.minted, new_claims.iter().map(|claim| claim.minted).sum::<u64>());
-        assert_eq!((replacement.paid, replacement.deferred), (replacement.minted, 0));
+        assert_eq!((replacement.paid, replacement.deferred), (replacement.minted - outstanding, outstanding));
         tc.shutdown(workers);
         drop(consensus);
         drop(tc);
@@ -2793,6 +2856,7 @@ mod tests {
         let store = DbIssuanceCheckpoint::new(db);
         assert_eq!(store.load_retained_replay_checkpoint(&selected, genesis, b3.hash(), CAP).unwrap(), replacement);
         assert!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).is_err());
+        assert_eq!(tc.virtual_processor().shielded_state_manager_ref().dev_accrued_at(b3.hash()).unwrap(), outstanding);
     }
 
     /// A node whose chain index starts at genesis must report history COMPLETE; the whole point
