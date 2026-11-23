@@ -152,7 +152,7 @@ jobs:
           if-no-files-found: error
 
       - name: Measure five minutes of isolated 5-BPS loopback
-        if: github.head_ref == 'test/phase6-five-bps-sustained-20261122' || github.ref_name == 'test/phase6-five-bps-sustained-20261122'
+        if: github.head_ref == 'test/phase6-sustained-resource-sampling-20261122' || github.ref_name == 'test/phase6-sustained-resource-sampling-20261122'
         timeout-minutes: 30
         shell: bash
         run: |
@@ -160,6 +160,8 @@ jobs:
           sed -n 's/^[[:blank:]]*phase6_config,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-profile.json"
           sed -n 's/^[[:blank:]]*phase6_tip,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-tip.txt"
           sed -E 's/^[[:blank:]]+//' "$RUNNER_TEMP/five-bps.log" | grep -E '^(index,block_hash,|[0-9]+,[0-9a-f]{64},[0-9]+,[0-9]+,[0-9]+$)' > "$RUNNER_TEMP/five-bps.csv"
+          sed -n 's/^[[:blank:]]*phase6_resources,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-resources.json"
+          export PHASE6_CLK_TCK="$(getconf CLK_TCK)"
           python3 - <<'PY'
           import csv
           import json
@@ -188,6 +190,20 @@ jobs:
               "offered_and_accepted_bps": offered_bps,
               "final_tip": tip,
           }
+          resources = json.loads((output / "five-bps-resources.json").read_text())
+          before, after = resources["before"], resources["after"]
+          ticks = (after["user_ticks"] - before["user_ticks"]) + (after["system_ticks"] - before["system_ticks"])
+          wall_seconds = resources["elapsed_us"] / 1_000_000
+          assert ticks >= 0 and wall_seconds > 0
+          report_cpu_seconds = ticks / int(os.environ["PHASE6_CLK_TCK"])
+          summary["process_resources"] = {
+              "wall_seconds": wall_seconds,
+              "cpu_seconds": report_cpu_seconds,
+              "mean_cpu_cores": report_cpu_seconds / wall_seconds,
+              "start_rss_kib": before["rss_kib"],
+              "end_rss_kib": after["rss_kib"],
+              "process_lifetime_peak_rss_kib": after["process_peak_rss_kib"],
+          }
           for peer in ("first", "second"):
               times = sorted(int(row[f"{peer}_valid_us"]) for row in rows)
               summary[f"{peer}_valid_us"] = {
@@ -201,7 +217,7 @@ jobs:
           PY
 
       - name: Upload five-minute 5-BPS measurement
-        if: github.head_ref == 'test/phase6-five-bps-sustained-20261122' || github.ref_name == 'test/phase6-five-bps-sustained-20261122'
+        if: github.head_ref == 'test/phase6-sustained-resource-sampling-20261122' || github.ref_name == 'test/phase6-sustained-resource-sampling-20261122'
         uses: actions/upload-artifact@v4
         with:
           name: phase6-five-bps-sustained
@@ -210,6 +226,7 @@ jobs:
             ${{ runner.temp }}/five-bps-profile.json
             ${{ runner.temp }}/five-bps-tip.txt
             ${{ runner.temp }}/five-bps-summary.json
+            ${{ runner.temp }}/five-bps-resources.json
           if-no-files-found: error
 
       - name: Run cargo build with devnet-prealloc feature
