@@ -193,9 +193,15 @@ mod tests {
             statuses::{DbStatusesStore, StatusesStore},
             virtual_state::{VirtualState, VirtualStateStore},
         };
-        use crate::processes::ghostdag::ordering::SortableBlock;
+        use crate::processes::{
+            ghostdag::ordering::SortableBlock,
+            issuance_checkpoint_model::{guarded_issuance_fixture, verify_guarded_issuance_fixture},
+        };
         use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, config::params::ForkActivation};
+        use kaspa_database::{prelude::DeferredDbBatch, registry::DatabaseStorePrefixes};
         use rocksdb::WriteBatch;
+
+        const SETTLEMENT_ROW: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 0xf0];
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
         let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
@@ -259,8 +265,35 @@ mod tests {
         db.write(batch).unwrap();
         assert!(processor.authority_lease().is_err());
         let recovered = processor.recover_authenticated_staging(point, &proof, &child, &child).unwrap();
-        processor.commit_staging_promotion_checked(recovered, &proof, &child, true).unwrap();
+        let (expected, checkpoint) = guarded_issuance_fixture(point.hash);
+        let make_batch = |bytes: &[u8]| {
+            let mut batch = DeferredDbBatch::new(db.clone());
+            batch.put_raw(&db, SETTLEMENT_ROW, bytes).unwrap();
+            batch
+        };
+
+        let invalid_body = Block::new(child.header.as_ref().clone(), vec![]);
+        assert!(processor.publish_staging_promotion_with_fixture(recovered, &proof, &invalid_body, make_batch(&checkpoint)).is_err());
+        assert!(!DbBranchReadiness::new(db.clone()).is_ready(point).unwrap());
+        assert!(db.get(PROMOTION_KEY).unwrap().is_none());
+        assert!(db.get(SETTLEMENT_ROW).unwrap().is_none());
+
+        let recovered = processor.recover_authenticated_staging(point, &proof, &child, &child).unwrap();
+        processor.publish_staging_promotion_with_fixture(recovered, &proof, &child, make_batch(&checkpoint)).unwrap();
+        drop(consensus);
+        drop(db);
+
+        let db = connect();
+        assert!(DbBranchReadiness::new(db.clone()).is_ready(point).unwrap());
         assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
+        let persisted = db.get(SETTLEMENT_ROW).unwrap().unwrap();
+        assert!(verify_guarded_issuance_fixture(&persisted, point.hash, expected));
+        let mut altered = persisted.to_vec();
+        let paid = u64::from_le_bytes(altered[72..80].try_into().unwrap());
+        let deferred = u64::from_le_bytes(altered[80..88].try_into().unwrap());
+        altered[72..80].copy_from_slice(&(paid - 1).to_le_bytes());
+        altered[80..88].copy_from_slice(&(deferred + 1).to_le_bytes());
+        assert!(!verify_guarded_issuance_fixture(&altered, point.hash, expected));
     }
 
     #[test]

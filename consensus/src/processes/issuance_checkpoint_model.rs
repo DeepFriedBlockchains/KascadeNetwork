@@ -290,3 +290,12 @@ pub(crate) fn check_issuance_fixture_with_child_anchor<F>(
     db.put(CHECKPOINT_ROW, checkpoint_bytes(&changed)).unwrap();
     assert!(read_ready_checkpoint(&db, network, changed.point, anchor).is_none());
 }
+
+pub(crate) fn guarded_issuance_fixture(point: Hash) -> (Hash, Vec<u8>) {
+    let checkpoint = Checkpoint::genesis(id(1)).advance(point, &[id(2)], cumulative_kazmi(1) - 5, 0, 5).unwrap();
+    (checkpoint.commitment(), checkpoint_bytes(&checkpoint))
+}
+
+pub(crate) fn verify_guarded_issuance_fixture(bytes: &[u8], point: Hash, expected: Hash) -> bool {
+    decode_checkpoint(bytes).and_then(|checkpoint| checkpoint.restore(id(1), point, expected)).is_some()
+}
