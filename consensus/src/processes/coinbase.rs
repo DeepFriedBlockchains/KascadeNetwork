@@ -1027,7 +1027,7 @@ mod tests {
     #[test]
     fn reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout() {
         use crate::model::stores::{
-            issuance_checkpoint::{DbIssuanceCheckpoint, IssuanceCheckpointAnchor},
+            issuance_checkpoint::{DbIssuanceCheckpoint, IssuanceCheckpointAnchor, LocalIssuanceReplay},
             selected_chain::{DbSelectedChainStore, SelectedChainStore},
         };
         use kaspa_consensus_core::{ChainPath, config::params::MAINNET_PARAMS};
@@ -1152,8 +1152,17 @@ mod tests {
             let guard = selected.read();
             let store = DbIssuanceCheckpoint::new(db.clone());
             assert_eq!(store.load(&guard, previous_anchor).unwrap(), Some(previous));
+            let replay = LocalIssuanceReplay {
+                network_genesis: network,
+                supply_cap: CAP,
+                selected_path: &[network, parent, current],
+                claims: &claims,
+                releases: &[],
+            };
+            let anchor = store.derive_anchor_from_local_replay(&guard, replay).unwrap();
+            assert_eq!(anchor.expected_commitment, next_anchor.expected_commitment);
             let mut batch = DeferredDbBatch::new(db);
-            store.stage_reconciled_transition(&mut batch, &guard, previous_anchor, next_anchor, &next, &settlement).unwrap();
+            store.stage_reconciled_transition(&mut batch, &guard, previous_anchor, anchor, &next, &settlement).unwrap();
             batch.commit().unwrap();
         }
         {
