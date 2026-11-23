@@ -172,6 +172,31 @@ jobs:
           cargo build -p kaspad
           cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --test-threads=1 --success-output immediate -E 'test(=phase6_loopback_cli_live_peer_reconnect)' 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
 
+      - name: Validate live-peer recovery observations
+        if: github.head_ref == 'test/phase6-native-pow-live-peer-reconnect-20261123' || github.ref_name == 'test/phase6-native-pow-live-peer-reconnect-20261123'
+        shell: bash
+        run: |
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-live-peer-reconnect"
+          sed -n 's/^[[:blank:]]*phase6_peer_recovery,//p' "$KASCADE_CLI_LOGS/driver.log" > "$KASCADE_CLI_LOGS/peer-recovery.json"
+          sed -n 's/^[[:blank:]]*phase6_node_metrics,//p' "$KASCADE_CLI_LOGS/driver.log" > "$KASCADE_CLI_LOGS/metrics.jsonl"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          folder = Path(os.environ["KASCADE_CLI_LOGS"])
+          recovery = json.loads((folder / "peer-recovery.json").read_text())
+          assert recovery["synced_blocks"] == 3
+          assert len(recovery["final_tip"]) == 64
+          int(recovery["final_tip"], 16)
+          assert 0 <= recovery["reconnect_ms"] <= recovery["catch_up_ms"]
+          assert recovery["interruption_ms"] >= 0 and recovery["offline_reopen_ms"] >= 0
+          metrics = [json.loads(line) for line in (folder / "metrics.jsonl").read_text().splitlines()]
+          expected = {("c", "before_partition"), *((node, "reconnected") for node in "abc")}
+          assert {(row["node"], row["stage"]) for row in metrics} == expected
+          assert len(metrics) == len(expected)
+          PY
+
       - name: Upload native-PoW peer reconnection evidence
         if: always() && (github.head_ref == 'test/phase6-native-pow-live-peer-reconnect-20261123' || github.ref_name == 'test/phase6-native-pow-live-peer-reconnect-20261123')
         uses: actions/upload-artifact@v4
