@@ -494,20 +494,16 @@ mod tests {
         (router, hub_receiver)
     }
 
+    fn message(payload: KaspadMessagePayload, request_id: u32) -> KaspadMessage {
+        KaspadMessage { payload: Some(payload), response_id: BLANK_ROUTE_ID, request_id }
+    }
+
     fn inventory(request_id: u32) -> KaspadMessage {
-        KaspadMessage {
-            payload: Some(KaspadMessagePayload::InvTransactions(InvTransactionsMessage::default())),
-            response_id: BLANK_ROUTE_ID,
-            request_id,
-        }
+        message(KaspadMessagePayload::InvTransactions(InvTransactionsMessage::default()), request_id)
     }
 
     fn ping(request_id: u32) -> KaspadMessage {
-        KaspadMessage {
-            payload: Some(KaspadMessagePayload::Ping(PingMessage::default())),
-            response_id: BLANK_ROUTE_ID,
-            request_id,
-        }
+        message(KaspadMessagePayload::Ping(PingMessage::default()), request_id)
     }
 
     #[test]
