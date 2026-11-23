@@ -48,8 +48,9 @@ and 8,000,000,000 KCADE reserved for a finite, long-term tail. Cumulative
 issuance cannot exceed 29,000,000,000 KCADE. Burns do not replenish either
 issuance budget.
 
-The exact curve, reward clock, phase boundaries and tail duration require
-owner approval. [Monetary design and reference vectors](docs/development/PHASE6_29B_EMISSION_DESIGN_2026-11-22.md)
+The owner directed a 10-year primary and 25-year tail candidate at a nominal
+5 rewarded slots per second. Review the [integer candidate](docs/development/PHASE6_35_YEAR_EMISSION_CANDIDATE.md).
+Reward-slot ownership and production activation require separate approval. [Monetary design and reference vectors](docs/development/PHASE6_29B_EMISSION_DESIGN_2026-11-22.md)
 compare the earlier cascade and fixed-tail figures with alternative finite
 tails. Add independent full-schedule and boundary vectors, including the
 transition to zero, once the schedule is approved.

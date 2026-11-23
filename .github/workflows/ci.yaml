@@ -133,9 +133,9 @@ jobs:
       - name: Run isolated Simnet native proof-of-work regression
         run: cargo nextest run -p kaspa-testing-integration --test phase6_native_pow_relay --features phase6-staging-preview
 
-      - name: Run 29B emission reference vectors
+      - name: Run 35-year emission candidate regressions
         if: github.head_ref == 'design/29b-emission-validation-20261122' || github.ref_name == 'design/29b-emission-validation-20261122'
-        run: cargo nextest run -p kaspa-consensus --test phase6_monetary_policy_model
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(emission_candidate_)'
 
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
