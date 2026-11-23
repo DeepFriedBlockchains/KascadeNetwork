@@ -1030,7 +1030,11 @@ mod tests {
             issuance_checkpoint::{DbIssuanceCheckpoint, IssuanceCheckpointAnchor},
             selected_chain::{DbSelectedChainStore, SelectedChainStore},
         };
-        use kaspa_consensus_core::{ChainPath, config::params::MAINNET_PARAMS};
+        use kaspa_consensus_core::{
+            ChainPath,
+            config::params::MAINNET_PARAMS,
+            issuance_checkpoint::{IssuanceCommitmentField, VerificationError},
+        };
         use kaspa_database::prelude::{CachePolicy, ConnBuilder, DeferredDbBatch};
         use kaspa_hashes::Hash;
         use parking_lot::RwLock;
@@ -1193,6 +1197,22 @@ mod tests {
         .unwrap();
         assert_eq!((payout_checkpoint.minted, payout_checkpoint.paid, payout_checkpoint.deferred), (3_180, 3_180, 0));
         assert!(paid.matches_checkpoint_transition(&prior_payout_checkpoint, &payout_checkpoint));
+
+        let path = [network, parent, current];
+        let verify = |wire: &[u8], path: &[Hash], releases: &[DeveloperPayoutRelease]| {
+            IssuanceCommitmentField::decode(wire)
+                .unwrap()
+                .verify_local_settlement(network, current, CAP, path, &payout_claims, releases)
+        };
+        let wire = IssuanceCommitmentField::from_checkpoint(&payout_checkpoint).encode();
+        assert_eq!(verify(&wire, &path, &[release]), Ok(payout_checkpoint));
+        let substituted = IssuanceCheckpoint { ordered_claims_root: fee_only, ..payout_checkpoint };
+        let wrong_wire = IssuanceCommitmentField::from_checkpoint(&substituted).encode();
+        assert_eq!(verify(&wrong_wire, &path, &[release]), Err(VerificationError::CommitmentMismatch));
+        assert_eq!(verify(&wire, &[fee_only, parent, current], &[release]), Err(VerificationError::WrongContext));
+        let stale = DeveloperPayoutRelease { settlement_block: red, ..release };
+        assert_eq!(verify(&wire, &path, &[stale]), Err(VerificationError::OffSelectedPath));
+        assert_eq!(verify(&wire, &path, &[release, release]), Err(VerificationError::DuplicateDeveloperRelease));
 
         template.tx.outputs[0].value = u64::MAX;
         assert!(CoinbaseManager::reconcile_settlement(&template, &ghostdag, &rewards, &non_daa, 30).is_none());

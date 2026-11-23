@@ -170,6 +170,10 @@ jobs:
         if: github.head_ref == 'feat/phase6-inactive-issuance-field-20261123' || github.ref_name == 'feat/phase6-inactive-issuance-field-20261123'
         run: cargo nextest run -p kaspa-consensus-core --lib -E 'test(=issuance_checkpoint::tests::inactive_issuance_field_has_canonical_encoding) | test(=issuance_checkpoint::tests::inactive_issuance_field_rejects_context_and_equal_total_substitution)'
 
+      - name: Verify inactive issuance field against locally derived coinbase settlement
+        if: github.head_ref == 'test/phase6-inactive-field-verified-settlement-20261123' || github.ref_name == 'test/phase6-inactive-field-verified-settlement-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
