@@ -18,12 +18,8 @@ const TAIL_SHORTFALL: u128 = JOIN_KAZMI * TAIL_N - TAIL_KAZMI as u128;
 
 const PRIMARY: LinearPhase =
     LinearPhase::new(PRIMARY_N, JOIN_KAZMI * PRIMARY_N * PRIMARY_N + PRIMARY_EXCESS, 2 * PRIMARY_EXCESS, PRIMARY_KAZMI);
-const TAIL: LinearPhase = LinearPhase::new(
-    TAIL_N,
-    JOIN_KAZMI * TAIL_N * TAIL_N - TAIL_SHORTFALL * (2 * TAIL_N - 1),
-    2 * TAIL_SHORTFALL,
-    TAIL_KAZMI,
-);
+const TAIL: LinearPhase =
+    LinearPhase::new(TAIL_N, JOIN_KAZMI * TAIL_N * TAIL_N - TAIL_SHORTFALL * (2 * TAIL_N - 1), 2 * TAIL_SHORTFALL, TAIL_KAZMI);
 
 struct LinearPhase {
     slots: u128,
