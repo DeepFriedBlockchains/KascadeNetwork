@@ -210,4 +210,39 @@ mod tests {
         db.write(batch).unwrap();
         assert!(verify_pruning_shielded(&db, point, &child, trusted_child).is_err());
     }
+
+    #[test]
+    fn issuance_checkpoint_reopens_against_selected_child_body_commitment() {
+        use crate::processes::issuance_checkpoint_model::check_issuance_fixture_with_child_anchor;
+
+        check_issuance_fixture_with_child_anchor(|db, point, fixture_commitment| {
+            // This uses the existing shielded slot only as a test stand-in.
+            // It does not define an issuance field in the consensus payload.
+            let mut payload = vec![0; SHIELDED_COMMITMENT_OFFSET];
+            payload.extend_from_slice(&fixture_commitment.as_bytes());
+            payload.extend_from_slice(&[0; 3]);
+            let coinbase = Transaction::new(0, vec![], vec![], 0, SUBNETWORK_ID_COINBASE, 0, payload);
+            let mut header = Header::from(&DEVNET_GENESIS);
+            header.hash_merkle_root = calc_hash_merkle_root(std::iter::once(&coinbase));
+            header.finalize();
+            let trusted_child = header.hash;
+            let child = Block::new(header.clone(), vec![coinbase.clone()]);
+
+            let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
+            headers.insert(trusted_child, Arc::new(header.clone()), 0).unwrap();
+            let ghostdag = DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty);
+            ghostdag.insert(trusted_child, Arc::new(GhostdagData::new_with_selected_parent(point, 5))).unwrap();
+
+            let anchor = authenticated_commitment(db, point, &child, trusted_child).unwrap();
+            assert_eq!(Hash::from_bytes(anchor), fixture_commitment);
+            assert!(authenticated_commitment(db, trusted_child, &child, trusted_child).is_err());
+            let mut changed = coinbase;
+            changed.payload[SHIELDED_COMMITMENT_OFFSET] ^= 1;
+            changed.finalize();
+            let mismatched = Block::new(header, vec![changed]);
+            assert!(authenticated_commitment(db, point, &mismatched, trusted_child).is_err());
+
+            Hash::from_bytes(anchor)
+        });
+    }
 }

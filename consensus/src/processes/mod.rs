@@ -5,7 +5,7 @@ pub mod difficulty;
 pub mod emission_candidate;
 pub mod ghostdag;
 #[cfg(test)]
-mod issuance_checkpoint_model;
+pub(crate) mod issuance_checkpoint_model;
 pub mod parents_builder;
 pub mod past_median_time;
 pub mod pruning;
