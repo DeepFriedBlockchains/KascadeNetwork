@@ -2,6 +2,18 @@
 
 Updated November 23, 2026.
 
+## Selected replay anchor and pending issuance validation — November 23, 2026
+
+| PR | Exact head | GitHub Actions evidence |
+| --- | --- | --- |
+| [#52](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/52) | `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` | [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690), 6/8 passed. The named settlement + RocksDB regression was running; the broader authority result, including port reservations, remains pending. No restart requested. |
+| [#53](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/53) | `844b9d8c2ad53733d314a33f74532dd216bebf5b` | [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761), 2/8 passed. Focused selected developer release and coinbase settlement step running. No restart requested. |
+| [#54](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/54) | `3863d17c66f7d237a965011a564164b9b3f8ac7f` | [45233347194](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45233347194) pending. Branch `feat/phase6-local-issuance-replay-anchor-20261123` stacked on exact #53. The focused step selects the new named replay/reorg regression and the actual coinbase settlement fixture. |
+
+#54 computes an expected issuance digest from separately provided local consensus replay events and checks the full replay path against a pinned, same-database selected-chain guard. It checks both hash-to-index and index-to-hash, configured genesis and cap, and derives the canonical claim/release root and balances without reading the imported record. The store then verifies the candidate against that expected digest. The regression rejects equal-total source substitution and stale ancestry, verifies rejected/abandoned RocksDB batches and committed reopen, and replaces the stale checkpoint after a selected-chain reorganization. The existing coinbase fixture now feeds its attributed source claims into the replay-derived anchor before staging a reconciled successor.
+
+**Next:** Inspect the exact named #52/#53 focused and completed authority logs. Verify #54's two-test replay and settlement step and matrix. The local replay interface requires trusted claim/release provenance and complete committed ancestry. A pruned receiver cannot use this as its remote proof: `import_shielded_readiness::authenticated_commitment` authenticates only the shielded state root. Consensus still needs a validated issuance commitment sourced from independently authenticated selected evidence or a verified replay checkpoint that can initialize a pruned suffix. Then pass the typed anchor to `commit_staging_promotion_checked` so the same guarded authority batch commits the real #51 settlement row and ready revision. Test invalid proof, interrupted publication, reopen and reorg in that path. The current replay regression uses a batch probe, and production readiness remains unproven. Proposed supply remains 29B KCADE (21B primary and 8B finite tail), with production issuance and public activation disabled.
+
 ## Local selected-chain replay checkpoint — November 23, 2026
 
 - #52 `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` remains active on [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690). Four jobs passed; focused settlement, Clippy and the authority/port regression were still pending.
