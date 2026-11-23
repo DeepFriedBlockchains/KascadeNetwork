@@ -2,6 +2,22 @@
 
 Updated November 23, 2026.
 
+## Four-assignment validation and readiness publication — November 23, 2026
+
+| PR | Exact head | Actions evidence |
+| --- | --- | --- |
+| #52 | `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` | [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690), 7/8. Named settlement + RocksDB step passed. Native devnet-prealloc build running; serial authority and port result pending. |
+| #53 | `844b9d8c2ad53733d314a33f74532dd216bebf5b` | [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761), 7/8. Combined selected-release/coinbase step passed; native devnet-prealloc running. Check the completed log for both exact PASS lines. |
+| #54 | `c1442b2d6f81cb9e7b9a470dd023154ffd755ef5` | [45234460768](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234460768), 4/8. Focused replay/settlement step running. |
+| #55 | `4b6e14876e0d84eee86241c8e58db2843d63a87b` | [45235594152](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45235594152), 3/8. Named retained replay pruning step running. Initial [45234797231](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234797231) failed rustfmt; correction is formatting-only. |
+| [#56](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/56) | `b6466c5a823988ac7b1837588ce4c7c57940b8de` | [45236408364](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45236408364) pending. Branch `feat/phase6-atomic-local-issuance-readiness-20261123` stacked on the corrected #55. |
+
+#56 stages the verified local pair at the first durable readiness write in `PersistentBranchAuthority::complete_import_with_staging`. The IBD completion reuses actual pruning proof, SMT, shielded, pruning UTXO and virtual UTXO verification, pins selected-chain ownership, and scopes writes to the authority namespace. The opt-in regression covers absent/substituted issuance, abandoned import and successful guarded completion and reopen. The fixture uses zero-issuance genesis replay, so crash and nonzero settlement/reorg publication still need the full integration case. The legacy path remains active with issuance disabled.
+
+Reusable selected-child coinbase membership verifies stored header, selected parent and transaction Merkle root. No current field supplies consensus-validated cumulative issuance. The next consensus increment must validate a separate versioned issuance digest against applied settlement for the selected parent, independently of peer checkpoint bytes. Once the owner approves placement, activation and migration, an authenticated selected child can supply that digest for a fresh pruned receiver. Feed it into the same staged completion; prove nonzero claims/releases and readiness publish atomically after interruption, reopen and reorg. Do not activate the proposed 29B KCADE cap or public network here.
+
+**Next:** Read exact named test and authority evidence on #52–#55, and the named guarded IBD test on #56. The updated [operator runbook](docs/development/PHASE6_LOOPBACK_OPERATOR_RUNBOOK_2026-11-23.md) and [acceptance checklist](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) track local replay, fresh pruned authentication, atomic readiness and owner approval independently.
+
 ## Four-assignment Phase 6 checkpoint — November 23, 2026
 
 - #52 [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690) 7/8, exact settlement step passed and native authority pending. #53 [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761) 6/8, focused step passed and individual named evidence pending completed logs. #54 [45234460768](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234460768) active in focused replay step.

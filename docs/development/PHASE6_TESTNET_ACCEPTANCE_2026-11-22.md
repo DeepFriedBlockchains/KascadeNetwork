@@ -29,3 +29,14 @@ Record these fields in the development report for each completed check.
 A change to the implementation or consensus configuration requires rechecking the affected rows. A test tied to Simnet's simulated PoW does not establish real PoW progress, production network isolation, or throughput under public traffic.
 
 See [the source audit](PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) for the inherited settings and candidate-profile checks.
+
+## Phase 6 private testnet gates — November 23, 2026
+
+| Area | Verified status | Gate |
+| --- | --- | --- |
+| Native-PoW networking | #43 and #48 passed 8/8, including real three-daemon native-PoW and live link-loss recovery. #48 observed reconnect in 105 ms, three-block catch-up in 106 ms and offline reopen in 315 ms. | Representative workload and owner-approved isolated network configuration remain separate. [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224) · [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156258308) · [Artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156258308/artifacts/14809571770) |
+| Locally replay-authenticated issuance | #49–#51 passed their verifier, canonical claim and RocksDB checkpoint cases. #52/#53 focused settlement and release steps passed on active runs. #54/#55 replay and retention validation continues. | Check exact named tests and completed matrices before relying on local replay or retained provenance. |
+| Atomic local pruning readiness | Candidate #56 exercises the IBD authority's first ready batch with a locally replayed issuance pair. Focused run pending. | Verify missing/altered replay, aborted import and RocksDB reopen, then extend to nonzero settlement, interruption and selected replacement through this publisher. [#56 CI](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45236408364) |
+| Fresh pruned receiver | Existing selected-child evidence proves header/body membership and the shielded root. The cumulative issuance digest is missing from consensus. | Require an independently verified versioned issuance commitment checked during block acceptance. Then verify the proof, checkpoint and readiness together without prior local history. |
+| Owner decisions | Production issuance and public testnet remain disabled. | Approve commitment placement, activation and migration, network identity/genesis, bootstrap configuration and the 29B KCADE schedule (21B primary and 8B finite tail) before activation. |
+
