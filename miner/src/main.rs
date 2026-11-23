@@ -129,7 +129,7 @@ async fn main() {
             raw_block.header = (&fc_with_aux).into();
             match client.submit_block(raw_block, false).await {
                 Ok(resp) if resp.report.is_success() => log::info!("AUX BLOCK ACCEPTED  hash={block_hash}"),
-                Ok(resp) => log::warn!("aux block rejected: {:?}  (hash={block_hash})", resp.report),
+                Ok(resp) => log::warn!("Aux rejected: {:?}, detail={:?}, hash={block_hash}", resp.report, resp.reject_detail),
                 Err(e) => log::warn!("submit_block (aux) failed: {e}"),
             }
             continue;
@@ -174,7 +174,7 @@ async fn main() {
         let block_hash = header_hash_with_nonce(&header, nonce);
         match client.submit_block(raw_block, false).await {
             Ok(resp) if resp.report.is_success() => log::info!("BLOCK ACCEPTED  nonce={nonce}  hash={block_hash}"),
-            Ok(resp) => log::warn!("block rejected: {:?}  (nonce={nonce})", resp.report),
+            Ok(resp) => log::warn!("block rejected: {:?}  detail={:?}  (nonce={nonce})", resp.report, resp.reject_detail),
             Err(e) => log::warn!("submit_block failed: {e}  (nonce={nonce})"),
         }
     }
