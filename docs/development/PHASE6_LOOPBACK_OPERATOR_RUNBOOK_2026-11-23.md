@@ -104,3 +104,7 @@ On source `13dc263c9883b858ca30173d5087f954bc46b58d`, the focused native-PoW tes
 | Production activation | Disabled. The owner must approve the network profile, commitment layout, genesis/migration accounting, activation and trust policy. |
 
 See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md). Complete local validation and verify the nonzero recovery log before proceeding to the first approved private deployment configuration.
+
+### Issuance recovery gate update
+
+#52–#55 passed all eight jobs on the source heads recorded in [CURRENT_HANDOFF.md](../../CURRENT_HANDOFF.md). Native-PoW and peer recovery evidence still uses the recorded #43/#48 heads. Guarded readiness, lost-acknowledgement retry, and developer liability through live reorganization have separate test gates. See the [acceptance checklist](PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) and the [fresh-receiver decision record](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) before using an approved private-network profile. Production issuance remains disabled.

@@ -70,7 +70,7 @@ See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUAN
 | --- | --- |
 | Native-PoW networking | Three nodes and peer recovery passed on the recorded #43/#48 runs. |
 | Actual nonzero settlement | #52 and #53 are 8/8 with named native passes. |
-| Local replay and retained state | #54 is 8/8. #55 focused retained-anchor pruning passed; full matrix pending. |
+| Local replay and retained state | #54 is 8/8. #55 is 8/8 with named retained-anchor pruning and reopen pass. |
 | Guarded atomic publication | #56 focused zero-issuance publication passed. Check both #57 named regressions on [45241439865](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241439865). |
 | Real process exit and retry | Inspect #58 exit 71 and 72 and #62 retry exit 0. Confirm persisted complete readiness and accounting in their log artifacts. |
 | Live reorganization | Confirm #59 actual branch replacement and #61 developer payout/liability persistence. Still need a live pruning-point fixture with proof and UTXO/SMT evidence for guarded readiness and crash/reopen under a real reorg. |
