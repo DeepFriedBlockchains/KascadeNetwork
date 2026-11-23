@@ -1,6 +1,6 @@
 # KASCADE 5-BPS candidate and evidence plan
 
-November 22, 2026. Derived from the current repository's parameter generator. This is an input for isolated testing. All runtime evidence below is pending, and the values are open to revision after measurement.
+November 22, 2026. Derived from the current repository's parameter generator. This is an input for isolated testing. The profile remains open to revision after measurement.
 
 | Parameter | Unmodified `BlockrateParams::new::<5>()` baseline |
 | --- | ---: |
@@ -32,11 +32,11 @@ Initial DAA and timestamp controls should be recorded alongside the profile. The
 
 The first executable step is a paced three-node loopback baseline at 200 ms with transparent blocks and measured propagation. Save raw per-block times and settings as artifacts. Agree on latency, resource, and sustained acceptance tolerances before measuring a launch candidate. Use the existing [acceptance matrix](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) for rejoin, restart, wallet and public-profile gates. Keep production activation off.
 
-The [opt-in loopback harness](testing/integration/tests/phase6_five_bps_baseline.rs) paces a transparent three-node workload and prints per-block submit and observed peer-validation times as CSV. Run it in GitHub Actions with `cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate`. The test exercises simulated PoW and its result is still pending. It is a short measurement harness rather than a sustained-rate certification.
+The [opt-in loopback harness](testing/integration/tests/phase6_five_bps_baseline.rs) paces a transparent three-node workload and prints per-block submit and observed peer-validation times as CSV. Run it in GitHub Actions with `cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate`. The harness exercises simulated PoW for the short relay sample. Sustained-rate acceptance is open.
 
 ## 5-BPS measurement candidate
 
-The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This is a short transparent Simnet sample with simulated PoW, not a sustained-rate or production mining claim. Record the exact commit, run, sample results and limitations before counting the measurement as evidence.
+The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This measures short, transparent Simnet relay with simulated PoW. Sustained throughput and production mining require separate experiments.
 
 ## November 22, 2026 · First measured loopback
 
@@ -49,4 +49,17 @@ The native test passed in 14.822 seconds on [Actions run 45086577123](https://gi
 
 These are nearest-rank percentiles of submit-to-first-observed UTXO-valid latency in a single 50-block, transparent Simnet sample. The fixture used simulated PoW and polled every 5 ms. It does not establish sustained throughput or live mining performance.
 
-The native job failed during CSV/JSON extraction because nextest indents captured stdout. The workflow now strips leading horizontal whitespace while requiring all 50 rows and exactly one configuration record. A new run must verify artifact publication and the remainder of the native job. The original samples and config remain in the linked job log.
+The native job failed during CSV/JSON extraction because nextest indents captured stdout. The workflow now strips leading horizontal whitespace while requiring all 50 rows and exactly one configuration record. The replacement run below verified artifact publication and the remainder of the native job. The original samples and config remain in the linked job log.
+
+## Validated replacement run
+
+All eight jobs passed on implementation commit `999f3e1342d82c1feebfeb47d55023807be17276`. The [native job](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439/job/137416068338) passed the 50-block loopback in 14.835 seconds, 35 targeted regressions, 1,579 workspace tests with 25 skipped, and 32 no-asm tests.
+
+The first-to-last submit window was 9.800571 seconds across 49 intervals, or **4.9997 blocks per second**. All three nodes selected final tip `86e67be18961bd5fceb8e6e8540ef35b5e21be1acff868b09663735ace5a31bb`.
+
+| Peer | p50 | p95 | p99 and max |
+| --- | ---: | ---: | ---: |
+| First | 6.641 ms | 12.410 ms | 12.589 ms |
+| Second | 6.598 ms | 12.325 ms | 12.656 ms |
+
+The workflow verified a 51-row CSV with one header and all 50 samples, and a single profile record. [Evidence artifact 14781544000](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439/artifacts/14781544000) has archive SHA-256 `0ad608775c671c450f83286c88630c64c826bcb3bdd017a456ecdd2c7f980216`. The [full CI run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439) validates this short sample and its collector. Sustained 5-BPS operation and live mining remain acceptance experiments.
