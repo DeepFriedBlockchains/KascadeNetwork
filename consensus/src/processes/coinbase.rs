@@ -824,6 +824,7 @@ mod tests {
 
     #[test]
     fn reward_claim_excludes_non_daa_red_subsidy_but_returns_its_fees() {
+        use kaspa_consensus_core::config::params::ZKAS_DEV_FEE_RECIPIENT;
         use kaspa_hashes::Hash;
         use std::sync::Arc;
 
@@ -836,7 +837,7 @@ mod tests {
         let blue_script = ScriptPublicKey::new(0, scriptvec![0x51]);
         let red_script = ScriptPublicKey::new(0, scriptvec![0x52]);
         let merge_script = ScriptPublicKey::new(0, scriptvec![0x53]);
-        let miner_data = MinerData::new(merge_script.clone(), vec![]);
+        let miner = MinerData::new(merge_script.clone(), vec![]);
         let ghostdag = GhostdagData {
             mergeset_blues: Arc::new(vec![blue]),
             mergeset_reds: Arc::new(vec![eligible_red, fee_only_red]),
@@ -848,14 +849,54 @@ mod tests {
         rewards.insert(fee_only_red, BlockRewardData::new(9_001, 31, red_script));
         let non_daa: BlockHashSet = [fee_only_red].into_iter().collect();
 
-        let coinbase = cbm.expected_coinbase_transaction(0, miner_data, &ghostdag, &rewards, &non_daa, [0; 32], 0, 0).unwrap();
+        let coinbase = cbm.expected_coinbase_transaction(0, miner.clone(), &ghostdag, &rewards, &non_daa, [0; 32], 0, 0).unwrap();
         assert!(coinbase.has_red_reward);
         assert_eq!(
             coinbase.tx.outputs,
-            vec![TransactionOutput::new(1_001 + 17, blue_script), TransactionOutput::new(2_003 + 19 + 31, merge_script)]
+            vec![
+                TransactionOutput::new(1_001 + 17, blue_script.clone()),
+                TransactionOutput::new(2_003 + 19 + 31, merge_script.clone()),
+            ]
         );
         let gross = coinbase.tx.outputs.iter().map(|output| output.value).sum::<u64>();
         assert_eq!(gross - (17 + 19 + 31), 1_001 + 2_003);
+
+        params.dev_fee_recipient = Some(ZKAS_DEV_FEE_RECIPIENT);
+        params.dev_fee_permille = 50;
+        params.dev_fee_accrual_activation = ForkActivation::new(100);
+        params.dev_fee_payout_interval = 10;
+        let cbm = create_manager(&params);
+        let dev_script = ScriptPublicKey::new(0, ScriptVec::from_slice(&ZKAS_DEV_FEE_RECIPIENT));
+        let parent_accrual = 41;
+        let eligible_dev_share = 50 + 100;
+
+        // Each case independently builds the same merge from a parent carrying an existing entitlement.
+        for (parent_score, score, expected_dev_paid) in [(101, 109, 0), (109, 111, parent_accrual + eligible_dev_share)] {
+            let coinbase = cbm
+                .expected_coinbase_transaction(
+                    score,
+                    miner.clone(),
+                    &ghostdag,
+                    &rewards,
+                    &non_daa,
+                    [0; 32],
+                    parent_score,
+                    parent_accrual,
+                )
+                .unwrap();
+            assert!(coinbase.has_red_reward);
+            let mut expected_outputs = vec![
+                TransactionOutput::new(1_001 - 50 + 17, blue_script.clone()),
+                TransactionOutput::new(2_003 - 100 + 19 + 31, merge_script.clone()),
+            ];
+            if expected_dev_paid > 0 {
+                expected_outputs.push(TransactionOutput::new(expected_dev_paid, dev_script.clone()));
+            }
+            assert_eq!(coinbase.tx.outputs, expected_outputs);
+            assert_eq!(coinbase.dev_accrued, parent_accrual + eligible_dev_share - expected_dev_paid);
+            let gross = coinbase.tx.outputs.iter().map(|output| output.value).sum::<u64>();
+            assert_eq!(gross + coinbase.dev_accrued - parent_accrual - (17 + 19 + 31), 1_001 + 2_003);
+        }
     }
 
     #[test]
