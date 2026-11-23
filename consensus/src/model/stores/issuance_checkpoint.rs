@@ -114,13 +114,8 @@ mod tests {
     const BATCH_PROBE: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, 0xf2];
 
     fn fixture(network: Hash, point: Hash) -> (IssuanceCheckpointAnchor, IssuanceCheckpoint) {
-        let claim = IssuanceClaim {
-            reward_source: Hash::from_u64_word(9),
-            settlement_block: point,
-            selected_index: 1,
-            minted: 100,
-            paid: 85,
-        };
+        let claim =
+            IssuanceClaim { reward_source: Hash::from_u64_word(9), settlement_block: point, selected_index: 1, minted: 100, paid: 85 };
         let checkpoint = IssuanceCheckpoint::derive_from_claims(network, point, CAP, &[network, point], &[claim]).unwrap();
         let anchor = IssuanceCheckpointAnchor {
             network_id: network,
