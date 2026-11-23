@@ -71,7 +71,7 @@ workflow-perf-monitor.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 rand = { workspace = true, features = ["small_rng"] }
-tokio = { workspace = true, features = ["rt", "macros", "process"] }
+tokio = { workspace = true, features = ["rt", "macros", "process", "net", "io-util"] }
 kaspa-txscript-errors.workspace = true
 # Shielded coinbase reward addresses for the shielded-state IBD sync test
 # (address_bytes_from_seed lives in the non-circuit `scan` module, so no proving

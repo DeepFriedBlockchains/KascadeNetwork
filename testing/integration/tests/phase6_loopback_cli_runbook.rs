@@ -435,8 +435,8 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     let mut c = Node::start(binary, data.path(), logs, 3, "c-reconnect-reopen", false, follower_options);
     let c_rpc = connect(19310).await;
     expect_peers(&c_rpc, 0).await;
-    let reopened = c_rpc.get_block_dag_info().await.unwrap();
-    assert_eq!(reopened.sink, tip);
+    let reopened = expect_tip(&c_rpc, tip).await;
+    expect_peers(&c_rpc, 0).await;
     assert_eq!(reopened.block_count, caught_up.block_count);
     assert_eq!(reopened.pruning_point_hash, caught_up.pruning_point_hash);
     assert_eq!(reopened.virtual_daa_score, caught_up.virtual_daa_score);
