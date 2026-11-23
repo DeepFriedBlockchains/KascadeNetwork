@@ -311,7 +311,7 @@ separately.
 1.  Independent KASCADE chain
 2.  No premine
 3.  No founder/creator allocation
-4.  Exact scheduled maximum 23B KCADE
+4.  Exact scheduled maximum 29B KCADE
 5.  Integer KASMI monetary consensus
 6.  Native kHeavyHash remains valid
 7.  5-BPS target with engineered supporting parameters
