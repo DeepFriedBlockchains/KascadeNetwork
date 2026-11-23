@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run RPC safe-mode regression
+        if: github.head_ref == 'test/phase6-rpc-safe-mode-20261122' || github.ref_name == 'test/phase6-rpc-safe-mode-20261122'
+        run: cargo nextest run -p kaspa-testing-integration --test rpc_safe_mode
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
