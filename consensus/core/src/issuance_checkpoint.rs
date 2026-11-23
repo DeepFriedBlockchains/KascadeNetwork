@@ -3,13 +3,14 @@
 
 use kaspa_hashes::{Hash, HasherBase, TransactionHash};
 use kaspa_merkle::calc_merkle_root;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 const DOMAIN: &[u8] = b"KASCADE/issuance-checkpoint/v1";
 const CLAIM_DOMAIN: &[u8] = b"KASCADE/issuance-claim/v1";
 
 /// Fixed-size summary of one selected pruning point's issuance and settlement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct IssuanceCheckpoint {
     pub network_id: Hash,
     pub pruning_point: Hash,

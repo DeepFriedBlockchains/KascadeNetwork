@@ -116,6 +116,10 @@ jobs:
           github.head_ref == 'feat/phase6-ordered-issuance-claims-20261123' || github.ref_name == 'feat/phase6-ordered-issuance-claims-20261123'
         run: cargo nextest run -p kaspa-consensus-core --lib -E 'test(issuance_checkpoint::)'
 
+      - name: Verify persisted issuance checkpoint recovery
+        if: github.head_ref == 'feat/phase6-issuance-checkpoint-store-20261123' || github.ref_name == 'feat/phase6-issuance-checkpoint-store-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=model::stores::issuance_checkpoint::tests::issuance_checkpoint_store_reopens_and_rejects_abandoned_selected_owner)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
