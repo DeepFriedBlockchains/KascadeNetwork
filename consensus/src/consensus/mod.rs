@@ -2670,6 +2670,131 @@ mod tests {
     use kaspa_consensus_core::api::{ConsensusApi, ShieldedExportMetadata};
     use kaspa_consensus_core::config::params::MAINNET_PARAMS;
 
+    #[tokio::test]
+    async fn live_reorg_replaces_selected_nonzero_issuance_checkpoint() {
+        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
+        use kaspa_consensus_core::{
+            blockhash,
+            coinbase::MinerData,
+            config::{ConfigBuilder, params::SIMNET_PARAMS},
+            issuance_checkpoint::{IssuanceCheckpoint, IssuanceClaim},
+            tx::{ScriptPublicKey, ScriptVec},
+        };
+        use kaspa_database::prelude::{ConnBuilder, DeferredDbBatch};
+
+        fn build(tc: &TestConsensus, parent: Hash, tag: u8) -> Block {
+            let miner = MinerData::new(ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x51, tag])), vec![]);
+            let mut block = tc.build_utxo_valid_block_with_parents(blockhash::NONE, vec![parent], miner, vec![]);
+            let params = tc.params();
+            block.header.timestamp = params.genesis.timestamp + u64::from(tag) * params.target_time_per_block();
+            block.header.nonce = u64::from(tag);
+            block.header.finalize();
+            block.to_immutable()
+        }
+
+        async fn insert(tc: &TestConsensus, block: &Block) {
+            tc.validate_and_insert_block(block.clone()).virtual_state_task.await.unwrap();
+        }
+
+        // This fixture disables developer settlement and contains no fees. Each
+        // reward-bearing selected block pays exactly its eligible parent.
+        fn claim(source: &Block, settlement: &Block, selected_index: u64, tag: u8) -> IssuanceClaim {
+            let minted = u64::from_le_bytes(source.transactions[0].payload[8..16].try_into().unwrap());
+            let outputs = &settlement.transactions[0].outputs;
+            assert_eq!(outputs.len(), 1);
+            assert!(minted > 0);
+            assert_eq!(outputs[0].value, minted);
+            assert_eq!(outputs[0].script_public_key.script(), &[0x51, tag]);
+            IssuanceClaim { reward_source: source.hash(), settlement_block: settlement.hash(), selected_index, minted, paid: minted }
+        }
+
+        const CAP: u64 = 2_900_000_000_000_000_000;
+        let config = ConfigBuilder::new(SIMNET_PARAMS.clone())
+            .edit_consensus_params(|params| {
+                params.shielded_coinbase = false;
+                params.dev_fee_recipient = None;
+                params.skip_proof_of_work = true;
+            })
+            .build();
+        let genesis = config.genesis.hash;
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let db = connect();
+        let (sender, _receiver) = async_channel::unbounded();
+        let tc = TestConsensus::with_db(db.clone(), &config, sender);
+        let workers = tc.init();
+        let consensus = tc.consensus_clone();
+        let split = build(&tc, genesis, 1);
+        insert(&tc, &split).await;
+        let a1 = build(&tc, split.hash(), 2);
+        let b1 = build(&tc, split.hash(), 3);
+        insert(&tc, &a1).await;
+        let a2 = build(&tc, a1.hash(), 4);
+        insert(&tc, &a2).await;
+        assert_eq!(consensus.get_sink(), a2.hash());
+
+        let store = DbIssuanceCheckpoint::new(db.clone());
+        let old_path = [genesis, split.hash(), a1.hash(), a2.hash()];
+        let old_claims = [claim(&split, &a1, 2, 1), claim(&a1, &a2, 3, 2)];
+        let old = IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &[]).unwrap();
+        {
+            let selected = consensus.storage.selected_chain_store.read();
+            let replay = LocalIssuanceReplay {
+                network_genesis: genesis,
+                supply_cap: CAP,
+                selected_path: &old_path,
+                claims: &old_claims,
+                releases: &[],
+            };
+            let mut batch = DeferredDbBatch::new(db.clone());
+            store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &old).unwrap();
+            batch.commit().unwrap();
+            assert_eq!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).unwrap(), old);
+        }
+
+        insert(&tc, &b1).await;
+        let b2 = build(&tc, b1.hash(), 5);
+        insert(&tc, &b2).await;
+        let b3 = build(&tc, b2.hash(), 6);
+        insert(&tc, &b3).await;
+        assert_eq!(consensus.get_sink(), b3.hash());
+        let new_path = [genesis, split.hash(), b1.hash(), b2.hash(), b3.hash()];
+        let new_claims = [claim(&split, &b1, 2, 1), claim(&b1, &b2, 3, 3), claim(&b2, &b3, 4, 5)];
+        let replacement = IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &[]).unwrap();
+        {
+            let selected = consensus.storage.selected_chain_store.read();
+            assert!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).is_err());
+            let replay = LocalIssuanceReplay {
+                network_genesis: genesis,
+                supply_cap: CAP,
+                selected_path: &new_path,
+                claims: &new_claims,
+                releases: &[],
+            };
+            let mut batch = DeferredDbBatch::new(db.clone());
+            store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &replacement).unwrap();
+            batch.commit().unwrap();
+        }
+        assert_eq!(replacement.claim_count, 3);
+        assert_eq!(replacement.minted, new_claims.iter().map(|claim| claim.minted).sum::<u64>());
+        assert_eq!((replacement.paid, replacement.deferred), (replacement.minted, 0));
+        tc.shutdown(workers);
+        drop(consensus);
+        drop(tc);
+        drop(store);
+        drop(db);
+
+        let config = config.to_builder().skip_adding_genesis().build();
+        let db = connect();
+        let (sender, _receiver) = async_channel::unbounded();
+        let tc = TestConsensus::with_db(db.clone(), &config, sender);
+        let consensus = tc.consensus_clone();
+        let selected = consensus.storage.selected_chain_store.read();
+        let store = DbIssuanceCheckpoint::new(db);
+        assert_eq!(store.load_retained_replay_checkpoint(&selected, genesis, b3.hash(), CAP).unwrap(), replacement);
+        assert!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).is_err());
+    }
+
     /// A node whose chain index starts at genesis must report history COMPLETE; the whole point
     /// of the field is that a wallet can tell the difference, so getting the polarity wrong is
     /// worse than not publishing it at all.

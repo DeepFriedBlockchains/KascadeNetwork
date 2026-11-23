@@ -154,6 +154,10 @@ jobs:
           cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview
           -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_publishes_nonzero_settlement_and_readiness) | test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_reopen_before_promotion_rejects_incomplete_evidence)'
 
+      - name: Verify live selected-chain reorganization replaces nonzero issuance
+        if: github.head_ref == 'test/phase6-live-issuance-reorg-20261123' || github.ref_name == 'test/phase6-live-issuance-reorg-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::tests::live_reorg_replaces_selected_nonzero_issuance_checkpoint)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
