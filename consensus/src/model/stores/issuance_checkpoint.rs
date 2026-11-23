@@ -129,11 +129,9 @@ impl DbIssuanceCheckpoint {
         // Read both records at one sequence number even if another reader
         // holds the same selected-chain lock while committing an authority batch.
         let snapshot = self.db.snapshot();
-        let anchor_bytes = snapshot
-            .get(LOCAL_REPLAY_ANCHOR_KEY)?
-            .ok_or_else(|| inconsistent("missing locally verified issuance anchor"))?;
-        let anchor: IssuanceCheckpointAnchor =
-            codec().deserialize(&anchor_bytes).map_err(|error| inconsistent(error.to_string()))?;
+        let anchor_bytes =
+            snapshot.get(LOCAL_REPLAY_ANCHOR_KEY)?.ok_or_else(|| inconsistent("missing locally verified issuance anchor"))?;
+        let anchor: IssuanceCheckpointAnchor = codec().deserialize(&anchor_bytes).map_err(|error| inconsistent(error.to_string()))?;
         if anchor.network_id != network_genesis || anchor.pruning_point != pruning_point || anchor.supply_cap != supply_cap {
             return Err(inconsistent("locally verified issuance anchor has a different network, point or cap"));
         }
@@ -441,7 +439,8 @@ mod tests {
         let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
         let [genesis, parent, point, sibling, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
         let path = [genesis, parent, point];
-        let claims = [IssuanceClaim { reward_source: source, settlement_block: parent, selected_index: 1, minted: CAP, paid: CAP - 20 }];
+        let claims =
+            [IssuanceClaim { reward_source: source, settlement_block: parent, selected_index: 1, minted: CAP, paid: CAP - 20 }];
         let releases = [DeveloperPayoutRelease { settlement_block: point, selected_index: 2, amount: 20 }];
         let replay = || LocalIssuanceReplay {
             network_genesis: genesis,
