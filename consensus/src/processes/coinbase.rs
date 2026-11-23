@@ -1200,9 +1200,14 @@ mod tests {
 
         let path = [network, parent, current];
         let verify = |wire: &[u8], path: &[Hash], releases: &[DeveloperPayoutRelease]| {
-            IssuanceCommitmentField::decode(wire)
-                .unwrap()
-                .verify_local_settlement(network, current, CAP, path, &payout_claims, releases)
+            IssuanceCommitmentField::decode(wire).unwrap().verify_local_settlement(
+                network,
+                current,
+                CAP,
+                path,
+                &payout_claims,
+                releases,
+            )
         };
         let wire = IssuanceCommitmentField::from_checkpoint(&payout_checkpoint).encode();
         assert_eq!(verify(&wire, &path, &[release]), Ok(payout_checkpoint));
