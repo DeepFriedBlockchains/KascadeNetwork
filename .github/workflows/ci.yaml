@@ -154,6 +154,19 @@ jobs:
           cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview
           -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_publishes_nonzero_settlement_and_readiness) | test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_reopen_before_promotion_rejects_incomplete_evidence)'
 
+      - name: Verify real process exits around nonzero pruning publication
+        if: github.head_ref == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.ref_name == 'test/phase6-nonzero-guarded-publication-exit-20261123'
+        run: |
+          set -o pipefail
+          cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview --success-output immediate -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_nonzero_publication_recovers_after_process_exit)' 2>&1 | tee nonzero-pruning-process-exit.log
+
+      - name: Preserve nonzero pruning process exit evidence
+        if: always() && (github.head_ref == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.ref_name == 'test/phase6-nonzero-guarded-publication-exit-20261123')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonzero-pruning-process-exit
+          path: nonzero-pruning-process-exit.log
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

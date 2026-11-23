@@ -36,6 +36,11 @@ struct AuthorityInner {
 type AuthorityRegistry = Mutex<HashMap<usize, Weak<AuthorityInner>>>;
 static AUTHORITIES: OnceLock<AuthorityRegistry> = OnceLock::new();
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static GUARDED_PUBLICATION_EXIT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Default)]
 struct AuthorityState {
     generation: Arc<()>,
@@ -215,7 +220,15 @@ impl PersistentBranchAuthority {
             batch.ensure_database(&self.db)?;
             batch.ensure_key_prefix(DatabaseStorePrefixes::KascadeBranchAuthorityData as u8)?;
             let revision = self.readiness.stage_ready(&mut batch, point)?;
+            #[cfg(test)]
+            if GUARDED_PUBLICATION_EXIT.get() == 71 {
+                std::process::exit(71);
+            }
             batch.commit()?;
+            #[cfg(test)]
+            if GUARDED_PUBLICATION_EXIT.get() == 72 {
+                std::process::exit(72);
+            }
             revision
         } else {
             self.readiness.complete_sync(point)?
