@@ -28,3 +28,9 @@ See [CURRENT_HANDOFF.md](../../CURRENT_HANDOFF.md) for the current #17 and #19â€
 1. Finish review of #22's native workspace tests. If the matrix passes, record validation at the exact source and update #25's convergence report without a CI skip marker to start the combined matrix.
 2. Review #23's corrected native job and retrieve the CSV/JSON artifacts. Record the strict evidence upload result and preserve the prior measured 50-block result as short-loopback evidence only.
 3. Finish #24 and #26 validation. Ask for a decision on the monetary schedule once the options and implementation dependencies are reviewed. The Phase 6 branches remain separate.
+
+## Validation follow-ups
+
+Draft #26 retains its original public policy documentation lineage and now builds from the validated #21 source and workflow. The initial run failed in the inherited WASM dependency configuration on the documentation-only base. The exact replacement source and run are in the handoff. Pending tests include the focused integer reference vectors, formatting, and all eight jobs.
+
+[Draft #27](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/27) stages a defensive correction to the integration harness's test listeners and a default-deny gRPC case. The production daemon defaults and controls were unchanged. Run the focused RPC test and full CI after capacity is available. Keep #25's combined acceptance scope independent of both new drafts.
