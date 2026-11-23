@@ -2,6 +2,17 @@
 
 Updated November 23, 2026.
 
+## Selected developer payout commitments — November 23, 2026
+
+| PR | Exact head | Actions evidence |
+| --- | --- | --- |
+| [#52](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/52) | `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` | [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690) running. Check, no-std, WASM check and WASM test passed. Rustfmt passed inside Lints; Clippy still running at the check. The named settlement+RocksDB step was executing; authority/port-reservation result pending. |
+| [#53](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/53) | `508d8babd4593591153ec9e471ca05bb8e3800b9` | [45232322897](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232322897) running on branch `feat/phase6-issuance-developer-release-20261123`, stacked on exact #52 head. Focused issuance release and actual coinbase payout regressions pending. |
+
+#53 uses the existing canonical root to commit a distinct developer-release leaf for a selected block. Source claims sort by source hash within each block, then the developer release spends available deferred liability. Releases add only to paid issuance. The verified path gates each event, duplicate/zero/overdrawn releases fail, and the release-enabled API rejects embedding prior payments in new source claims. Existing claim-only roots are preserved. The actual coinbase payout fixture derives its 330-unit release and checks its cumulative checkpoint against the prior liability. The dedicated core regression covers equal-total tampering, selected sibling replacement, duplicate releases, and payout at the issuance cap.
+
+**Next:** Verify #52's exact named settlement+RocksDB focused result and the serial authority logs on 45231556690 before marking it validated. Verify #53's focused two-test step and matrix on 45232322897. The next production interface is an independently verified issuance digest in selected-chain evidence, separate from the current shielded coinbase root. The guarded promotion must consume that proof and stage the #51 checkpoint and readiness in the same authority batch. Run a real interruption/reopen/reorganization acceptance test with attributed source claims and a developer release. Production issuance stays disabled at the proposed 29B KCADE cap (21B primary and 8B finite tail).
+
 ## Developer release integration checkpoint — November 23, 2026
 
 - #52 at `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` remains under [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690). Formatting and initial check passed at the first read; native setup and strict Clippy were still running. No reruns requested.
