@@ -186,6 +186,7 @@ mod tests {
             import_readiness::tests::{install_point, stage_explicit_evidence},
             staging_import::PROMOTION_KEY,
         };
+        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
         use crate::model::stores::{
             ghostdag::GhostdagData,
             headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
@@ -194,9 +195,8 @@ mod tests {
             virtual_state::{VirtualState, VirtualStateStore},
         };
         use crate::processes::ghostdag::ordering::SortableBlock;
-        use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, config::params::ForkActivation};
-        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
         use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
+        use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, config::params::ForkActivation};
         use rocksdb::WriteBatch;
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
@@ -289,7 +289,9 @@ mod tests {
             let token = processor.begin_authority_import().unwrap();
             let substituted = IssuanceCheckpoint { ordered_claims_root: child.hash(), ..checkpoint };
             assert!(
-                processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay()), &substituted))).is_err()
+                processor
+                    .finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay()), &substituted)))
+                    .is_err()
             );
             unavailable();
 

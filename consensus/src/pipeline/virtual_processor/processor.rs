@@ -2706,20 +2706,21 @@ impl VirtualStateProcessor {
             let Some((replay, checkpoint)) = issuance else {
                 return self.finish_authority_import_at(token, point, point, verify_remaining);
             };
-            let selected = self.selected_chain_store.try_read().ok_or_else(|| {
-                StoreError::DataInconsistency("selected chain is busy during issuance verification".into())
-            })?;
+            let selected = self
+                .selected_chain_store
+                .try_read()
+                .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during issuance verification".into()))?;
             self.branch_authority.complete_import_with_staging(token, point, point, |db, point| {
                 super::import_readiness::verify_pruning_utxos(db, point)?;
                 self.verify_authority_smt(db, point)?;
                 verify_remaining(db, point)?;
-                let replay = replay.ok_or_else(|| StoreError::DataInconsistency("missing independently verified issuance replay".into()))?;
+                let replay =
+                    replay.ok_or_else(|| StoreError::DataInconsistency("missing independently verified issuance replay".into()))?;
                 if replay.network_genesis != self.genesis.hash || replay.selected_path.last() != Some(&point.hash) {
                     return Err(StoreError::DataInconsistency("issuance replay does not match the current pruning context".into()));
                 }
                 let mut batch = DeferredDbBatch::new(db.clone());
-                DbIssuanceCheckpoint::new(db.clone())
-                    .stage_retained_replay_checkpoint(&mut batch, &selected, replay, checkpoint)?;
+                DbIssuanceCheckpoint::new(db.clone()).stage_retained_replay_checkpoint(&mut batch, &selected, replay, checkpoint)?;
                 Ok(Some(batch))
             })
         })
