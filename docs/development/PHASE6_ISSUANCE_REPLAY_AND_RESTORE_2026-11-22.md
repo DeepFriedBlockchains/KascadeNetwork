@@ -22,3 +22,9 @@ These estimates use average unique credited slots per second, including all bott
 | 3 | 16.67 | 41.67 | 58.33 |
 
 PR #23 measured a short generated-block loopback sample. To support elapsed-year projections, sample unique committed reward claims over a sustained real-mining period, track rollbacks and fees independently, and record the committed ordinal delta against elapsed time. The 29B budget is a slot limit regardless of elapsed time once unique ownership and production enforcement are proven.
+
+## Production-path fee and genesis follow-up
+
+[Draft #31](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/31) isolates the real coinbase builder's treatment of qualified red and non-DAA red sources. Exact source `5228e73e9b8a3981f611a5cee512fbe24b50f5f3`, branch `test/phase6-merge-fee-accounting-20261122`, [run 45103888993](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45103888993). It checks output scripts and amounts and distinguishes 3,004 Kazmi of new subsidy from 67 Kazmi of recycled fees. It supplies merge membership explicitly. A real DAG forcing qualified and non-DAA red membership remains a follow-up to the green transparent join baseline.
+
+The Simnet genesis transaction starts with zero outputs, but its coinbase payload declares 100,000,000 Kazmi and carries an OP-FALSE reward script. Trace the first accepted payment independently before treating genesis as excluded from the budget. The shielded verification path already checks net coinbase growth minus fees against eligible source subsidy, with a non-DAA blue fee adjustment and a deferred developer entitlement adjustment. That check is per transition. An authenticated ordinal with an activation point is still required for global issuance accounting.
