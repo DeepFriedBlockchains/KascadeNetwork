@@ -2592,7 +2592,29 @@ impl VirtualStateProcessor {
         child: &kaspa_consensus_core::block::Block,
         verify_virtual: bool,
     ) -> kaspa_database::prelude::StoreResult<()> {
-        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        let batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        self.publish_staging_promotion(lease, proof, child, verify_virtual, batch)
+    }
+
+    #[cfg(test)]
+    pub(super) fn publish_staging_promotion_with_fixture(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.publish_staging_promotion(lease, proof, child, true, batch)
+    }
+
+    fn publish_staging_promotion(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        verify_virtual: bool,
+        mut batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
         batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
         self.with_authority_point(|point| {
             // Retain the virtual read guard through the durable marker write.

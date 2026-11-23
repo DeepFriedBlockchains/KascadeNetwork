@@ -149,6 +149,10 @@ jobs:
           github.ref_name == 'test/phase6-issuance-current-selected-path-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(issuance_checkpoint_)'
 
+      - name: Exercise guarded settlement batch publication
+        if: github.head_ref == 'test/phase6-guarded-issuance-publication-20261123' || github.ref_name == 'test/phase6-guarded-issuance-publication-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_reopen_before_promotion_rejects_incomplete_evidence) | test(issuance_checkpoint_)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
