@@ -48,7 +48,7 @@ impl IssuanceCommitmentField {
     pub fn encode(self) -> [u8; ISSUANCE_COMMITMENT_FIELD_SIZE] {
         let mut field = [0; ISSUANCE_COMMITMENT_FIELD_SIZE];
         field[..2].copy_from_slice(&ISSUANCE_COMMITMENT_VERSION.to_le_bytes());
-        field[2..].copy_from_slice(self.digest.as_bytes());
+        field[2..].copy_from_slice(&self.digest.as_bytes());
         field
     }
 
@@ -316,7 +316,7 @@ mod tests {
         let field = IssuanceCommitmentField::from_checkpoint(&saved);
         let mut wire = field.encode();
         assert_eq!(&wire[..2], &[1, 0]);
-        assert_eq!(&wire[2..], saved.commitment().as_bytes());
+        assert_eq!(&wire[2..], &saved.commitment().as_bytes());
         assert_eq!(IssuanceCommitmentField::decode(&wire), Ok(field));
         assert_eq!(IssuanceCommitmentField::decode(&wire[..33]), Err(IssuanceFieldError::WrongLength));
         assert_eq!(IssuanceCommitmentField::decode(&[0; 35]), Err(IssuanceFieldError::WrongLength));
