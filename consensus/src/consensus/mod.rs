@@ -2736,12 +2736,16 @@ mod tests {
         let store = DbIssuanceCheckpoint::new(db.clone());
         let old_path = [genesis, split.hash(), a1.hash(), a2.hash()];
         let old_claims = [claim(&split, &a1, 2, 1), claim(&a1, &a2, 3, 2)];
-        let old =
-            IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &[]).unwrap();
+        let old = IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &[]).unwrap();
         {
             let selected = consensus.storage.selected_chain_store.read();
-            let replay =
-                LocalIssuanceReplay { network_genesis: genesis, supply_cap: CAP, selected_path: &old_path, claims: &old_claims, releases: &[] };
+            let replay = LocalIssuanceReplay {
+                network_genesis: genesis,
+                supply_cap: CAP,
+                selected_path: &old_path,
+                claims: &old_claims,
+                releases: &[],
+            };
             let mut batch = DeferredDbBatch::new(db.clone());
             store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &old).unwrap();
             batch.commit().unwrap();
@@ -2756,13 +2760,17 @@ mod tests {
         assert_eq!(consensus.get_sink(), b3.hash());
         let new_path = [genesis, split.hash(), b1.hash(), b2.hash(), b3.hash()];
         let new_claims = [claim(&split, &b1, 2, 1), claim(&b1, &b2, 3, 3), claim(&b2, &b3, 4, 5)];
-        let replacement =
-            IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &[]).unwrap();
+        let replacement = IssuanceCheckpoint::derive_from_settlements(genesis, b3.hash(), CAP, &new_path, &new_claims, &[]).unwrap();
         {
             let selected = consensus.storage.selected_chain_store.read();
             assert!(store.load_retained_replay_checkpoint(&selected, genesis, a2.hash(), CAP).is_err());
-            let replay =
-                LocalIssuanceReplay { network_genesis: genesis, supply_cap: CAP, selected_path: &new_path, claims: &new_claims, releases: &[] };
+            let replay = LocalIssuanceReplay {
+                network_genesis: genesis,
+                supply_cap: CAP,
+                selected_path: &new_path,
+                claims: &new_claims,
+                releases: &[],
+            };
             let mut batch = DeferredDbBatch::new(db.clone());
             store.stage_retained_replay_checkpoint(&mut batch, &selected, replay, &replacement).unwrap();
             batch.commit().unwrap();
