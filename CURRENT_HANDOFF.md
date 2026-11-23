@@ -2,6 +2,12 @@
 
 Updated November 23, 2026.
 
+## Atomic settlement checkpoint — November 23, 2026
+
+- #47 at `232dca6e685cc7081537a8ed5e588f891bb05966` passed 8/8 in [45216092833](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45216092833), including eight focused tests and the named guarded RocksDB reopen/publication case. Its issuance row and digest are fixtures. #45 supplies separate stale-branch coverage.
+- #52 at `b34198310232e72f4289ceb8562ec22d9a05bf96` executed and passed the expanded settlement+RocksDB test in [45216624402](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45216624402). Six of eight jobs passed overall. Lints found three formatting differences. The serial native authority stage failed on a gRPC AddrInUse followed by a refused connection, so serial execution did not eliminate the test-port race.
+- Next work: reserve isolated test ports across test workers, and derive real eligible source claims from checked coinbase inputs with developer payout release accounted separately. Keep production issuance and pruning activation disabled.
+
 ## Validated recovery and reconciled checkpoint succession — November 23, 2026
 
 | PR | Exact head | Verified evidence |
