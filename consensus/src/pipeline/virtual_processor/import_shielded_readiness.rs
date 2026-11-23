@@ -245,5 +245,4 @@ mod tests {
             Hash::from_bytes(anchor)
         });
     }
-
 }
