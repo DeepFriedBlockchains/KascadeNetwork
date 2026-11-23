@@ -142,7 +142,9 @@ jobs:
           github.head_ref == 'test/phase6-authenticated-issuance-model-20261122' ||
           github.ref_name == 'test/phase6-authenticated-issuance-model-20261122' ||
           github.head_ref == 'test/phase6-issuance-checkpoint-persistence-20261122' ||
-          github.ref_name == 'test/phase6-issuance-checkpoint-persistence-20261122'
+          github.ref_name == 'test/phase6-issuance-checkpoint-persistence-20261122' ||
+          github.head_ref == 'test/phase6-issuance-checkpoint-process-exit-20261123' ||
+          github.ref_name == 'test/phase6-issuance-checkpoint-process-exit-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(issuance_checkpoint_)'
 
       - name: Run cargo build with devnet-prealloc feature
