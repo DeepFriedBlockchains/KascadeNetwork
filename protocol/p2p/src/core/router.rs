@@ -470,3 +470,81 @@ fn match_for_io_error(err_status: &tonic::Status) -> Option<&std::io::Error> {
         err = err.source()?;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pb::{InvTransactionsMessage, PingMessage};
+
+    fn local_router() -> (Arc<Router>, MpscReceiver<HubEvent>) {
+        let (hub_sender, hub_receiver) = mpsc_channel(1);
+        let (outgoing_route, _) = mpsc_channel(1);
+        let (shutdown_sender, _) = oneshot_channel();
+        let router = Arc::new(Router {
+            identity: Default::default(),
+            net_address: "127.0.0.1:0".parse().unwrap(),
+            is_outbound: false,
+            connection_started: Instant::now(),
+            routing_map_by_type: RwLock::new(HashMap::new()),
+            routing_map_by_id: RwLock::new(HashMap::new()),
+            outgoing_route,
+            hub_sender,
+            mutable_state: Mutex::new(RouterMutableState::new(None, Some(shutdown_sender))),
+        });
+        (router, hub_receiver)
+    }
+
+    fn inventory(request_id: u32) -> KaspadMessage {
+        KaspadMessage {
+            payload: Some(KaspadMessagePayload::InvTransactions(InvTransactionsMessage::default())),
+            response_id: BLANK_ROUTE_ID,
+            request_id,
+        }
+    }
+
+    fn ping(request_id: u32) -> KaspadMessage {
+        KaspadMessage {
+            payload: Some(KaspadMessagePayload::Ping(PingMessage::default())),
+            response_id: BLANK_ROUTE_ID,
+            request_id,
+        }
+    }
+
+    #[test]
+    fn p2p_resource_inventory_capacity_is_reusable() {
+        let (router, _hub) = local_router();
+        let mut route = router.subscribe_with_capacity(vec![KaspadMessagePayloadType::InvTransactions], 1);
+
+        // Inventory notifications may be dropped at the limit. The earlier notification must stay queued.
+        router.route_to_flow(inventory(1)).unwrap();
+        router.route_to_flow(inventory(2)).unwrap();
+        assert_eq!(route.try_recv().unwrap().request_id, 1);
+        assert!(matches!(route.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Empty)));
+
+        router.route_to_flow(inventory(3)).unwrap();
+        assert_eq!(route.try_recv().unwrap().request_id, 3);
+    }
+
+    #[tokio::test]
+    async fn p2p_resource_control_capacity_is_peer_local_and_released_on_close() {
+        let (router, mut hub) = local_router();
+        let (other_router, _other_hub) = local_router();
+        let mut route = router.subscribe_with_capacity(vec![KaspadMessagePayloadType::Ping], 1);
+        let mut other_route = other_router.subscribe_with_capacity(vec![KaspadMessagePayloadType::Ping], 1);
+
+        router.route_to_flow(ping(1)).unwrap();
+        assert!(matches!(
+            router.route_to_flow(ping(2)),
+            Err(ProtocolError::IncomingRouteCapacityReached(KaspadMessagePayloadType::Ping, _))
+        ));
+
+        other_router.route_to_flow(ping(3)).unwrap();
+        assert_eq!(other_route.try_recv().unwrap().request_id, 3);
+
+        assert!(router.close().await);
+        assert!(!router.close().await);
+        assert!(matches!(hub.try_recv(), Ok(HubEvent::PeerClosing(closed)) if Arc::ptr_eq(&closed, &router)));
+        assert_eq!(route.try_recv().unwrap().request_id, 1);
+        assert!(matches!(route.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)));
+    }
+}
