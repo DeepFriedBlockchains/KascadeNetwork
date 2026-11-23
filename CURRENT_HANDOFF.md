@@ -712,3 +712,5 @@ shielded authorization, privacy, proving stack and migration work.
 ## 5-BPS measurement candidate
 
 The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This is a short transparent Simnet sample with simulated PoW, not a sustained-rate or production mining claim. Record the exact commit, run, sample results and limitations before counting the measurement as evidence.
+
+The 50-block loopback passed in run 45086577123 and averaged 4.9996 offered BPS. Nextest indented the successful output, causing the extraction step to fail. The follow-up workflow recognizes indented lines and retains the strict artifact completeness checks. See [the measurement report](KASCADE_5BPS_REPORT.md).

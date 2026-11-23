@@ -37,3 +37,16 @@ The [opt-in loopback harness](testing/integration/tests/phase6_five_bps_baseline
 ## 5-BPS measurement candidate
 
 The existing opt-in harness now has a branch-scoped Actions step and fails unless it emits a configuration file and all 50 samples. It separately waits for all three nodes to select the final tip. This is a short transparent Simnet sample with simulated PoW, not a sustained-rate or production mining claim. Record the exact commit, run, sample results and limitations before counting the measurement as evidence.
+
+## November 22, 2026 · First measured loopback
+
+The native test passed in 14.822 seconds on [Actions run 45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), job `137406503498`, source `d042358d92a8ab0ae99b549d18dad1c5254533a2`. All 50 submissions were accepted and both peers and the sender selected the final tip. The first-to-last submit window was 9.800693 seconds, or **4.9996 blocks per second** over 49 intervals. The final selected hash was `3933a5188c0b7bf773b698ac5fdae11ecfb80f22e52fafdbca2f40d65c81097e`.
+
+| Peer | p50 | p95 | p99 and max |
+| --- | ---: | ---: | ---: |
+| First | 6.294 ms | 12.088 ms | 12.603 ms |
+| Second | 6.289 ms | 11.829 ms | 12.091 ms |
+
+These are nearest-rank percentiles of submit-to-first-observed UTXO-valid latency in a single 50-block, transparent Simnet sample. The fixture used simulated PoW and polled every 5 ms. It does not establish sustained throughput or live mining performance.
+
+The native job failed during CSV/JSON extraction because nextest indents captured stdout. The workflow now strips leading horizontal whitespace while requiring all 50 rows and exactly one configuration record. A new run must verify artifact publication and the remainder of the native job. The original samples and config remain in the linked job log.
