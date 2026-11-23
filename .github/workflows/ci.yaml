@@ -158,6 +158,10 @@ jobs:
         if: github.head_ref == 'test/phase6-live-issuance-reorg-20261123' || github.ref_name == 'test/phase6-live-issuance-reorg-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::tests::live_reorg_replaces_selected_nonzero_issuance_checkpoint)'
 
+      - name: Verify developer accrual and release through live Simnet reorganization
+        if: github.head_ref == 'test/phase6-live-developer-release-reorg-20261123' || github.ref_name == 'test/phase6-live-developer-release-reorg-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::tests::live_reorg_replaces_selected_developer_release)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
