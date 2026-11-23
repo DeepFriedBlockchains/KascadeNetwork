@@ -263,9 +263,11 @@ fn issuance_checkpoint_decoder_rejects_short_oversized_and_trailing_records() {
     assert!(decode_checkpoint(&extended).is_none());
 }
 
-pub(crate) fn check_issuance_fixture_with_child_anchor(
-    authenticate: impl FnOnce(&std::sync::Arc<kaspa_database::prelude::DB>, Hash, Hash) -> Hash,
-) {
+pub(crate) fn check_issuance_fixture_with_child_anchor<F>(
+    prepare: impl FnOnce(&std::sync::Arc<kaspa_database::prelude::DB>, Hash, Hash) -> F,
+) where
+    F: FnOnce(&std::sync::Arc<kaspa_database::prelude::DB>) -> Hash,
+{
     use kaspa_database::prelude::ConnBuilder;
 
     let temp = kaspa_database::utils::get_kaspa_tempdir();
@@ -275,10 +277,11 @@ pub(crate) fn check_issuance_fixture_with_child_anchor(
     let checkpoint = Checkpoint::genesis(network).advance(id(3), &[id(2)], subsidy - 5, 0, 5).unwrap();
     let db = connect();
     db.write(checkpoint_batch(&checkpoint)).unwrap();
-    let anchor = authenticate(&db, checkpoint.point, checkpoint.commitment());
+    let authenticate = prepare(&db, checkpoint.point, checkpoint.commitment());
     drop(db);
 
     let db = connect();
+    let anchor = authenticate(&db);
     assert_eq!(read_ready_checkpoint(&db, network, checkpoint.point, anchor), Some(checkpoint.clone()));
     let mut changed = checkpoint;
     changed.balance.deferred -= 1;
