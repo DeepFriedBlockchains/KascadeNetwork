@@ -183,10 +183,7 @@ fn decode_checkpoint(bytes: &[u8]) -> Option<Checkpoint> {
         return None;
     }
 
-    let ordered_claims = bytes[HEADER..]
-        .chunks_exact(32)
-        .map(|source| Hash::from_bytes(source.try_into().unwrap()))
-        .collect();
+    let ordered_claims = bytes[HEADER..].chunks_exact(32).map(|source| Hash::from_bytes(source.try_into().unwrap())).collect();
     Some(Checkpoint { network, point, balance: Balance { slots, paid, deferred }, ordered_claims })
 }
 
