@@ -670,3 +670,5 @@ The [resumed-work handoff](https://github.com/DeepFriedBlockchains/KascadeNetwor
 ## November 22, 2026 — acceptance convergence staging
 
 Archive backfill (#17) and three-node partition/rejoin/restart (#19) are present together for eventual combined validation. Check the [convergence report](docs/development/PHASE6_ACCEPTANCE_CONVERGENCE_2026-11-22.md) for exact sources, prior runs, and the next change after #22 validates. This combined source has no CI result yet. [Current cross-branch handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/cfe5ba6c4383bd8d38e63f06c766db685556632a/CURRENT_HANDOFF.md).
+
+The candidate now also stages the exact #22 relay source after its dedicated mining step passed. The combined matrix is deferred until [#22's run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439) finishes. The workflow includes focused archive, partition and both relay paths. Update the convergence report with #22's final result and use that normal push to run the combined jobs.

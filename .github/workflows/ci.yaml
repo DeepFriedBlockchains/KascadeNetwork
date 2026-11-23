@@ -125,10 +125,18 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_promotes_and_recovers_a_committed_descendant_chain)'
 
-      - name: Run two-node Simnet descendant recovery and archive regressions
+      - name: Run focused Simnet recovery, archive and partition regressions
         env:
           RUST_BACKTRACE: '1'
-        run: cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview -E 'test(authority_integration_preview_recovers_descendants_after_header_sync) | test(authority_integration_preview_verifies_shielded_archive_backfill)'
+        run: >-
+          cargo nextest run -p kaspa-testing-integration --lib
+          --features phase6-staging-preview --test-threads=1
+          -E 'test(authority_integration_preview_recovers_descendants_after_header_sync)
+          | test(authority_integration_preview_verifies_shielded_archive_backfill)
+          | test(authority_integration_preview_three_node_partition_rejoin)'
+
+      - name: Run isolated Simnet native and AuxPoW relay regressions
+        run: cargo nextest run -p kaspa-testing-integration --test phase6_native_pow_relay --features phase6-staging-preview
 
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
