@@ -174,9 +174,7 @@ mod tests {
             processes::reachability::interval::Interval,
         };
         let child = shielded_child(nonce);
-        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
-            .insert(child.hash(), child.header.clone(), 0)
-            .unwrap();
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(child.hash(), child.header.clone(), 0).unwrap();
         DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty)
             .insert(child.hash(), Arc::new(GhostdagData::new_with_selected_parent(parent, 5)))
             .unwrap();
@@ -405,7 +403,11 @@ mod tests {
     const CRASH_CAP: u64 = 2_900_000_000_000_000_000;
     const CRASH_INTERMEDIATE: u64 = 700;
 
-    fn guarded_issuance_fixture(db: &Arc<DB>, nonzero: bool, initialize: bool) -> (TestConsensus, ReadinessPoint, ValidatedImportProof, Block) {
+    fn guarded_issuance_fixture(
+        db: &Arc<DB>,
+        nonzero: bool,
+        initialize: bool,
+    ) -> (TestConsensus, ReadinessPoint, ValidatedImportProof, Block) {
         use super::super::import_readiness::tests::{install_point, stage_explicit_evidence};
         use crate::model::stores::{
             ghostdag::GhostdagData,
@@ -503,8 +505,8 @@ mod tests {
         let path = [genesis, intermediate, point.hash];
         let (claims, releases) = nonzero_settlements(&processor.coinbase_manager, intermediate, point.hash);
         if before {
-            let prior = IssuanceCheckpoint::derive_from_settlements(genesis, intermediate, CRASH_CAP, &path[..2], &claims[..2], &[])
-                .unwrap();
+            let prior =
+                IssuanceCheckpoint::derive_from_settlements(genesis, intermediate, CRASH_CAP, &path[..2], &claims[..2], &[]).unwrap();
             assert_eq!((prior.minted, prior.paid, prior.deferred), (3_000, 2_850, 150));
             let selected = processor.selected_chain_store.read();
             let mut batch = DeferredDbBatch::new(db.clone());
@@ -519,9 +521,15 @@ mod tests {
             batch.commit().unwrap();
         }
 
-        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CRASH_CAP, &path, &claims, &releases).unwrap();
-        let replay =
-            LocalIssuanceReplay { network_genesis: genesis, supply_cap: CRASH_CAP, selected_path: &path, claims: &claims, releases: &releases };
+        let checkpoint =
+            IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CRASH_CAP, &path, &claims, &releases).unwrap();
+        let replay = LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CRASH_CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
         let token = processor.begin_authority_import().unwrap();
         GUARDED_PUBLICATION_EXIT.set(if before { 71 } else { 72 });
         processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay), &checkpoint))).unwrap();
