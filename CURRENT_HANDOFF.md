@@ -701,8 +701,9 @@ Documentation-only checkpoints preserve each exact tested source.
 | Draft | Branch | Implementation SHA | Actions |
 | --- | --- | --- | --- |
 | [#22 AuxPoW relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) | `test/phase6-auxpow-relay-20261122` | `3aae9a87e353b2a164fadc77528b0871500e34ee` | [45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439), 7/8. Native job `137401920040` running. Canceled duplicate push run `45085111236`. |
-| [#23 5-BPS loopback](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `d042358d92a8ab0ae99b549d18dad1c5254533a2` | [45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), 2/8. no-std and WASM check passed. Native job `137406503498` running. |
-| [#24 bundled AuxPoW miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062), queued at checkpoint. |
+| [#23 5-BPS loopback](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `d042358d92a8ab0ae99b549d18dad1c5254533a2` | [45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), 3/8. no-std, WASM check, and WASM tests passed. Native job `137406503498` running. |
+| [#24 bundled AuxPoW miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062), 2/8. no-std and WASM check passed. Native job `137407465112` is running the focused miner step. |
+| [#25 combined acceptance](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) | `test/phase6-acceptance-convergence-20261122` | `b2bd46520caa96066376fc6c6bc4223bfbbc4d41` | Unvalidated staging of #17 and #19. CI deliberately deferred until the validated #22 source is added. |
 
 No job failures were reported on the active runs at this checkpoint.
 Review #22's dedicated relay test output first. Collect #23's checked
