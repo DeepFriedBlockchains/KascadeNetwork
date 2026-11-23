@@ -121,6 +121,28 @@ jobs:
           cargo build -p kaspad
           cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --test-threads=1 --success-output immediate 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
 
+      - name: Validate per-node resource observations
+        if: github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123'
+        shell: bash
+        run: |
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-cli-runbook"
+          sed -n 's/^[[:blank:]]*phase6_node_metrics,//p' "$KASCADE_CLI_LOGS/driver.log" > "$KASCADE_CLI_LOGS/metrics.jsonl"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["KASCADE_CLI_LOGS"]) / "metrics.jsonl"
+          rows = [json.loads(line) for line in path.read_text().splitlines()]
+          expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
+          expected.add(("c", "before_stop"))
+          assert len(rows) == len(expected)
+          assert {(row["node"], row["stage"]) for row in rows} == expected
+          counters = ("rss_bytes", "disk_io_read_bytes", "disk_io_write_bytes", "storage_size_bytes",
+                      "p2p_bytes_sent", "p2p_bytes_received")
+          assert all(isinstance(row[key], int) and row[key] >= 0 for row in rows for key in counters)
+          PY
+
       - name: Upload three-node CLI runbook evidence
         if: always() && (github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123' || github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123')
         uses: actions/upload-artifact@v4
