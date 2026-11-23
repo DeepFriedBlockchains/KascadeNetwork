@@ -124,6 +124,13 @@ jobs:
         if: github.head_ref == 'feat/phase6-coinbase-settlement-checkpoint-20261123' || github.ref_name == 'feat/phase6-coinbase-settlement-checkpoint-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
 
+      - name: Verify selected developer release commitments and coinbase settlement
+        if: github.head_ref == 'feat/phase6-issuance-developer-release-20261123' || github.ref_name == 'feat/phase6-issuance-developer-release-20261123'
+        run: >-
+          cargo nextest run -p kaspa-consensus-core -p kaspa-consensus --lib
+          -E 'test(=issuance_checkpoint::tests::commits_developer_releases_without_minting_or_replaying_stale_liabilities) |
+          test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

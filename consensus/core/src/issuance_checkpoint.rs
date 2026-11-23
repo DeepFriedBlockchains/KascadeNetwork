@@ -8,6 +8,7 @@ use std::collections::HashSet;
 
 const DOMAIN: &[u8] = b"KASCADE/issuance-checkpoint/v1";
 const CLAIM_DOMAIN: &[u8] = b"KASCADE/issuance-claim/v1";
+const RELEASE_DOMAIN: &[u8] = b"KASCADE/issuance-developer-release/v1";
 
 /// Fixed-size summary of one selected pruning point's issuance and settlement.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -46,6 +47,48 @@ impl IssuanceClaim {
     }
 }
 
+/// Payment of already accounted developer issuance at a selected block.
+/// A release is unique by selected block and contributes no new subsidy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DeveloperPayoutRelease {
+    pub settlement_block: Hash,
+    pub selected_index: u64,
+    pub amount: u64,
+}
+
+impl DeveloperPayoutRelease {
+    fn hash(&self) -> Hash {
+        let mut hasher = TransactionHash::new();
+        hasher.update(RELEASE_DOMAIN);
+        hasher.update(self.settlement_block.as_bytes());
+        hasher.update(self.selected_index.to_le_bytes());
+        hasher.update(self.amount.to_le_bytes());
+        hasher.finalize()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SettlementEvent<'a> {
+    Claim(&'a IssuanceClaim),
+    Release(&'a DeveloperPayoutRelease),
+}
+
+impl SettlementEvent<'_> {
+    fn key(self) -> (u64, u8, Hash) {
+        match self {
+            Self::Claim(claim) => (claim.selected_index, 0, claim.reward_source),
+            Self::Release(release) => (release.selected_index, 1, Hash::default()),
+        }
+    }
+
+    fn hash(self) -> Hash {
+        match self {
+            Self::Claim(claim) => claim.hash(),
+            Self::Release(release) => release.hash(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerificationError {
     WrongContext,
@@ -53,6 +96,7 @@ pub enum VerificationError {
     UnbalancedSettlement,
     CommitmentMismatch,
     DuplicateRewardSource,
+    DuplicateDeveloperRelease,
     OffSelectedPath,
 }
 
@@ -75,34 +119,84 @@ impl IssuanceCheckpoint {
         selected_path: &[Hash],
         claims: &[IssuanceClaim],
     ) -> Result<Self, VerificationError> {
+        Self::derive_events(network_id, pruning_point, supply_cap, selected_path, claims, &[])
+    }
+
+    /// Derive a checkpoint from source claims and developer releases. Claims
+    /// accrue before the release at the same selected index. Release amounts
+    /// are drawn from deferred liability and included in the same Merkle root.
+    /// Callers must obtain both the path and expected digest independently.
+    pub fn derive_from_settlements(
+        network_id: Hash,
+        pruning_point: Hash,
+        supply_cap: u64,
+        selected_path: &[Hash],
+        claims: &[IssuanceClaim],
+        releases: &[DeveloperPayoutRelease],
+    ) -> Result<Self, VerificationError> {
+        if claims.iter().any(|claim| claim.paid > claim.minted) {
+            return Err(VerificationError::UnbalancedSettlement);
+        }
+        Self::derive_events(network_id, pruning_point, supply_cap, selected_path, claims, releases)
+    }
+
+    fn derive_events(
+        network_id: Hash,
+        pruning_point: Hash,
+        supply_cap: u64,
+        selected_path: &[Hash],
+        claims: &[IssuanceClaim],
+        releases: &[DeveloperPayoutRelease],
+    ) -> Result<Self, VerificationError> {
         if selected_path.last() != Some(&pruning_point) {
             return Err(VerificationError::WrongContext);
         }
-        let mut ordered = claims.iter().collect::<Vec<_>>();
-        ordered.sort_unstable_by_key(|claim| (claim.selected_index, claim.reward_source));
-        let mut seen = HashSet::with_capacity(ordered.len());
+        let mut ordered =
+            claims.iter().map(SettlementEvent::Claim).chain(releases.iter().map(SettlementEvent::Release)).collect::<Vec<_>>();
+        ordered.sort_unstable_by_key(|event| event.key());
+        let mut seen = HashSet::with_capacity(claims.len());
+        let mut last_release = None;
         let mut minted = 0u64;
         let mut paid = 0u64;
-        for (position, claim) in ordered.iter().enumerate() {
-            let index = usize::try_from(claim.selected_index).map_err(|_| VerificationError::OffSelectedPath)?;
-            if selected_path.get(index) != Some(&claim.settlement_block) {
+        for (position, event) in ordered.iter().copied().enumerate() {
+            let (selected_index, _, _) = event.key();
+            let index = usize::try_from(selected_index).map_err(|_| VerificationError::OffSelectedPath)?;
+            let block = match event {
+                SettlementEvent::Claim(claim) => claim.settlement_block,
+                SettlementEvent::Release(release) => release.settlement_block,
+            };
+            if selected_path.get(index) != Some(&block) {
                 return Err(VerificationError::OffSelectedPath);
             }
-            if !seen.insert(claim.reward_source) {
-                return Err(VerificationError::DuplicateRewardSource);
+            match event {
+                SettlementEvent::Claim(claim) => {
+                    if !seen.insert(claim.reward_source) {
+                        return Err(VerificationError::DuplicateRewardSource);
+                    }
+                    minted = minted.checked_add(claim.minted).ok_or(VerificationError::AboveSupplyCap)?;
+                    if minted > supply_cap {
+                        return Err(VerificationError::AboveSupplyCap);
+                    }
+                    paid = paid.checked_add(claim.paid).ok_or(VerificationError::UnbalancedSettlement)?;
+                }
+                SettlementEvent::Release(release) => {
+                    if last_release == Some(selected_index) {
+                        return Err(VerificationError::DuplicateDeveloperRelease);
+                    }
+                    last_release = Some(selected_index);
+                    if release.amount == 0 || minted.checked_sub(paid).is_none_or(|balance| release.amount > balance) {
+                        return Err(VerificationError::UnbalancedSettlement);
+                    }
+                    paid = paid.checked_add(release.amount).ok_or(VerificationError::UnbalancedSettlement)?;
+                }
             }
-            minted = minted.checked_add(claim.minted).ok_or(VerificationError::AboveSupplyCap)?;
-            if minted > supply_cap {
-                return Err(VerificationError::AboveSupplyCap);
-            }
-            paid = paid.checked_add(claim.paid).ok_or(VerificationError::UnbalancedSettlement)?;
-            if paid > minted && ordered.get(position + 1).is_none_or(|next| next.selected_index != claim.selected_index) {
+            if paid > minted && ordered.get(position + 1).is_none_or(|next| next.key().0 != selected_index) {
                 return Err(VerificationError::UnbalancedSettlement);
             }
         }
         let deferred = minted.checked_sub(paid).ok_or(VerificationError::UnbalancedSettlement)?;
-        let claim_count = u64::try_from(ordered.len()).map_err(|_| VerificationError::UnbalancedSettlement)?;
-        let ordered_claims_root = calc_merkle_root(ordered.into_iter().map(IssuanceClaim::hash));
+        let claim_count = u64::try_from(claims.len()).map_err(|_| VerificationError::UnbalancedSettlement)?;
+        let ordered_claims_root = calc_merkle_root(ordered.into_iter().map(SettlementEvent::hash));
         Ok(Self { network_id, pruning_point, ordered_claims_root, claim_count, minted, paid, deferred })
     }
 
@@ -222,5 +316,47 @@ mod tests {
             Err(VerificationError::AboveSupplyCap)
         );
         assert_eq!(derive(&[IssuanceClaim { paid: u64::MAX, ..a }, b]), Err(VerificationError::UnbalancedSettlement));
+    }
+
+    #[test]
+    fn commits_developer_releases_without_minting_or_replaying_stale_liabilities() {
+        let [genesis, parent, point, sibling, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
+        let path = [genesis, parent, point];
+        let claim = IssuanceClaim { reward_source: source, settlement_block: parent, selected_index: 1, minted: CAP, paid: CAP - 40 };
+        let early = DeveloperPayoutRelease { settlement_block: parent, selected_index: 1, amount: 10 };
+        let late = DeveloperPayoutRelease { settlement_block: point, selected_index: 2, amount: 30 };
+        let derive = |releases: &[DeveloperPayoutRelease]| {
+            IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, &path, &[claim], releases)
+        };
+        let checkpoint = derive(&[early, late]).unwrap();
+        assert_eq!(derive(&[late, early]), Ok(checkpoint));
+        assert_eq!((checkpoint.claim_count, checkpoint.minted, checkpoint.paid, checkpoint.deferred), (1, CAP, CAP, 0));
+        assert_eq!(derive(&[early, early]), Err(VerificationError::DuplicateDeveloperRelease));
+        assert_eq!(derive(&[early, DeveloperPayoutRelease { amount: 31, ..late }]), Err(VerificationError::UnbalancedSettlement));
+        assert_eq!(derive(&[DeveloperPayoutRelease { amount: 0, ..early }]), Err(VerificationError::UnbalancedSettlement));
+        assert_eq!(derive(&[DeveloperPayoutRelease { settlement_block: sibling, ..late }]), Err(VerificationError::OffSelectedPath));
+        let first_claim = IssuanceClaim { minted: CAP - 10, ..claim };
+        let embedded_release =
+            IssuanceClaim { reward_source: sibling, settlement_block: point, selected_index: 2, minted: 10, paid: 11 };
+        assert_eq!(
+            IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, &path, &[first_claim, embedded_release], &[]),
+            Err(VerificationError::UnbalancedSettlement)
+        );
+
+        let reordered_payment =
+            derive(&[DeveloperPayoutRelease { amount: 20, ..early }, DeveloperPayoutRelease { amount: 20, ..late }]).unwrap();
+        assert_eq!((reordered_payment.minted, reordered_payment.paid, reordered_payment.deferred), (CAP, CAP, 0));
+        assert_eq!(
+            reordered_payment.verify(genesis, point, CAP, checkpoint.commitment()),
+            Err(VerificationError::CommitmentMismatch)
+        );
+
+        let sibling_path = [genesis, parent, sibling];
+        let restore = |releases: &[DeveloperPayoutRelease]| {
+            IssuanceCheckpoint::derive_from_settlements(genesis, sibling, CAP, &sibling_path, &[claim], releases)
+        };
+        assert_eq!(restore(&[early, late]), Err(VerificationError::OffSelectedPath));
+        let replacement = restore(&[early, DeveloperPayoutRelease { settlement_block: sibling, ..late }]).unwrap();
+        assert_eq!(replacement.verify(genesis, sibling, CAP, checkpoint.commitment()), Err(VerificationError::CommitmentMismatch));
     }
 }
