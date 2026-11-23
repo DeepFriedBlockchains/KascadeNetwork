@@ -262,9 +262,13 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     let c_rpc = connect(19310).await;
     expect_peers(&a_rpc, 2).await;
 
+    let genesis = expect_tip(&a_rpc, SIMNET_GENESIS.hash).await;
     for client in [&a_rpc, &b_rpc, &c_rpc] {
         assert_eq!(client.get_current_network().await.unwrap(), NetworkType::Simnet);
-        expect_tip(client, SIMNET_GENESIS.hash).await;
+        let dag = expect_tip(client, SIMNET_GENESIS.hash).await;
+        assert_eq!(dag.block_count, genesis.block_count);
+        assert_eq!(dag.pruning_point_hash, SIMNET_GENESIS.hash);
+        assert_eq!(dag.virtual_daa_score, genesis.virtual_daa_score);
     }
 
     for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
@@ -305,13 +309,22 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     let recovered = expect_tip(&c_rpc, tip).await;
     let converged_ms = reopen_started.elapsed().as_millis();
     let authority = expect_tip(&a_rpc, tip).await;
+    let peer = expect_tip(&b_rpc, tip).await;
+    assert_eq!(before.block_count, genesis.block_count + 6);
+    assert_eq!(authority.block_count, genesis.block_count + 12);
     assert_eq!(recovered.block_count, before.block_count + 6);
-    assert_eq!(recovered.block_count, authority.block_count);
-    assert_eq!(recovered.pruning_point_hash, authority.pruning_point_hash);
-    assert_eq!(recovered.virtual_daa_score, authority.virtual_daa_score);
+    for dag in [&peer, &recovered] {
+        assert_eq!(dag.block_count, authority.block_count);
+        assert_eq!(dag.pruning_point_hash, authority.pruning_point_hash);
+        assert_eq!(dag.virtual_daa_score, authority.virtual_daa_score);
+    }
     let recovery = serde_json::json!({
         "follower": "c",
+        "accepted_blocks": authority.block_count - genesis.block_count,
         "missed_blocks": recovered.block_count - before.block_count,
+        "final_block_count": authority.block_count,
+        "final_pruning_point": authority.pruning_point_hash.to_string(),
+        "final_virtual_daa_score": authority.virtual_daa_score,
         "offline_ms": offline_ms,
         "reopen_to_rpc_ready_ms": rpc_ready_ms,
         "reopen_to_tip_convergence_ms": converged_ms,

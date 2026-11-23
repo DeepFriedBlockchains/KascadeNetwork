@@ -136,6 +136,11 @@ jobs:
           output = Path(os.environ["KASCADE_CLI_LOGS"])
           recovery = json.loads((output / "recovery.json").read_text())
           assert recovery["follower"] == "c" and recovery["missed_blocks"] == 6
+          assert recovery["accepted_blocks"] == 12 and recovery["final_block_count"] >= 12
+          assert recovery["final_virtual_daa_score"] >= 0
+          for key in ("final_tip", "final_pruning_point"):
+              assert len(recovery[key]) == 64
+              int(recovery[key], 16)
           assert 0 <= recovery["reopen_to_rpc_ready_ms"] <= recovery["reopen_to_tip_convergence_ms"]
           path = output / "metrics.jsonl"
           rows = [json.loads(line) for line in path.read_text().splitlines()]
