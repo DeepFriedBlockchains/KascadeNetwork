@@ -110,6 +110,25 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Exercise the three-node CLI runbook
+        if: github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123'
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-cli-runbook"
+          mkdir -p "$KASCADE_CLI_LOGS"
+          cargo build -p kaspad
+          cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --success-output immediate 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
+
+      - name: Upload three-node CLI runbook evidence
+        if: always() && (github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123')
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-cli-runbook
+          path: ${{ runner.temp }}/phase6-cli-runbook
+          if-no-files-found: error
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
