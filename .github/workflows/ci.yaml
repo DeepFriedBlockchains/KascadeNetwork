@@ -120,6 +120,10 @@ jobs:
         if: github.head_ref == 'feat/phase6-issuance-checkpoint-store-20261123' || github.ref_name == 'feat/phase6-issuance-checkpoint-store-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=model::stores::issuance_checkpoint::tests::issuance_checkpoint_store_reopens_and_rejects_abandoned_selected_owner)'
 
+      - name: Reconcile actual coinbase settlement with issuance checkpoint
+        if: github.head_ref == 'feat/phase6-coinbase-settlement-checkpoint-20261123' || github.ref_name == 'feat/phase6-coinbase-settlement-checkpoint-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
