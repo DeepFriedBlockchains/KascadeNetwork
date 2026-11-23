@@ -130,6 +130,27 @@ jobs:
           RUST_BACKTRACE: '1'
         run: cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview -E 'test(authority_integration_preview_recovers_descendants_after_header_sync)'
 
+      - name: Measure the isolated 5-BPS loopback baseline
+        if: github.head_ref == 'docs/phase6-five-bps-evidence-20261122' || github.ref_name == 'docs/phase6-five-bps-evidence-20261122'
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate 2>&1 | tee "$RUNNER_TEMP/five-bps.log"
+          sed -n 's/^[[:blank:]]*phase6_config,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-profile.json"
+          sed -E 's/^[[:blank:]]+//' "$RUNNER_TEMP/five-bps.log" | grep -E '^(index,block_hash,|[0-9]+,[0-9a-f]{64},[0-9]+,[0-9]+,[0-9]+$)' > "$RUNNER_TEMP/five-bps.csv"
+          test "$(wc -l < "$RUNNER_TEMP/five-bps.csv")" -eq 51
+          test "$(wc -l < "$RUNNER_TEMP/five-bps-profile.json")" -eq 1
+
+      - name: Upload 5-BPS measurement
+        if: github.head_ref == 'docs/phase6-five-bps-evidence-20261122' || github.ref_name == 'docs/phase6-five-bps-evidence-20261122'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-five-bps-loopback
+          path: |
+            ${{ runner.temp }}/five-bps.csv
+            ${{ runner.temp }}/five-bps-profile.json
+          if-no-files-found: error
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
