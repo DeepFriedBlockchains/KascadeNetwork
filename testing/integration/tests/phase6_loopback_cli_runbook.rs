@@ -48,6 +48,7 @@ impl Node {
 
         if let Some(params) = params {
             command.arg("--override-params-file").arg(params);
+            command.args(["--perf-metrics", "--perf-metrics-interval-sec=1"]);
         }
         let log = File::create(logs.join(format!("{label}.log"))).unwrap();
         command.stdout(log.try_clone().unwrap()).stderr(log);
@@ -199,6 +200,26 @@ async fn phase6_loopback_cli_runbook() {
     eprintln!("all three daemon processes exited successfully after SIGINT");
 }
 
+async fn record_node_metrics(client: &GrpcClient, node: &str, stage: &str) {
+    let report = client.get_metrics(true, true, true, false, true, false).await.unwrap();
+    let process = report.process_metrics.expect("node must return requested process metrics");
+    let bandwidth = report.bandwidth_metrics.expect("node must return requested bandwidth metrics");
+    let storage = report.storage_metrics.expect("node must return requested storage metrics");
+    let row = serde_json::json!({
+        "node": node,
+        "stage": stage,
+        "server_time": report.server_time,
+        "cpu_usage": process.cpu_usage,
+        "rss_bytes": process.resident_set_size,
+        "disk_io_read_bytes": process.disk_io_read_bytes,
+        "disk_io_write_bytes": process.disk_io_write_bytes,
+        "storage_size_bytes": storage.storage_size_bytes,
+        "p2p_bytes_sent": bandwidth.p2p_bytes_tx,
+        "p2p_bytes_received": bandwidth.p2p_bytes_rx,
+    });
+    eprintln!("phase6_node_metrics,{row}");
+}
+
 async fn submit_real_pow_block(client: &GrpcClient, prove_pow_enabled: bool) -> Hash {
     let address = Address::new(NetworkType::Simnet.into(), Version::PubKey, &[0; 32]);
     let mut block = client.get_block_template(address, vec![]).await.unwrap().block;
@@ -246,6 +267,10 @@ async fn phase6_loopback_cli_real_pow_recovery() {
         expect_tip(client, SIMNET_GENESIS.hash).await;
     }
 
+    for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
+        record_node_metrics(client, name, "genesis").await;
+    }
+
     let mut tip = SIMNET_GENESIS.hash;
     for i in 0..6 {
         let next = submit_real_pow_block(&a_rpc, i == 0).await;
@@ -257,6 +282,7 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     }
 
     let before = expect_tip(&c_rpc, tip).await;
+    record_node_metrics(&c_rpc, "c", "before_stop").await;
     c_rpc.disconnect().await.unwrap();
     c.stop().await;
     expect_peers(&a_rpc, 1).await;
@@ -280,7 +306,8 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     assert_eq!(recovered.virtual_daa_score, authority.virtual_daa_score);
     eprintln!("three real-PoW daemons converged to {tip} after follower reopened with six missing blocks");
 
-    for client in [&a_rpc, &b_rpc, &c_rpc] {
+    for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
+        record_node_metrics(client, name, "converged").await;
         client.disconnect().await.unwrap();
     }
     c.stop().await;
