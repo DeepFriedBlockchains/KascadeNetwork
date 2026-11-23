@@ -15,7 +15,7 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 
 ## Next executable check
 
-[Draft #25](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) combines the independently validated #17 and #19 branches. Once #22 validates, attach the relay source, reconcile the focused regressions in the native workflow, and validate the combined candidate on all eight [CI jobs](../../.github/workflows/ci.yaml). Keep public activation gated on separate maintainer authorization.
+[Draft #25](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) combines the independently validated #17 and #19 branches. It also stages the #22 relay source after its focused step passed. Once #22 validates, trigger and validate the combined candidate on all eight [CI jobs](../../.github/workflows/ci.yaml). Keep public activation gated on separate maintainer authorization.
 
 ## Reproducible acceptance evidence
 
