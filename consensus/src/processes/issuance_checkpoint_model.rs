@@ -262,3 +262,79 @@ fn issuance_checkpoint_decoder_rejects_short_oversized_and_trailing_records() {
     extended.push(0);
     assert!(decode_checkpoint(&extended).is_none());
 }
+
+const CHECKPOINT_WORKER_PATH: &str = "KASCADE_TEST_CHECKPOINT_WORKER_PATH";
+const CHECKPOINT_WORKER_STAGE: &str = "KASCADE_TEST_CHECKPOINT_WORKER_STAGE";
+const CHECKPOINT_WORKER_EXIT: i32 = 73;
+
+fn process_exit_fixture() -> (Checkpoint, Checkpoint) {
+    let first = cumulative_kazmi(1);
+    let second = cumulative_kazmi(2) - first;
+    let parent = Checkpoint::genesis(id(1)).advance(id(3), &[id(2)], first - 5, 0, 5).unwrap();
+    let child = parent.advance(id(5), &[id(4)], second + 5, 0, 0).unwrap();
+    (parent, child)
+}
+
+#[test]
+#[ignore = "internal worker launched by the process-exit checkpoint test"]
+fn issuance_checkpoint_process_exit_worker() {
+    use kaspa_database::prelude::ConnBuilder;
+
+    // A standalone run of ignored tests must not exit the surrounding test binary.
+    let Some(path) = std::env::var_os(CHECKPOINT_WORKER_PATH) else {
+        return;
+    };
+    let stage = std::env::var(CHECKPOINT_WORKER_STAGE).unwrap();
+    let db = ConnBuilder::default().with_files_limit(10).with_db_path(path.into()).build().unwrap();
+    let (parent, child) = process_exit_fixture();
+    assert_eq!(read_ready_checkpoint(&db, parent.network, parent.point, parent.commitment()), Some(parent));
+    let batch = checkpoint_batch(&child);
+    match stage.as_str() {
+        "staged" => assert!(!batch.is_empty()),
+        "committed" => db.write(batch).unwrap(),
+        _ => panic!("unexpected worker stage"),
+    }
+    // Do not allow a clean RocksDB destructor/close to supply durability.
+    std::process::exit(CHECKPOINT_WORKER_EXIT);
+}
+
+#[test]
+fn issuance_checkpoint_recovers_after_worker_exits_without_closing_database() {
+    use kaspa_database::prelude::ConnBuilder;
+
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let (parent, child) = process_exit_fixture();
+    {
+        let db = connect();
+        db.write(checkpoint_batch(&parent)).unwrap();
+    }
+
+    let run_worker = |stage| {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--ignored", "--exact", "processes::issuance_checkpoint_model::issuance_checkpoint_process_exit_worker"])
+            .env(CHECKPOINT_WORKER_PATH, temp.path())
+            .env(CHECKPOINT_WORKER_STAGE, stage)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(CHECKPOINT_WORKER_EXIT),
+            "checkpoint worker {stage} did not reach its exit boundary: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    run_worker("staged");
+    {
+        let db = connect();
+        assert_eq!(read_ready_checkpoint(&db, parent.network, parent.point, parent.commitment()), Some(parent.clone()));
+        assert!(read_ready_checkpoint(&db, child.network, child.point, child.commitment()).is_none());
+    }
+
+    run_worker("committed");
+    let db = connect();
+    assert!(read_ready_checkpoint(&db, parent.network, parent.point, parent.commitment()).is_none());
+    assert_eq!(read_ready_checkpoint(&db, child.network, child.point, child.commitment()), Some(child));
+}
