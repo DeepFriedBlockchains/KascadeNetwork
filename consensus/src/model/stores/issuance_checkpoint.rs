@@ -10,13 +10,16 @@ use kaspa_database::{
 };
 use kaspa_hashes::Hash;
 use parking_lot::RwLockReadGuard;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 // Distinct from the readiness and promotion-marker keys in this namespace.
 const CHECKPOINT_KEY: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, b'I', 1];
 
+const LOCAL_REPLAY_ANCHOR_KEY: &[u8] = &[DatabaseStorePrefixes::KascadeBranchAuthorityData as u8, b'I', 2];
+
 /// Trusted context obtained independently of persisted or imported settlement data.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub struct IssuanceCheckpointAnchor {
     pub network_id: Hash,
     pub pruning_point: Hash,
@@ -89,6 +92,55 @@ impl DbIssuanceCheckpoint {
             supply_cap: replay.supply_cap,
             expected_commitment: expected.commitment(),
         })
+    }
+
+    /// Retain the locally derived anchor before its selected prefix is pruned.
+    /// The authoritative guard must remain held until the shared batch commits.
+    /// Only this replay-backed path writes the retained anchor key.
+    pub fn stage_retained_replay_checkpoint<'guard>(
+        &self,
+        batch: &mut DeferredDbBatch<'guard>,
+        selected: &'guard RwLockReadGuard<'_, DbSelectedChainStore>,
+        replay: LocalIssuanceReplay<'_>,
+        checkpoint: &IssuanceCheckpoint,
+    ) -> StoreResult<()> {
+        let result = (|| {
+            let anchor = self.derive_anchor_from_local_replay(selected, replay)?;
+            self.stage(batch, selected, anchor, checkpoint)?;
+            let bytes = codec().serialize(&anchor).map_err(|error| inconsistent(error.to_string()))?;
+            batch.reserve_unique_key(LOCAL_REPLAY_ANCHOR_KEY)?;
+            batch.put_raw(&self.db, LOCAL_REPLAY_ANCHOR_KEY, bytes)
+        })();
+        if result.is_err() {
+            batch.reject();
+        }
+        result
+    }
+
+    /// Recover a locally authenticated pair after the replay prefix is gone.
+    /// The caller supplies network, cap and point from its trusted view.
+    pub fn load_retained_replay_checkpoint(
+        &self,
+        selected: &RwLockReadGuard<'_, DbSelectedChainStore>,
+        network_genesis: Hash,
+        pruning_point: Hash,
+        supply_cap: u64,
+    ) -> StoreResult<IssuanceCheckpoint> {
+        // Read both records at one sequence number even if another reader
+        // holds the same selected-chain lock while committing an authority batch.
+        let snapshot = self.db.snapshot();
+        let anchor_bytes = snapshot
+            .get(LOCAL_REPLAY_ANCHOR_KEY)?
+            .ok_or_else(|| inconsistent("missing locally verified issuance anchor"))?;
+        let anchor: IssuanceCheckpointAnchor =
+            codec().deserialize(&anchor_bytes).map_err(|error| inconsistent(error.to_string()))?;
+        if anchor.network_id != network_genesis || anchor.pruning_point != pruning_point || anchor.supply_cap != supply_cap {
+            return Err(inconsistent("locally verified issuance anchor has a different network, point or cap"));
+        }
+        let checkpoint_bytes = snapshot.get(CHECKPOINT_KEY)?.ok_or_else(|| inconsistent("missing retained issuance checkpoint"))?;
+        let checkpoint = codec().deserialize(&checkpoint_bytes).map_err(|error| inconsistent(error.to_string()))?;
+        self.verify(selected, anchor, &checkpoint)?;
+        Ok(checkpoint)
     }
 
     /// Stage a verified row without publishing it. The caller must hold the
@@ -194,7 +246,7 @@ mod tests {
     use super::*;
     use crate::model::stores::selected_chain::SelectedChainStore;
     use kaspa_consensus_core::ChainPath;
-    use kaspa_database::prelude::ConnBuilder;
+    use kaspa_database::prelude::{BatchDbWriter, ConnBuilder};
     use parking_lot::RwLock;
     use rocksdb::WriteBatch;
 
@@ -381,5 +433,84 @@ mod tests {
         store.stage(&mut batch, &guard, anchor, &replacement).unwrap();
         batch.commit().unwrap();
         assert_eq!(store.load(&guard, anchor).unwrap(), Some(replacement));
+    }
+
+    #[test]
+    fn retained_issuance_anchor_recovers_after_pruning_and_rejects_stale_selection() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let [genesis, parent, point, sibling, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
+        let path = [genesis, parent, point];
+        let claims = [IssuanceClaim { reward_source: source, settlement_block: parent, selected_index: 1, minted: CAP, paid: CAP - 20 }];
+        let releases = [DeveloperPayoutRelease { settlement_block: point, selected_index: 2, amount: 20 }];
+        let replay = || LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
+        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, &path, &claims, &releases).unwrap();
+
+        {
+            let db = connect();
+            let mut chain = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+            let mut init = WriteBatch::default();
+            chain.init_with_pruning_point(&mut init, genesis).unwrap();
+            db.write(init).unwrap();
+            let mut add = WriteBatch::default();
+            chain.apply_changes(&mut add, &ChainPath { removed: vec![], added: vec![parent, point] }).unwrap();
+            db.write(add).unwrap();
+
+            let selected = RwLock::new(chain);
+            let store = DbIssuanceCheckpoint::new(db.clone());
+            {
+                let guard = selected.read();
+                let mut missing = DeferredDbBatch::new(db.clone());
+                let ordinary_anchor = store.derive_anchor_from_local_replay(&guard, replay()).unwrap();
+                store.stage(&mut missing, &guard, ordinary_anchor, &checkpoint).unwrap();
+                missing.commit().unwrap();
+                assert!(store.load_retained_replay_checkpoint(&guard, genesis, point, CAP).is_err());
+
+                let mut rejected = DeferredDbBatch::new(db.clone());
+                let forged = IssuanceCheckpoint { ordered_claims_root: sibling, ..checkpoint };
+                assert!(store.stage_retained_replay_checkpoint(&mut rejected, &guard, replay(), &forged).is_err());
+                assert!(rejected.commit().is_err());
+                assert!(db.get(LOCAL_REPLAY_ANCHOR_KEY).unwrap().is_none());
+
+                let mut abandoned = DeferredDbBatch::new(db.clone());
+                store.stage_retained_replay_checkpoint(&mut abandoned, &guard, replay(), &checkpoint).unwrap();
+                drop(abandoned);
+                assert!(db.get(LOCAL_REPLAY_ANCHOR_KEY).unwrap().is_none());
+
+                let mut batch = DeferredDbBatch::new(db.clone());
+                store.stage_retained_replay_checkpoint(&mut batch, &guard, replay(), &checkpoint).unwrap();
+                batch.commit().unwrap();
+            }
+            let mut chain = selected.write();
+            let mut prune = WriteBatch::default();
+            chain.prune_below_point(BatchDbWriter::new(&mut prune), parent).unwrap();
+            db.write(prune).unwrap();
+        }
+
+        let db = connect();
+        let selected = RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+        let store = DbIssuanceCheckpoint::new(db.clone());
+        {
+            let guard = selected.read();
+            assert!(store.derive_anchor_from_local_replay(&guard, replay()).is_err());
+            assert_eq!(store.load_retained_replay_checkpoint(&guard, genesis, point, CAP).unwrap(), checkpoint);
+            assert!(store.load_retained_replay_checkpoint(&guard, sibling, point, CAP).is_err());
+            assert!(store.load_retained_replay_checkpoint(&guard, genesis, point, CAP - 1).is_err());
+        }
+        {
+            let mut chain = selected.write();
+            let mut reorg = WriteBatch::default();
+            chain.apply_changes(&mut reorg, &ChainPath { removed: vec![point], added: vec![sibling] }).unwrap();
+            db.write(reorg).unwrap();
+        }
+        let guard = selected.read();
+        assert!(store.load_retained_replay_checkpoint(&guard, genesis, point, CAP).is_err());
+        assert!(store.load_retained_replay_checkpoint(&guard, genesis, sibling, CAP).is_err());
     }
 }
