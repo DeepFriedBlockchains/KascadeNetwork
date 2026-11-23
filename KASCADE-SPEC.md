@@ -38,7 +38,7 @@ consensus values.
 
 Consensus monetary arithmetic is integer KASMI only. Never use floating
 point. - KASMI_PER_KCADE = 100,000,000 - MAX_SUPPLY_KCADE =
-23,000,000,000 - MAX_SUPPLY_KASMI = 2,300,000,000,000,000,000 Audit
+29,000,000,000 - MAX_SUPPLY_KASMI = 2,900,000,000,000,000,000 Audit
 upstream integer types and overflow safety.
 
 ## 4. Cascading Emission
@@ -50,9 +50,9 @@ to audit of the upstream reward clock - Reward sequence: 50, 49, 48 … 2,
 final 1-KCADE stage by 750,000 units - Total primary units:
 824,250,000 - Exact primary issuance: 21B KCADE
 
-Finite tail: - 0.5 KCADE per rewarding unit - Exactly 4,000,000,000 tail
-units - Exact tail issuance: 2B KCADE - Subsidy becomes 0 permanently
-afterward - Exact scheduled maximum: 23B KCADE
+Finite tail: - 0.5 KCADE per rewarding unit - Exactly 16,000,000,000 tail
+units - Exact tail issuance: 8B KCADE - Subsidy becomes 0 permanently
+afterward - Exact scheduled maximum: 29B KCADE
 
 Add independent full-schedule tests and boundary vectors for every
 Cascade, primary-to-tail, and tail-to-zero.
