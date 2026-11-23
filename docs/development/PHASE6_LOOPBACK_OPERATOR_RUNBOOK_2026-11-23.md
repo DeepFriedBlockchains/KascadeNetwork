@@ -40,6 +40,34 @@ The [five-minute timing evidence](https://github.com/DeepFriedBlockchains/Kascad
 
 Public testnet startup still needs owner-approved network identity, genesis, bootstrap endpoints, expected protocol and RPC exposure, observable peer and byte budgets, and authenticated production issuance and recovery. Keep this runbook's loopback configuration scoped to Simnet. The 29B issuance candidate remains inactive.
 
-## Automated command exercise (pending)
+## Automated command exercise
 
-The Linux Actions fixture starts the three documented commands with temporary paths and the same loopback ports. It checks RPC network identity, common fresh genesis, and the explicit peer topology. In a second pass, it restarts A with the additional test-only `--enable-unsynced-mining` flag. Default Simnet simulated PoW is used to advance two blocks, one while C is stopped. C reopens the same path and must catch up to the new tip and match A's pruning point and virtual DAA. All processes must exit successfully after SIGINT. CI uploads the exact commands, test driver observations, and per-process logs. No observed CLI results yet.
+The Linux Actions fixture starts the three documented commands with temporary paths and the same loopback ports. It checks RPC network identity, common fresh genesis, and the explicit peer topology. In a second pass, it restarts A with the additional test-only `--enable-unsynced-mining` flag. Default Simnet simulated PoW is used to advance two blocks, one while C is stopped. C reopens the same path and must catch up to the new tip and match A's pruning point and virtual DAA. All processes must exit successfully after SIGINT. CI uploads the exact commands, test driver observations, and per-process logs. The simulated-PoW exercise passed on the exact #42 source in [Actions run 45137198320](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45137198320).
+
+## Native-PoW acceptance on isolated Simnet
+
+Create one absolute-path override file visible to all three processes:
+
+```bash
+printf '%s\n' '{"skip_proof_of_work":false,"shielded_coinbase":false}' > "$(pwd)/phase6-native-pow.json"
+export NATIVE_PARAMS="$(pwd)/phase6-native-pow.json"
+```
+
+Use the three startup commands above with `--override-params-file="$NATIVE_PARAMS" --perf-metrics --perf-metrics-interval-sec=1` appended to each. Append `--enable-unsynced-mining` only on node A for this fixture. Reopen node C with the same command, binary, data directory and overrides. Use fresh directories when switching from the simulated-PoW exercise. The override enables normal proof validation and keeps the fixture transparent with the same Simnet genesis.
+
+For a reproducible block source and complete acceptance check, run the focused Linux driver from the pinned checkout. Reserve the six loopback ports shown above and let the driver start the processes:
+
+```bash
+cargo build -p kaspad
+export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
+export KASCADE_CLI_LOGS="$(mktemp -d)"
+cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook \
+  --run-ignored all --test-threads=1 --success-output immediate \
+  -E 'test(=phase6_loopback_cli_real_pow_recovery)'
+```
+
+Pass requires a common fresh genesis and two followers connected to A, an above-target nonce rejected, exactly 12 valid blocks accepted, unchanged DAG accounting after an exact duplicate submission, and six missing blocks recovered by C after reopening. All three final selected tips, block counts, pruning points and virtual DAA scores must agree. Record reopen-to-RPC and reopen-to-tip times, per-node CPU and RSS, storage and P2P counters, and three clean exits. Inspect `driver.log`, the daemon stdout/stderr logs, `metrics.jsonl` and `recovery.json` in the Actions artifact. A loopback pass is evidence for this native-PoW workload; representative load and competing native-PoW tips remain separate gates.
+
+## First native-PoW evidence
+
+On source `13dc263c9883b858ca30173d5087f954bc46b58d`, the focused native-PoW test passed in 4.878 seconds. All three processes accepted the expected 12-block DAG, rejected the invalid nonce, left the DAG unchanged on a duplicate submit, and shut down cleanly. C recovered six blocks in 312 ms from process reopen, with RPC ready after 310 ms. The raw artifact was uploaded. The matrix's metrics validator failed because Nextest appended an ANSI reset to the final JSON line, and early process metrics included zero RSS before the sampler's first observation. The follow-up strips terminal control sequences before JSON validation and waits up to ten seconds for each process sample. [Run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379) · [Raw artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379/artifacts/14803614244)

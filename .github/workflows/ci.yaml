@@ -111,7 +111,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Exercise the three-node CLI runbook
-        if: github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123'
+        if: github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123' || github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123'
         timeout-minutes: 45
         shell: bash
         run: |
@@ -119,10 +119,49 @@ jobs:
           export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-cli-runbook"
           mkdir -p "$KASCADE_CLI_LOGS"
           cargo build -p kaspad
-          cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --success-output immediate 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
+          cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --test-threads=1 --success-output immediate 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
+
+      - name: Validate per-node resource observations
+        if: github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123'
+        shell: bash
+        run: |
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-cli-runbook"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          output = Path(os.environ["KASCADE_CLI_LOGS"])
+          plain_log = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", (output / "driver.log").read_text())
+
+          def rows_for(prefix):
+              return [json.loads(line.removeprefix(prefix)) for line in map(str.lstrip, plain_log.splitlines())
+                      if line.startswith(prefix)]
+
+          recovery, = rows_for("phase6_recovery,")
+          rows = rows_for("phase6_node_metrics,")
+          (output / "recovery.json").write_text(json.dumps(recovery) + "\n")
+          (output / "metrics.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+          assert recovery["follower"] == "c" and recovery["missed_blocks"] == 6
+          assert recovery["accepted_blocks"] == 12 and recovery["final_block_count"] >= 12
+          assert recovery["final_virtual_daa_score"] >= 0
+          for key in ("final_tip", "final_pruning_point"):
+              assert len(recovery[key]) == 64
+              int(recovery[key], 16)
+          assert 0 <= recovery["reopen_to_rpc_ready_ms"] <= recovery["reopen_to_tip_convergence_ms"]
+          expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
+          expected.add(("c", "before_stop"))
+          assert len(rows) == len(expected)
+          assert {(row["node"], row["stage"]) for row in rows} == expected
+          counters = ("rss_bytes", "disk_io_read_bytes", "disk_io_write_bytes", "storage_size_bytes",
+                      "p2p_bytes_sent", "p2p_bytes_received")
+          assert all(isinstance(row[key], int) and row[key] >= 0 for row in rows for key in counters)
+          assert all(row["rss_bytes"] > 0 and row["cpu_usage"] >= 0 for row in rows)
+          PY
 
       - name: Upload three-node CLI runbook evidence
-        if: always() && (github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123')
+        if: always() && (github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123' || github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123')
         uses: actions/upload-artifact@v4
         with:
           name: phase6-cli-runbook
