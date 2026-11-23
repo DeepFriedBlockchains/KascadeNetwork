@@ -86,3 +86,13 @@ See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUAN
 - Before completing the live readiness gate, exercise the real exporter proof and receiver UTXO, SMT and virtual import, then confirm compatible fixed-point recovery and rejection of the stale child after the fork.
 - #60 and #64 remain inactive. No network selects the codec or replay verifier.
 
+
+## Exporter-to-receiver recovery acceptance
+
+| Gate | Evidence and next check |
+| --- | --- |
+| Actual exporter and isolated receiver | #65 candidate uses the existing P2P import workflow. Require the named native test to pass with a non-genesis proof, selected child, nonempty UTXOs, committed SMT lanes, authenticated empty shielded root and verified virtual state. |
+| Guarded publication and reopen | #65 compares the receiver's durable evidence before and after opening the same RocksDB directory, before reconnecting. Also require post-reopen block acceptance. Nonempty Orchard evidence currently has separate coverage. |
+| Interrupted accounting publication | #58 and #62 artifacts confirm 71 before commit, 72 after commit before acknowledgement, and 0 for the fresh retry. These cases use seeded chain evidence. A joint real-export crash case remains open. |
+| Reorganization at fixed pruning point | #59 verifies live checkpoint replacement. #63 verifies eligibility and stale ancestry for a prospective pruning point. Add a legitimate live fork above finality while keeping the committed point fixed. Test stale immediate-child rejection during a lawful staging or pre-finality transition. Retain the common checkpoint and reject incompatible descendant claims without double issuance. |
+| Independent historical issuance | `finish_verified_ibd_import_with_issuance` requires selected replay already validated locally. Production P2P completion supplies no fresh-receiver issuance witness. Require owner-approved carrier, activation, migration and bootstrap trust, then prove nonzero settlement and atomic readiness together, with missing/altered evidence, restart and reorganization. |

@@ -2,6 +2,27 @@
 
 Updated November 23, 2026.
 
+## Exporter-to-receiver recovery session
+
+The original stacks are #56 → #57 → #58 → #62, #57 → #59 → #61 → #63 → #65, and #53 → #60 → #64. All implementation PRs remain drafts. #65 also contains #61's DAA fixture correction.
+
+| Exact implementation | Actions evidence at checkpoint |
+| --- | --- |
+| `6df90717b0fdc41a6f85bc0bbb6a25709d688aa5` | [#57](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/57) · [45241439865](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241439865). Both guarded-publication regressions, the authority selection and workspace tests passed. Native follow-up steps were still running. |
+| `42d6937163511280276964400e0bf8fab1844664` | [#58](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/58) · [45241630500](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241630500). The focused guarded subprocess regression and 38 authority tests passed. Workspace run passed 1,599 tests and failed the separate `interrupted_import_remains_closed_after_abrupt_writer_exit` when that worker terminated without an exit code. Only the failed job was requested again. |
+| `c327d527b6dc9c586048ef4450cb57bc26899de7` | [#59](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/59) · [45241635579](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241635579). `live_reorg_replaces_selected_nonzero_issuance_checkpoint` passed. Workspace pending at checkpoint. |
+| `068c49622d572f39f6a64fa99322b12ca3f05a23` | [#60](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/60) · [45243944211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243944211). Both focused codec and context tests passed. Workspace pending. |
+| `d8a6c833420f751a204aa18055806267af00a586` | [#61](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/61) · [45251578576](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45251578576). Replaces [45243938117](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243938117), where the live test required zero liability one DAA tick too soon. The isolated Simnet test now uses interval 2 and checks DAA scores 0, 1, 2, and 3. Native regression pending. |
+| `b99dd88562ac810e2ecb9090ddd345a9b0e233eb` | [#62](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/62) · [45243940522](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243940522). Fresh-process retry passed with the same authenticated checkpoint and durable readiness. Workspace pending. |
+| `0d869e26697327d7de85c00e1cbb098bdf9c4236` | [#63](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/63) · [45245782694](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45245782694). `live_pruning_candidate_authenticates_selected_child_after_reorg` passed. It uses a prospective point during fork selection and checks pruning eligibility after the replacement. Workspace pending. |
+| `ab3835b056c5f90b3a2e3a0793ff5039f95e9f18` | [#64](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/64) · [45251521642](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45251521642). The named settlement regression passed in [45244523522](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45244523522); Lints required one rustfmt change. Replacement pending. |
+| `c9380e742f74c11d67f6ff3726f8874ec0aed5bc` | [#65](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/65) · [45252226323](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45252226323). New real exporter-to-receiver fixture. Native pass has yet to be observed. |
+
+[Artifact 14853226458](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241630500/artifacts/14853226458) prints exit 71 before the guarded commit and exit 72 after commit before acknowledgement. The parent asserted the old checkpoint and closed marker before commit, then the successor checkpoint, paid/deferred conservation, and durable ready marker after commit. [Artifact 14854234556](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243940522/artifacts/14854234556) prints 71, 72, and retry 0. Its test requires the identical full authenticated checkpoint and ready marker after the retry, including claim count, minted amount and released liability.
+
+**Next executable checks.** Inspect the #61 developer test and #64 formatting and settlement steps on their replacement heads. Inspect #58's failed-job retry for an actual worker status, then the remaining native jobs. On #65, inspect the named `authority_integration_preview_reopens_imported_pruning_evidence` result in the Phase 6 authority step and debug the first failed evidence comparison if present. The [runbook](docs/development/PHASE6_LOOPBACK_OPERATOR_RUNBOOK_2026-11-23.md) and [acceptance checklist](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) describe the fixture and the remaining recovery conditions.
+
+
 ## Live pruning eligibility and inactive settlement verification — November 23, 2026
 
 | PR | Exact head | GitHub Actions evidence |

@@ -108,3 +108,18 @@ See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUAN
 ### Issuance recovery gate update
 
 #52–#55 passed all eight jobs on the source heads recorded in [CURRENT_HANDOFF.md](../../CURRENT_HANDOFF.md). Native-PoW and peer recovery evidence still uses the recorded #43/#48 heads. Guarded readiness, lost-acknowledgement retry, and developer liability through live reorganization have separate test gates. See the [acceptance checklist](PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md) and the [fresh-receiver decision record](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) before using an approved private-network profile. Production issuance remains disabled.
+
+### Verified pruning import and database reopen candidate
+
+Draft #65 uses the transparent Simnet IBD profile. Run its focused fixture with the same profile and feature the workflow uses.
+
+```sh
+cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview --test-threads=1 \
+  -E 'test(=daemon_integration_tests::authority_integration_preview_reopens_imported_pruning_evidence)'
+```
+
+The exporter uses `get_pruning_point_proof` and the existing pruning-point/anticone response. The receiver validates the proof via `validate_staging_pruning_proof`, applies pruning history and trusted data to isolated staging, and authenticates the selected child from synced headers before interpreting the coinbase commitment. `get_pruning_point_smt_metadata` and the lane stream supply verified SMT data. The shielded snapshot and nullifier stream are checked against the selected child's root. `get_pruning_point_utxos` feeds the committed pruning UTXO set. The receiver computes the pruning-point virtual base from that UTXO import. `finish_verified_staging_import` rechecks these committed rows at guarded publication before the consensus manager accepts promotion.
+
+Pass requires a non-genesis pruning proof, nonempty pruning and virtual UTXO sets, at least ten active SMT lanes, the same selected-child body commitment and shielded root, all three stable flags, and the verified promotion record. The receiver compares evidence before and after reopening the same RocksDB directory, then reconnects and validates fresh blocks. This profile exercises the authenticated empty shielded state. The existing shielded profile supplies nonempty Orchard evidence in its own run. Track the named #65 native result in CURRENT_HANDOFF.md.
+
+Validate an ordinary descendant branch replacement with both nodes sharing the fixed pruning point and the current finality point. Check the exact finality point before attempting a competing branch. For a stale immediate child, exercise selection while the pruning point remains a candidate or while isolated staging can still lawfully change its selected headers. A live virtual branch that excludes the already finalized child is ineligible. Fresh nonzero issuance publication remains gated on the owner-approved issuance carrier and independent historical verification. Keep production issuance disabled.
