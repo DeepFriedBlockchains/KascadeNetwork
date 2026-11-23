@@ -140,7 +140,8 @@ pub fn check_prepared_payment(
         let recipient =
             Option::<Address>::from(Address::from_raw_address_bytes(&d.out_recipient)).ok_or(PaymentCheckError::Malformed(i))?;
         let out_value = NoteValue::from_raw(d.out_value);
-        let note = Option::<Note>::from(Note::from_parts(recipient, out_value, rho, rseed, orchard::note::NoteVersion::V2)).ok_or(PaymentCheckError::Malformed(i))?;
+        let note = Option::<Note>::from(Note::from_parts(recipient, out_value, rho, rseed, orchard::note::NoteVersion::V2))
+            .ok_or(PaymentCheckError::Malformed(i))?;
 
         // (1) The note this action really creates is the note the prover disclosed.
         if ExtractedNoteCommitment::from(note.commitment()).to_bytes() != act.cmx {
@@ -222,13 +223,19 @@ mod tests {
         let rseed_bytes = [7u8; 32];
         let rseed = Option::<RandomSeed>::from(RandomSeed::from_bytes(rseed_bytes, &rho)).unwrap();
         let recipient = Option::<Address>::from(Address::from_raw_address_bytes(&to)).unwrap();
-        let note = Option::<Note>::from(Note::from_parts(recipient, NoteValue::from_raw(out_value), rho, rseed, orchard::note::NoteVersion::V2)).unwrap();
+        let note = Option::<Note>::from(Note::from_parts(
+            recipient,
+            NoteValue::from_raw(out_value),
+            rho,
+            rseed,
+            orchard::note::NoteVersion::V2,
+        ))
+        .unwrap();
         let cmx = ExtractedNoteCommitment::from(note.commitment()).to_bytes();
 
         let rcv_bytes = [3u8; 32];
         let rcv = Option::<ValueCommitTrapdoor>::from(ValueCommitTrapdoor::from_bytes(rcv_bytes)).unwrap();
-        let cv_net =
-            ValueCommitment::derive(NoteValue::from_raw(spend_value) - NoteValue::from_raw(out_value), rcv).to_bytes();
+        let cv_net = ValueCommitment::derive(NoteValue::from_raw(spend_value) - NoteValue::from_raw(out_value), rcv).to_bytes();
 
         (
             ActionWire {
@@ -278,14 +285,8 @@ mod tests {
         // approved 1,000 and the device would have signed 2,000.
         let fvk = fvk_for([1; 32]);
         let to = fvk_for([2; 32]).address_at(0u32, Scope::External).to_raw_address_bytes();
-        let (b, d) = bundle(
-            vec![action([9; 32], 1_050, 1_000, to), action([8; 32], 1_050, 1_000, to)],
-            100,
-        );
-        assert_eq!(
-            check_prepared_payment(&b, &d, &fvk, &to, 1_000, 100),
-            Err(PaymentCheckError::RecipientPaidTwice { times: 2 })
-        );
+        let (b, d) = bundle(vec![action([9; 32], 1_050, 1_000, to), action([8; 32], 1_050, 1_000, to)], 100);
+        assert_eq!(check_prepared_payment(&b, &d, &fvk, &to, 1_000, 100), Err(PaymentCheckError::RecipientPaidTwice { times: 2 }));
     }
 
     #[test]
@@ -294,10 +295,7 @@ mod tests {
         let to = fvk_for([2; 32]).address_at(0u32, Scope::External).to_raw_address_bytes();
         let stranger = fvk_for([3; 32]).address_at(0u32, Scope::External).to_raw_address_bytes();
         let (b, d) = bundle(vec![action([9; 32], 1_100, 1_000, stranger)], 100);
-        assert!(matches!(
-            check_prepared_payment(&b, &d, &fvk, &to, 1_000, 100),
-            Err(PaymentCheckError::UnexpectedRecipient(0))
-        ));
+        assert!(matches!(check_prepared_payment(&b, &d, &fvk, &to, 1_000, 100), Err(PaymentCheckError::UnexpectedRecipient(0))));
     }
 
     #[test]
@@ -314,10 +312,7 @@ mod tests {
         let fvk = fvk_for([1; 32]);
         let to = fvk_for([2; 32]).address_at(0u32, Scope::External).to_raw_address_bytes();
         let mine = fvk.address_at(0u32, Scope::External).to_raw_address_bytes();
-        let (b, d) = bundle(
-            vec![action([9; 32], 1_100, 1_000, to), action([8; 32], 500, 400, mine)],
-            200,
-        );
+        let (b, d) = bundle(vec![action([9; 32], 1_100, 1_000, to), action([8; 32], 500, 400, mine)], 200);
         assert_eq!(check_prepared_payment(&b, &d, &fvk, &to, 1_000, 200), Ok(()));
     }
 
@@ -335,9 +330,6 @@ mod tests {
         let fvk = fvk_for([1; 32]);
         let to = fvk_for([2; 32]).address_at(0u32, Scope::External).to_raw_address_bytes();
         let (b, d) = bundle(vec![action([9; 32], 1_100, 1_000, to)], 100);
-        assert!(matches!(
-            check_prepared_payment(&b, &d, &fvk, &to, 1_000, 50),
-            Err(PaymentCheckError::FeeMismatch { .. })
-        ));
+        assert!(matches!(check_prepared_payment(&b, &d, &fvk, &to, 1_000, 50), Err(PaymentCheckError::FeeMismatch { .. })));
     }
 }

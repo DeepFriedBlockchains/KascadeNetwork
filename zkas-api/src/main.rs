@@ -85,8 +85,6 @@ struct Cli {
 #[derive(Clone)]
 struct TxLoc {
     block_hash: String,
-    blue_score: u64,
-    block_time: u64,
 }
 
 /// One block as the frontend's live feed expects it.
@@ -193,8 +191,10 @@ fn load_tx_index(path: &str) -> (std::collections::HashMap<String, TxLoc>, VecDe
     for line in text.lines() {
         let mut f = line.split('\t');
         let (Some(id), Some(bh), Some(bs), Some(bt)) = (f.next(), f.next(), f.next(), f.next()) else { continue };
-        let (Ok(blue_score), Ok(block_time)) = (bs.parse::<u64>(), bt.parse::<u64>()) else { continue };
-        if map.insert(id.to_string(), TxLoc { block_hash: bh.to_string(), blue_score, block_time }).is_none() {
+        if bs.parse::<u64>().is_err() || bt.parse::<u64>().is_err() {
+            continue;
+        }
+        if map.insert(id.to_string(), TxLoc { block_hash: bh.to_string() }).is_none() {
             order.push_back(id.to_string());
         }
     }
@@ -224,12 +224,12 @@ async fn index_block(state: &AppState, block: &RpcBlock) {
                 continue;
             }
             rows.push_str(&format!("{id}\t{block_hash}\t{blue_score}\t{block_time}\n"));
-            map.insert(id.clone(), TxLoc { block_hash: block_hash.clone(), blue_score, block_time });
+            map.insert(id.clone(), TxLoc { block_hash: block_hash.clone() });
             order.push_back(id);
-            if order.len() > TX_INDEX_CAP {
-                if let Some(old) = order.pop_front() {
-                    map.remove(&old);
-                }
+            if order.len() > TX_INDEX_CAP
+                && let Some(old) = order.pop_front()
+            {
+                map.remove(&old);
             }
         }
     }
@@ -465,7 +465,7 @@ async fn follow(state: Arc<AppState>) {
     // without this the ring filled with duplicates (96 unique of 200 observed
     // live), inflating the explorer's block-rate stat to 9–26 "bps" and
     // double-counting the shielded aggregate.
-    let mut seen: std::collections::HashSet<RpcHash> = backfill.iter().filter_map(|b| Some(b.header.hash)).collect();
+    let mut seen: std::collections::HashSet<RpcHash> = backfill.iter().map(|b| b.header.hash).collect();
     let mut seen_order: VecDeque<RpcHash> = backfill.iter().map(|b| b.header.hash).collect();
     const SEEN_CAP: usize = 8 * RECENT_CAP;
     let mut low = sink;
@@ -487,10 +487,10 @@ async fn follow(state: Arc<AppState>) {
                 continue; // page anchor or an already-ingested block
             }
             seen_order.push_back(*hash);
-            if seen_order.len() > SEEN_CAP {
-                if let Some(old) = seen_order.pop_front() {
-                    seen.remove(&old);
-                }
+            if seen_order.len() > SEEN_CAP
+                && let Some(old) = seen_order.pop_front()
+            {
+                seen.remove(&old);
             }
             let mut agg = state.shielded.write().await;
             let summary = ingest(block, &mut agg);
@@ -531,11 +531,11 @@ async fn follow(state: Arc<AppState>) {
                 // whole feed. A few polls of grace first to avoid needless jumps.
                 stalled_polls = stalled_polls.saturating_add(1);
                 if stalled_polls >= 5 {
-                    if let Ok(dag) = state.client.get_block_dag_info().await {
-                        if dag.sink != low {
-                            log::warn!("follow cursor pinned; re-anchoring to sink {}", dag.sink);
-                            low = dag.sink;
-                        }
+                    if let Ok(dag) = state.client.get_block_dag_info().await
+                        && dag.sink != low
+                    {
+                        log::warn!("follow cursor pinned; re-anchoring to sink {}", dag.sink);
+                        low = dag.sink;
                     }
                     stalled_polls = 0;
                 }
@@ -696,7 +696,7 @@ async fn info_nodes(State(s): State<Arc<AppState>>) -> impl IntoResponse {
         let placed = country.map(|c| {
             let slot = per_country.entry(c.code.clone()).or_insert_with(|| (c.name.clone(), (c.lat, c.lon), 0));
             slot.2 += 1;
-            let seed = u64::from_str_radix(&id, 16).unwrap_or_else(|_| id.len() as u64);
+            let seed = u64::from_str_radix(&id, 16).unwrap_or(id.len() as u64);
             (c, scatter(c.lat, c.lon, seed, slot.2 - 1))
         });
         nodes.push(MapNode {
@@ -905,7 +905,10 @@ async fn scan_merged(state: Arc<AppState>) {
 /// merge-mined blocks committed to, with block counts. Re-read each request (tiny
 /// file); absent/stale is fine — the fields just come back null.
 fn load_attribution() -> serde_json::Value {
-    std::fs::read_to_string(std::env::var("KASCADE_ATTRIBUTION_FILE").unwrap_or_else(|_| "attribution.json".to_string())).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null)
+    std::fs::read_to_string(std::env::var("KASCADE_ATTRIBUTION_FILE").unwrap_or_else(|_| "attribution.json".to_string()))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null)
 }
 
 async fn info_merged(State(s): State<Arc<AppState>>) -> impl IntoResponse {
@@ -1215,7 +1218,7 @@ async fn info_pulse(State(s): State<Arc<AppState>>, Query(query): Query<PulseQue
 
     let now_ms = now_secs() * 1_000;
     let recent = s.recent.read().await;
-    let mut blocks_15m = 0_u64;
+
     let mut transactions_15m = 0_u64;
     let mut transactions_1h = 0_u64;
     let mut block_bins = vec![0_u64; BINS];
@@ -1237,7 +1240,6 @@ async fn info_pulse(State(s): State<Arc<AppState>>, Query(query): Query<PulseQue
             daa_1h.push(daa);
         }
         if age < FIFTEEN_MIN_MS {
-            blocks_15m += 1;
             transactions_15m = transactions_15m.saturating_add(block.tx_count);
             let bin = BINS - 1 - (age / BIN_MS) as usize;
             block_bins[bin] += 1;
@@ -1257,7 +1259,7 @@ async fn info_pulse(State(s): State<Arc<AppState>>, Query(query): Query<PulseQue
     // observed in the window without double-counting the selected-chain coinbases.
     let non_coinbase_1h = transactions_1h.saturating_sub(daa_1h.len() as u64);
     transactions_1h = dag_blocks_1h.saturating_add(non_coinbase_1h);
-    blocks_15m = dag_blocks_15m;
+    let blocks_15m = dag_blocks_15m;
     for i in 0..BINS {
         if difficulty_counts[i] > 0 {
             difficulty_bins[i] /= difficulty_counts[i] as f64;
@@ -1397,7 +1399,7 @@ async fn transactions_search(State(s): State<Arc<AppState>>, Json(req): Json<TxS
     let mut found = Vec::new();
     for b in recent.iter() {
         for t in &b.txs {
-            if req.transaction_ids.iter().any(|id| *id == t.tx_id) {
+            if req.transaction_ids.contains(&t.tx_id) {
                 found.push(json!({
                     "transaction_id": t.tx_id,
                     "is_accepted": true,
@@ -1431,28 +1433,27 @@ async fn transaction_by_id(State(s): State<Arc<AppState>>, Path(id): Path<String
         // just-broadcast tx appears immediately as pending (0-conf) rather than
         // "not found". Confirmations stay 0 (accepting_block_blue_score = 0) until it
         // is mined and enters the recent-block window on a later request.
-        if let Ok(txid) = id.parse::<RpcHash>() {
-            if let Ok(entry) = s.client.get_mempool_entry(txid, false, false).await {
-                let tx = &entry.transaction;
-                let now_ms =
-                    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-                let outputs = detail_outputs(tx, &id, "");
-                return Json(json!({
-                    "subnetwork_id": tx.subnetwork_id.to_string(),
-                    "transaction_id": id,
-                    "hash": tx.verbose_data.as_ref().map(|v| v.hash.to_string()).unwrap_or_else(|| id.clone()),
-                    "mass": tx.verbose_data.as_ref().map(|v| v.compute_mass).unwrap_or(0).to_string(),
-                    "payload": hexs(&tx.payload),
-                    "block_hash": Vec::<String>::new(),
-                    "block_time": now_ms,
-                    "is_accepted": false,
-                    "confirmations": 0u64,
-                    "accepting_block_blue_score": 0u64,
-                    "inputs": Value::Null,
-                    "outputs": if outputs.is_empty() { Value::Null } else { json!(outputs) },
-                }))
-                .into_response();
-            }
+        if let Ok(txid) = id.parse::<RpcHash>()
+            && let Ok(entry) = s.client.get_mempool_entry(txid, false, false).await
+        {
+            let tx = &entry.transaction;
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let outputs = detail_outputs(tx, &id, "");
+            return Json(json!({
+                "subnetwork_id": tx.subnetwork_id.to_string(),
+                "transaction_id": id,
+                "hash": tx.verbose_data.as_ref().map(|v| v.hash.to_string()).unwrap_or_else(|| id.clone()),
+                "mass": tx.verbose_data.as_ref().map(|v| v.compute_mass).unwrap_or(0).to_string(),
+                "payload": hexs(&tx.payload),
+                "block_hash": Vec::<String>::new(),
+                "block_time": now_ms,
+                "is_accepted": false,
+                "confirmations": 0u64,
+                "accepting_block_blue_score": 0u64,
+                "inputs": Value::Null,
+                "outputs": if outputs.is_empty() { Value::Null } else { json!(outputs) },
+            }))
+            .into_response();
         }
         return err(format!("transaction {id} not found in the recent window"));
     };

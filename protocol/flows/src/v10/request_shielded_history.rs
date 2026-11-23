@@ -87,12 +87,12 @@ impl RequestShieldedHistoryFlow {
             let max_blocks = (msg.max_blocks as usize).clamp(1, HISTORY_CHUNK_BLOCKS);
             // Throttle before doing the work, not after: the cost this guards is the walk itself,
             // so sleeping afterwards would still let a peer queue the reads back to back.
-            if self.served_count >= HISTORY_BURST_CHUNKS {
-                if let Some(last) = self.last_served {
-                    let since = last.elapsed();
-                    if since < HISTORY_CHUNK_MIN_INTERVAL {
-                        tokio::time::sleep(HISTORY_CHUNK_MIN_INTERVAL - since).await;
-                    }
+            if self.served_count >= HISTORY_BURST_CHUNKS
+                && let Some(last) = self.last_served
+            {
+                let since = last.elapsed();
+                if since < HISTORY_CHUNK_MIN_INTERVAL {
+                    tokio::time::sleep(HISTORY_CHUNK_MIN_INTERVAL - since).await;
                 }
             }
             self.last_served = Some(std::time::Instant::now());
@@ -121,7 +121,9 @@ impl RequestShieldedHistoryFlow {
             .collect::<Result<_, _>>()?;
 
         debug!("serving {} shielded history records below {} (done={})", entries.len(), anchor, done);
-        self.router.enqueue(make_message!(Payload::ShieldedHistoryChunk, ShieldedHistoryChunkMessage { entries, done, anchor_index })).await?;
+        self.router
+            .enqueue(make_message!(Payload::ShieldedHistoryChunk, ShieldedHistoryChunkMessage { entries, done, anchor_index }))
+            .await?;
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use kaspa_consensus_core::{
     acceptance_data::{AcceptanceData, MergedBlockContext, MergesetBlockAcceptanceData},
     api::{
         BlockCount, BlockValidationFutures, ConsensusApi, ConsensusStats, DynConsensus, ImportLane, ImportLaneBatchIterator,
-        SeqCommitLaneProof,
+        SeqCommitLaneProof, StagingImportComponent, StagingImportSession, StagingPromotionError,
     },
     block::Block,
     blockstatus::BlockStatus,
@@ -147,17 +147,50 @@ impl Deref for ConsensusSessionBlocking<'_> {
 /// Please note - you must use [`ConsensusProxy`] type alias instead of this struct.
 #[derive(Clone)]
 pub struct ConsensusSessionOwned {
-    _session_guard: Option<SessionOwnedReadGuard>,
+    session_guard: Option<SessionOwnedReadGuard>,
     consensus: DynConsensus,
+    staging_import: Option<Arc<StagingImportSession>>,
+    staging_lifetime: Option<Arc<dyn Send + Sync>>,
 }
 
 impl ConsensusSessionOwned {
     pub fn new(session_guard: SessionOwnedReadGuard, consensus: DynConsensus) -> Self {
-        Self { _session_guard: Some(session_guard), consensus }
+        Self { session_guard: Some(session_guard), consensus, staging_import: None, staging_lifetime: None }
     }
 
     pub fn new_without_session_guard(consensus: DynConsensus) -> Self {
-        Self { _session_guard: None, consensus }
+        Self { session_guard: None, consensus, staging_import: None, staging_lifetime: None }
+    }
+
+    pub(crate) fn with_staging_lifetime(mut self, lifetime: Arc<dyn Send + Sync>) -> Self {
+        self.staging_lifetime = Some(lifetime);
+        self
+    }
+
+    pub fn with_staging_import(mut self, import: Option<Arc<StagingImportSession>>) -> Self {
+        self.staging_import = import;
+        self
+    }
+
+    pub fn staging_import(&self) -> Option<&Arc<StagingImportSession>> {
+        self.staging_import.as_ref()
+    }
+
+    pub async fn check_staging_component(
+        &self,
+        component: StagingImportComponent,
+        complete: bool,
+    ) -> Result<(), StagingPromotionError> {
+        let Some(import) = self.staging_import.clone() else { return Ok(()) };
+        self.clone()
+            .spawn_blocking(move |c| {
+                if complete {
+                    c.complete_verified_staging_component(&import, component)
+                } else {
+                    c.check_verified_staging_component(&import, component)
+                }
+            })
+            .await
     }
 
     /// Uses [`tokio::task::spawn_blocking`] to run the provided consensus closure on a thread where blocking is acceptable.
@@ -168,13 +201,20 @@ impl ConsensusSessionOwned {
         F: FnOnce(&dyn ConsensusApi) -> R + Send + 'static,
         R: Send + 'static,
     {
-        spawn_blocking(move || f(self.consensus.as_ref())).await.unwrap()
+        spawn_blocking(move || {
+            let result = f(self.consensus.as_ref());
+            // Capture the whole session so a detached worker retains its pruning guard.
+            drop(self);
+            result
+        })
+        .await
+        .unwrap()
     }
 }
 
 impl ConsensusSessionOwned {
     pub fn validate_and_insert_block(&self, block: Block) -> BlockValidationFutures {
-        self.consensus.validate_and_insert_block(block)
+        self.track_staging_block(self.consensus.validate_and_insert_block(block))
     }
 
     pub fn validate_and_insert_block_batch(&self, mut batch: Vec<Block>) -> BlockProcessingBatch {
@@ -191,7 +231,25 @@ impl ConsensusSessionOwned {
     }
 
     pub fn validate_and_insert_trusted_block(&self, tb: TrustedBlock) -> BlockValidationFutures {
-        self.consensus.validate_and_insert_trusted_block(tb)
+        self.track_staging_block(self.consensus.validate_and_insert_trusted_block(tb))
+    }
+
+    fn track_staging_block(&self, futures: BlockValidationFutures) -> BlockValidationFutures {
+        if self.staging_lifetime.is_none() {
+            return futures;
+        }
+        let session = self.clone();
+        let (block, block_task) = tokio::sync::oneshot::channel();
+        let virtual_state_task = tokio::spawn(async move {
+            let _ = block.send(futures.block_task.await);
+            let result = futures.virtual_state_task.await;
+            drop(session);
+            result
+        });
+        BlockValidationFutures {
+            block_task: Box::pin(async move { block_task.await.expect("staging block worker panicked") }),
+            virtual_state_task: Box::pin(async move { virtual_state_task.await.expect("staging virtual worker panicked") }),
+        }
     }
 
     pub fn calculate_transaction_non_contextual_masses(&self, transaction: &Transaction) -> TxResult<NonContextualMasses> {
@@ -376,7 +434,14 @@ impl ConsensusSessionOwned {
     }
 
     pub async fn async_is_chain_ancestor_of(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
-        self.clone().spawn_blocking(move |c| c.is_chain_ancestor_of(low, high)).await
+        let guarded = self.session_guard.is_some();
+        self.clone()
+            .spawn_blocking(
+                move |c| {
+                    if guarded { c.is_chain_ancestor_of_guarded(low, high) } else { c.is_chain_ancestor_of(low, high) }
+                },
+            )
+            .await
     }
 
     pub async fn async_get_hashes_between(&self, low: Hash, high: Hash, max_blocks: usize) -> ConsensusResult<(Vec<Hash>, Hash)> {
@@ -601,6 +666,11 @@ impl ConsensusSessionOwned {
         inactivity_shortcut_block: Hash,
         mut rx: tokio::sync::mpsc::Receiver<Vec<ImportLane>>,
     ) -> PruningImportResult<()> {
+        if let Some(import) = self.staging_import() {
+            self.consensus
+                .check_verified_staging_component(import, StagingImportComponent::Smt)
+                .map_err(|error| kaspa_consensus_core::errors::pruning::PruningImportError::SmtStoreError(error.to_string()))?;
+        }
         let lane_batches: ImportLaneBatchIterator = &mut std::iter::from_fn(move || rx.blocking_recv());
         self.consensus.import_pruning_point_smt(new_pruning_point, metadata, inactivity_shortcut_block, lane_batches)
     }
@@ -631,8 +701,19 @@ impl ConsensusSessionOwned {
 
     // -------------------- Shielded-pool pruning-point state (IBD) --------------------
 
-    pub async fn async_clear_pruning_shielded_stores(&self) {
-        self.clone().spawn_blocking(move |c| c.clear_pruning_shielded_stores()).await
+    pub async fn async_clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
+        let import = self.staging_import.clone();
+        self.clone()
+            .spawn_blocking(move |c| {
+                if let Some(import) = import {
+                    c.clear_verified_staging_shielded(&import, c.pruning_point()).map_err(|error| {
+                        kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string())
+                    })
+                } else {
+                    c.clear_pruning_shielded_stores()
+                }
+            })
+            .await
     }
     pub async fn async_set_pruning_shielded_stable(&self) {
         self.clone().spawn_blocking(move |c| c.set_pruning_shielded_stable_flag(true)).await
@@ -660,6 +741,17 @@ impl ConsensusSessionOwned {
     ) -> PruningImportResult<()> {
         let nullifier_batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator =
             &mut std::iter::from_fn(move || rx.blocking_recv());
+        if let Some(import) = self.staging_import() {
+            let expected = expected_state_root.ok_or_else(|| {
+                kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(
+                    "staging shielded import requires an authenticated state root".into(),
+                )
+            })?;
+            return self
+                .consensus
+                .import_verified_staging_shielded(import, new_pruning_point, metadata, expected, nullifier_batches)
+                .map_err(|error| kaspa_consensus_core::errors::pruning::PruningImportError::ShieldedStateError(error.to_string()));
+        }
         self.consensus.import_pruning_point_shielded(new_pruning_point, metadata, expected_state_root, nullifier_batches)
     }
 
@@ -685,3 +777,57 @@ impl ConsensusSessionOwned {
 }
 
 pub type ConsensusProxy = ConsensusSessionOwned;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{future::ready, sync::mpsc, time::Duration};
+    use tokio::{sync::oneshot, time::timeout};
+
+    struct StubConsensus;
+
+    impl ConsensusApi for StubConsensus {
+        fn is_chain_ancestor_of(&self, _low: Hash, _high: Hash) -> ConsensusResult<bool> {
+            Ok(false)
+        }
+
+        fn is_chain_ancestor_of_guarded(&self, _low: Hash, _high: Hash) -> ConsensusResult<bool> {
+            Ok(true)
+        }
+    }
+
+    #[tokio::test]
+    async fn authority_integration_staging_ancestry_reuses_existing_pruning_guard() {
+        let receiver = ConsensusInstance::new(SessionLock::new(), Arc::new(StubConsensus));
+        assert!(receiver.session().await.async_is_chain_ancestor_of(1.into(), 2.into()).await.unwrap());
+        assert!(!receiver.unguarded_session().async_is_chain_ancestor_of(1.into(), 2.into()).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancelled_wait_keeps_pruning_guard_until_blocking_callback_returns() {
+        let pruning_lock = SessionLock::new();
+        let consensus = ConsensusInstance::new(pruning_lock.clone(), Arc::new(StubConsensus));
+        let session = consensus.session().await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let caller = tokio::spawn(session.spawn_blocking(move |_| {
+            started_tx.send(()).unwrap();
+            let _ = release_rx.recv();
+        }));
+
+        timeout(Duration::from_secs(5), started_rx).await.unwrap().unwrap();
+        caller.abort();
+        assert!(caller.await.unwrap_err().is_cancelled());
+
+        let writer = pruning_lock.0.write();
+        tokio::pin!(writer);
+        tokio::select! {
+            biased;
+            _ = &mut writer => panic!("the detached callback released its pruning guard"),
+            () = ready(()) => {}
+        }
+
+        release_tx.send(()).unwrap();
+        let _writer = timeout(Duration::from_secs(5), writer).await.unwrap();
+    }
+}

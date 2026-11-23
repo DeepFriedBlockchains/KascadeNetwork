@@ -32,6 +32,7 @@ kaspa-smt = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 
 [features]
+test-staging-interruption = ["kaspa-consensus-core/test-staging-interruption"]
 test-smt-pruning-diagnostics = []
 
 [lints]

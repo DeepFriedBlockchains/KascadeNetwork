@@ -9,9 +9,18 @@ async fn main() {
     let client = GrpcClient::connect_with_args(
         NotificationMode::Direct,
         format!("grpc://{addr}"),
-        None, true, None, false, Some(500_000), Default::default(),
-    ).await.expect("connect");
+        None,
+        true,
+        None,
+        false,
+        Some(500_000),
+        Default::default(),
+    )
+    .await
+    .expect("connect");
     let r = client.get_peer_addresses().await.expect("getPeerAddresses");
     println!("known: {}  banned: {}", r.known_addresses.len(), r.banned_addresses.len());
-    for a in r.known_addresses { println!("{a}"); }
+    for a in r.known_addresses {
+        println!("{a}");
+    }
 }

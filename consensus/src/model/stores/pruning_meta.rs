@@ -33,7 +33,10 @@ impl PruningMetaStores {
             shielded_stable_flag_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedSyncFlag.into()),
             body_missing_anticone_blocks: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::BodyMissingAnticone.into()),
             shielded_history_backfilled_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedHistoryBackfilled.into()),
-            shielded_history_verified_base_access: CachedDbItem::new(db.clone(), DatabaseStorePrefixes::ShieldedHistoryVerifiedBase.into()),
+            shielded_history_verified_base_access: CachedDbItem::new(
+                db.clone(),
+                DatabaseStorePrefixes::ShieldedHistoryVerifiedBase.into(),
+            ),
         }
     }
 
@@ -69,6 +72,16 @@ impl PruningMetaStores {
 
     pub fn set_utxoset_position(&mut self, batch: &mut WriteBatch, pruning_utxoset_position: Hash) -> StoreResult<()> {
         self.utxoset_position_access.write(BatchDbWriter::new(batch), &pruning_utxoset_position)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stage_utxoset_completion<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        point: Hash,
+    ) -> StoreResult<()> {
+        self.utxoset_position_access.stage_exclusive_write(batch, &point)?;
+        self.utxoset_stable_flag_access.stage_exclusive_write(batch, &true)
     }
 
     /// Flip the sync flag in the same batch as your other writes
@@ -107,6 +120,15 @@ impl PruningMetaStores {
     /// Default to true if missing — upgrading nodes had no SMT state to sync.
     pub fn pruning_smt_stable_flag(&self) -> bool {
         self.smt_stable_flag_access.read().optional().unwrap().unwrap_or(true)
+    }
+
+    /// Caller retains the exclusive metadata lock through the deferred commit.
+    pub(crate) fn stage_pruning_shielded_stable<'a>(
+        &'a self,
+        batch: &mut kaspa_database::prelude::DeferredDbBatch<'a>,
+        stable: bool,
+    ) -> StoreResult<()> {
+        self.shielded_stable_flag_access.stage_exclusive_write(batch, &stable)
     }
 
     pub fn set_pruning_shielded_stable_flag(&mut self, batch: &mut WriteBatch, stable: bool) -> StoreResult<()> {

@@ -286,7 +286,7 @@ const SEED: [u8; 32] = [
         for (index, item) in dataset_slice.iter_mut().enumerate() {
             *item = calculate_dataset_item_1024(light_cache, start + index);
             let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if done % 4_000_000 == 0 {
+            if done.is_multiple_of(4_000_000) {
                 info!("prebuilding fishhash dataset: {}% ({}/{})", done * 100 / total_items, done, total_items);
             }
         }

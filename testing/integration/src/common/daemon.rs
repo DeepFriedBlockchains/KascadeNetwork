@@ -110,7 +110,7 @@ pub struct Daemon {
     shutdown_requested: Listener,
     workers: Option<Vec<std::thread::JoinHandle<()>>>,
 
-    _appdir_tempdir: TempDir,
+    _appdir_tempdir: Option<TempDir>,
 }
 
 fn free_port() -> u16 {
@@ -153,8 +153,23 @@ impl Daemon {
     }
 
     pub fn with_manager(client_manager: Arc<ClientManager>, fd_total_budget: i32) -> Daemon {
-        let appdir_tempdir = get_kaspa_tempdir();
+        Self::with_manager_and_appdir(client_manager, fd_total_budget, get_kaspa_tempdir())
+    }
+
+    fn with_manager_and_appdir(client_manager: Arc<ClientManager>, fd_total_budget: i32, appdir_tempdir: TempDir) -> Daemon {
         client_manager.args.write().appdir = Some(appdir_tempdir.path().to_str().unwrap().to_owned());
+        Self::with_manager_and_owner(client_manager, fd_total_budget, Some(appdir_tempdir))
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    pub fn new_persistent_with_args(mut args: Args, fd_total_budget: i32, path: &std::path::Path) -> Self {
+        std::fs::create_dir_all(path).unwrap();
+        Self::fill_args_with_random_ports(&mut args);
+        args.appdir = Some(path.to_str().unwrap().to_owned());
+        Self::with_manager_and_owner(Arc::new(ClientManager::new(args)), fd_total_budget, None)
+    }
+
+    fn with_manager_and_owner(client_manager: Arc<ClientManager>, fd_total_budget: i32, appdir: Option<TempDir>) -> Self {
         let (core, _) = create_core_with_runtime(&Default::default(), &client_manager.args.read(), fd_total_budget);
         let async_service = &Arc::downcast::<AsyncRuntime>(core.find(AsyncRuntime::IDENT).unwrap().into_any_arc()).unwrap();
         let rpc_core_service =
@@ -162,7 +177,16 @@ impl Daemon {
         let shutdown_requested = rpc_core_service.core_shutdown_request_listener();
         let grpc_server = &Arc::downcast::<GrpcService>(async_service.find(GrpcService::IDENT).unwrap().into_any_arc()).unwrap();
         let grpc_server_started = grpc_server.started();
-        Daemon { client_manager, core, grpc_server_started, shutdown_requested, workers: None, _appdir_tempdir: appdir_tempdir }
+        Daemon { client_manager, core, grpc_server_started, shutdown_requested, workers: None, _appdir_tempdir: appdir }
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    pub fn restart(mut self, fd_total_budget: i32) -> Self {
+        self.shutdown();
+        let appdir = self._appdir_tempdir.take().expect("daemon data directory was already taken");
+        let manager = self.client_manager.clone();
+        drop(self);
+        Self::with_manager_and_appdir(manager, fd_total_budget, appdir)
     }
 
     pub fn client_manager(&self) -> Arc<ClientManager> {

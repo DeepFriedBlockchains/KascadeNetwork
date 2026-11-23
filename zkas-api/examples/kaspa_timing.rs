@@ -23,8 +23,8 @@ use kaspa_p2p_lib::{
     common::ProtocolError,
     dequeue_with_timeout, make_message,
     pb::{
-        AddressesMessage, KaspadMessage, PingMessage, PongMessage, ReadyMessage, RequestAddressesMessage, VerackMessage,
-        VersionMessage, kaspad_message::Payload,
+        AddressesMessage, PingMessage, PongMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage,
+        kaspad_message::Payload,
     },
 };
 use std::{
@@ -178,7 +178,7 @@ async fn main() {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 for addr in &addrs {
-                    if let Ok(_) = adaptor.connect_peer(addr.clone()).await {
+                    if adaptor.connect_peer(addr.clone()).await.is_ok() {
                         eprintln!("re-connected {addr}{}", if targets.contains(addr) { "  [TARGET]" } else { "" });
                     }
                 }
@@ -202,8 +202,8 @@ async fn main() {
                     wall0 + inv.mono_ns, inv.mono_ns, inv.peer, target, inv.hash);
                 n += 1;
                 // Flush often so a long run is observable on disk mid-flight.
-                if n % 100 == 0 { let _ = file.flush(); }
-                if n % 1000 == 0 { eprintln!("  {n} invs logged"); }
+                if n.is_multiple_of(100) { let _ = file.flush(); }
+                if n.is_multiple_of(1000) { eprintln!("  {n} invs logged"); }
             }
         }
     }

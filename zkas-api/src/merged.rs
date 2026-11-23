@@ -190,10 +190,10 @@ pub async fn probe_kaspa_all(ip: IpAddr, skip_port: u16) -> Sweep {
             continue;
         }
         reachable = true; // something is listening, even if it is not a kaspad
-        if let Some(hit) = probe(ip, port).await {
-            if hit.network.starts_with("kaspa") {
-                found.push(hit);
-            }
+        if let Some(hit) = probe(ip, port).await
+            && hit.network.starts_with("kaspa")
+        {
+            found.push(hit);
         }
     }
     Sweep { found, reachable }

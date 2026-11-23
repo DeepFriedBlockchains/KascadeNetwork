@@ -140,6 +140,8 @@ fn wait_for_smt_pruning_to_settle(consensus: &Consensus, seed: u64) {
 fn apply_pruning_repro_params(params: &mut Params) {
     // Keep this aligned with simpa's `--test-pruning` profile, with Toccata
     // active so generated non-native lanes update the sequence-commit SMT.
+    // This harness spends transparent P2PK coinbases, not shielded notes.
+    params.shielded_coinbase = false;
     params.max_block_level = BlockLevel::MAX - 1;
     params.coinbase_maturity = 200;
 

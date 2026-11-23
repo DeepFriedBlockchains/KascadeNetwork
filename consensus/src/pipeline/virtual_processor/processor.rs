@@ -120,6 +120,9 @@ pub(super) struct AnchorVerdict {
     pub reject_reason: Option<&'static str>,
 }
 
+/// Cached pruning-point-time nullifier set for shielded IBD export: `(pp_hash, nullifiers)`.
+type PpNullifierExportCache = Mutex<Option<(Hash, Arc<Vec<[u8; 32]>>)>>;
+
 pub struct VirtualStateProcessor {
     // Channels
     receiver: CrossbeamReceiver<VirtualStateProcessingMessage>,
@@ -131,6 +134,8 @@ pub struct VirtualStateProcessor {
 
     // DB
     db: Arc<DB>,
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    branch_authority: super::persistent_branch_authority::PersistentBranchAuthority,
 
     // Config
     pub(super) genesis: GenesisBlock,
@@ -165,6 +170,8 @@ pub struct VirtualStateProcessor {
     pub(super) body_tips_store: Arc<RwLock<DbTipsStore>>,
     pub(super) depth_store: Arc<DbDepthStore>,
     pub(super) selected_chain_store: Arc<RwLock<DbSelectedChainStore>>,
+    #[cfg(any(test, feature = "phase6-staging-preview"))]
+    headers_selected_tip_store: Arc<RwLock<crate::model::stores::headers_selected_tip::DbHeadersSelectedTipStore>>,
     pub(super) pruning_samples_store: Arc<DbPruningSamplesStore>,
 
     // Utxo-related stores
@@ -226,7 +233,7 @@ pub struct VirtualStateProcessor {
     /// `nullifier_count`) and the streaming call so one request serves a single
     /// captured view. Keyed by pruning-point hash; the PP-time set is immutable per
     /// pruning point, so the cached value never goes stale.
-    pub(super) pp_nullifier_export_cache: Mutex<Option<(Hash, Arc<Vec<[u8; 32]>>)>>,
+    pub(super) pp_nullifier_export_cache: PpNullifierExportCache,
 
     // zkas: when true, the coinbase reward enters the shielded pool as
     // coinbase notes (no transparent outputs) — see `build_coinbase_mint`.
@@ -286,6 +293,8 @@ impl VirtualStateProcessor {
             mempool_mass_cofactors: params.mempool_block_mass_cofactors(),
             block_version: params.block_version(),
 
+            #[cfg(any(test, feature = "phase6-staging-preview"))]
+            branch_authority: super::persistent_branch_authority::PersistentBranchAuthority::new(db.clone()),
             db,
             statuses_store: storage.statuses_store.clone(),
             headers_store: storage.headers_store.clone(),
@@ -297,6 +306,8 @@ impl VirtualStateProcessor {
             body_tips_store: storage.body_tips_store.clone(),
             depth_store: storage.depth_store.clone(),
             selected_chain_store: storage.selected_chain_store.clone(),
+            #[cfg(any(test, feature = "phase6-staging-preview"))]
+            headers_selected_tip_store: storage.headers_selected_tip_store.clone(),
             pruning_samples_store: storage.pruning_samples_store.clone(),
             utxo_diffs_store: storage.utxo_diffs_store.clone(),
             utxo_multisets_store: storage.utxo_multisets_store.clone(),
@@ -386,6 +397,34 @@ impl VirtualStateProcessor {
         &self,
         pp: kaspa_hashes::Hash,
     ) -> Result<Option<kaspa_consensus_core::api::ShieldedExportMetadata>, kaspa_database::prelude::StoreError> {
+        let Some(md) =
+            self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &self.selected_chain_store.read()))?
+        else {
+            return Ok(None);
+        };
+        let nullifier_count = self.pruning_point_nullifier_set(pp)?.len() as u64;
+        Ok(Some(kaspa_consensus_core::api::ShieldedExportMetadata { data: md.to_wire_bytes(), nullifier_count }))
+    }
+
+    fn shielded_export_window_blocks(
+        &self,
+        pp: Hash,
+        chain: &DbSelectedChainStore,
+    ) -> kaspa_database::prelude::StoreResult<BlockHashSet> {
+        match chain.get_by_hash(pp).optional()? {
+            Some(pp_index) => {
+                let low_index = pp_index.saturating_sub(self.max_shielded_anchor_age);
+                Ok((low_index..pp_index).filter_map(|i| chain.get_by_index(i).optional().ok().flatten()).collect())
+            }
+            None => Ok(BlockHashSet::default()),
+        }
+    }
+
+    fn shielded_export_metadata(
+        &self,
+        pp: Hash,
+        window_blocks: impl FnOnce() -> kaspa_database::prelude::StoreResult<BlockHashSet>,
+    ) -> kaspa_database::prelude::StoreResult<Option<crate::processes::shielded::PruningPointShieldedMetadata>> {
         let Some(mut md) = self.shielded_state_manager.export_pruning_point_shielded(pp)? else {
             return Ok(None);
         };
@@ -396,17 +435,7 @@ impl VirtualStateProcessor {
         // `pp` over exactly the consensus window; stop early if the chain index does not reach that
         // far (a node that itself fast-synced), since anything we cannot resolve we simply do not
         // claim — the receiver is no worse off than today.
-        let window = self.max_shielded_anchor_age;
-        let window_blocks: BlockHashSet = {
-            let sc_read = self.selected_chain_store.read();
-            match sc_read.get_by_hash(pp).optional()? {
-                Some(pp_index) => {
-                    let low_index = pp_index.saturating_sub(window);
-                    (low_index..pp_index).filter_map(|i| sc_read.get_by_index(i).optional().ok().flatten()).collect()
-                }
-                None => BlockHashSet::default(),
-            }
-        };
+        let window_blocks = window_blocks()?;
         if !window_blocks.is_empty() {
             // Read the pairs out of the stored index rather than recomputing a tree root per
             // block: the derive-per-block version overran the 120s IBD timeout at 27,000 blocks
@@ -431,8 +460,7 @@ impl VirtualStateProcessor {
             }
             md.in_window_anchor_source_scores = scores;
         }
-        let nullifier_count = self.pruning_point_nullifier_set(pp)?.len() as u64;
-        Ok(Some(kaspa_consensus_core::api::ShieldedExportMetadata { data: md.to_wire_bytes(), nullifier_count }))
+        Ok(Some(md))
     }
 
     /// Server side: the spent-nullifier set **as of the pruning point** (for shielded
@@ -462,10 +490,10 @@ impl VirtualStateProcessor {
     /// tolerated by the serving flow, which aborts the transfer cleanly on drift
     /// instead of panicking.
     fn pruning_point_nullifier_set(&self, pp: kaspa_hashes::Hash) -> Result<Arc<Vec<[u8; 32]>>, kaspa_database::prelude::StoreError> {
-        if let Some((cached_pp, set)) = self.pp_nullifier_export_cache.lock().as_ref() {
-            if *cached_pp == pp {
-                return Ok(Arc::clone(set));
-            }
+        if let Some((cached_pp, set)) = self.pp_nullifier_export_cache.lock().as_ref()
+            && *cached_pp == pp
+        {
+            return Ok(Arc::clone(set));
         }
         let snapshot = self.shielded_state_manager.nullifier_set_snapshot()?;
         let tip = self.lkg_virtual_state.load().ghostdag_data.selected_parent;
@@ -487,31 +515,76 @@ impl VirtualStateProcessor {
     /// declared state root must equal this PoW-committed value (the coinbase
     /// `shielded_commitment` of the pruning point's selected child) BEFORE anything
     /// is seeded — the import is otherwise entirely attacker-controlled.
-    pub fn seed_pruning_point_shielded(
+    /// The caller pins its existing pruning session for the entire blocking worker.
+    /// Network waits hold no store locks. Every write is bounded and atomic.
+    pub(crate) fn import_bounded_pruning_shielded(
         &self,
-        pp: kaspa_hashes::Hash,
+        pp: Hash,
         metadata: kaspa_consensus_core::api::ShieldedExportMetadata,
         expected_state_root: Option<[u8; 32]>,
-        nullifiers: Vec<[u8; 32]>,
+        nullifier_batches: kaspa_consensus_core::api::ShieldedNullifierBatchIterator<'_>,
+        mut commit: impl for<'a> FnMut(kaspa_database::prelude::DeferredDbBatch<'a>) -> kaspa_database::prelude::StoreResult<()>,
     ) -> Result<(), String> {
+        use crate::model::stores::shielded::NullifierSetStoreReader;
         use crate::processes::shielded::{PruningPointShieldedMetadata, ShieldedStateManager};
+        use crate::processes::shielded_import::ShieldedImportAccumulator;
+        use kaspa_database::prelude::DeferredDbBatch;
+
+        let mut stream = ShieldedImportAccumulator::new(metadata.nullifier_count)?;
         let md = PruningPointShieldedMetadata::from_wire_bytes(&metadata.data)?;
-        // F-02: reject the import before seeding if it does not match the
-        // PoW-committed shielded state root (peer can be dropped; another syncer
-        // can be tried).
         if let Some(committed) = expected_state_root {
             ShieldedStateManager::verify_import_binding(&md, committed)?;
         }
-        let n = ShieldedStateManager::verify_pruning_point_shielded(&md, nullifiers.iter())?;
-        if n as u64 != metadata.nullifier_count {
-            return Err(format!("nullifier count mismatch: metadata says {}, streamed {}", metadata.nullifier_count, n));
+        ShieldedStateManager::verify_import_metadata(&md)?;
+        {
+            // Read point before metadata, matching the other authority writers.
+            let point = self.pruning_point_store.read();
+            if point.pruning_point().map_err(|e| e.to_string())? != pp {
+                return Err("shielded import pruning point changed".into());
+            }
+            let metadata_store = self.pruning_meta_stores.write();
+            if self.shielded_state_manager.nullifiers().iter_all().next().transpose().map_err(|e| e.to_string())?.is_some() {
+                return Err("shielded import requires a cleared membership set".into());
+            }
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            metadata_store.stage_pruning_shielded_stable(&mut batch, false).map_err(|e| e.to_string())?;
+            commit(batch).map_err(|e| e.to_string())?;
         }
-        let mut batch = WriteBatch::default();
-        self.shielded_state_manager
-            .seed_pruning_point_shielded(&mut batch, pp, &md, nullifiers.iter())
-            .map_err(|e| format!("seeding shielded stores failed: {e:?}"))?;
-        self.db.write(batch).unwrap();
-        info!("Imported shielded state for pruning point {}: {} nullifiers imported", pp, n);
+        for chunk in nullifier_batches {
+            stream.append(&chunk)?;
+            let point = self.pruning_point_store.read();
+            if point.pruning_point().map_err(|e| e.to_string())? != pp {
+                return Err("shielded import pruning point changed".into());
+            }
+            // This set is bounded by the single frame limit, never the stream size.
+            let mut unique = std::collections::HashSet::with_capacity(chunk.len());
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            for nf in chunk {
+                if !unique.insert(nf) || self.shielded_state_manager.nullifiers().contains(&nf).map_err(|e| e.to_string())? {
+                    return Err("duplicate nullifier in shielded import".into());
+                }
+                self.shielded_state_manager.nullifiers().insert_deferred(&mut batch, nf).map_err(|e| e.to_string())?;
+            }
+            commit(batch).map_err(|e| e.to_string())?;
+            drop(point);
+            #[cfg(feature = "test-staging-interruption")]
+            kaspa_consensus_core::test_staging_write::after_shielded_write();
+        }
+        stream.finish(&md.nullifier_muhash)?;
+        let point = self.pruning_point_store.read();
+        if point.pruning_point().map_err(|e| e.to_string())? != pp {
+            return Err("shielded import pruning point changed".into());
+        }
+        let metadata_store = self.pruning_meta_stores.write();
+        let rows = self.shielded_state_manager.verify_import_rows(&md).map_err(|e| e.to_string())?;
+        if rows != metadata.nullifier_count {
+            return Err("committed nullifier count differs from the declared count".into());
+        }
+        let mut batch = DeferredDbBatch::new(self.db.clone());
+        self.shielded_state_manager.stage_import_metadata(&mut batch, pp, &md).map_err(|e| e.to_string())?;
+        metadata_store.stage_pruning_shielded_stable(&mut batch, true).map_err(|e| e.to_string())?;
+        commit(batch).map_err(|e| e.to_string())?;
+        info!("Imported shielded state for pruning point {}: {} nullifiers imported", pp, rows);
         Ok(())
     }
 
@@ -523,16 +596,36 @@ impl VirtualStateProcessor {
         self.shielded_state_manager.state_root_at(block)
     }
 
-    /// F-15: stage the real clear of the shielded import state (the whole global
-    /// nullifier set + the per-block snapshots at `pruning_point`) into `batch`.
-    /// See `ShieldedStateManager::clear_for_pruning_reimport` for the safety
-    /// preconditions — the caller (IBD flow via `Consensus`) enforces them.
-    pub fn clear_shielded_state_for_pruning_reimport(
+    /// Clear before a full re-seed, only after IBD rejects validated descendants.
+    /// A durable false marker precedes deletion. A single database iterator and
+    /// bounded deferred batches avoid a full membership snapshot or write batch.
+    /// The proxy retains its existing pruning guard across the complete call.
+    pub(crate) fn clear_bounded_pruning_shielded(
         &self,
-        batch: &mut WriteBatch,
-        pruning_point: kaspa_hashes::Hash,
-    ) -> Result<(), kaspa_database::prelude::StoreError> {
-        self.shielded_state_manager.clear_for_pruning_reimport(batch, pruning_point)
+        pp: Hash,
+        mut commit: impl for<'a> FnMut(kaspa_database::prelude::DeferredDbBatch<'a>) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use kaspa_database::prelude::{DeferredDbBatch, StoreError};
+
+        let check_point = || {
+            let point = self.pruning_point_store.read();
+            if point.pruning_point()? != pp {
+                return Err(StoreError::DataInconsistency("shielded cleanup pruning point changed".into()));
+            }
+            Ok(point)
+        };
+        {
+            let _point = check_point()?;
+            let metadata = self.pruning_meta_stores.write();
+            let mut batch = DeferredDbBatch::new(self.db.clone());
+            metadata.stage_pruning_shielded_stable(&mut batch, false)?;
+            commit(batch)?;
+        }
+        self.shielded_state_manager.clear_for_pruning_reimport(&self.db, pp, |batch| {
+            let _point = check_point()?;
+            let _metadata = self.pruning_meta_stores.write();
+            commit(batch)
+        })
     }
 
     /// The shielded effects one **chain block** applied (PLAN §2.4), for wallet sync
@@ -2380,4 +2473,457 @@ impl VirtualStateProcessor {
 enum MergesetIncreaseResult {
     Accepted { increase_size: u64 },
     Rejected { new_candidate: Hash },
+}
+
+#[cfg(any(test, feature = "phase6-staging-preview"))]
+impl VirtualStateProcessor {
+    /// Enter from a caller without an existing pruning session guard.
+    fn with_authority_point<T>(
+        &self,
+        operation: impl FnOnce(super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<T>,
+    ) -> kaspa_database::prelude::StoreResult<T> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        operation(super::branch_readiness::ReadinessPoint { hash, index })
+    }
+
+    pub(super) fn begin_authority_import(
+        &self,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentImportToken> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let _metadata = self.pruning_meta_stores.read();
+        self.branch_authority.begin_import()
+    }
+
+    #[cfg(test)]
+    pub(super) fn authority_lease(
+        &self,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| self.branch_authority.lease(point))
+    }
+
+    #[cfg(test)]
+    pub(super) fn authority_commit(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.with_authority_point(|point| self.branch_authority.commit(point, lease, batch))
+    }
+
+    #[cfg(test)]
+    pub(super) fn apply_authorized_staging_batch(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        prefixes: &[u8],
+        build: impl FnOnce() -> kaspa_database::prelude::StoreResult<kaspa_database::prelude::DeferredDbBatch<'static>>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let batch = build()?;
+        batch.ensure_key_prefixes(prefixes)?;
+        let _pruning = self.pruning_point_store.write();
+        let _metadata = self.pruning_meta_stores.write();
+        operation.apply(&self.branch_authority, batch)
+    }
+
+    /// Legacy proof stores take their own point and virtual locks. Keep the
+    /// worker and pruning guard pinned, and never hold the authority mutex
+    /// across the legacy writer.
+    #[cfg(test)]
+    pub(super) fn apply_authorized_pruning_proof(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        apply: impl FnOnce() -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        self.apply_guarded_staging_proof(operation, proof, apply)
+    }
+
+    /// The production IBD proxy holds the receiver's pruning read guard.
+    pub(super) fn apply_guarded_staging_proof(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        apply: impl FnOnce() -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        operation.verify(&self.branch_authority)?;
+        apply()?;
+        let _pruning = self.pruning_point_store.read();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        proof.verify_committed(&self.db, super::branch_readiness::ReadinessPoint { hash, index })?;
+        operation.verify(&self.branch_authority)
+    }
+
+    pub(super) fn check_staging_operation(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        operation.verify(&self.branch_authority)
+    }
+
+    pub(super) fn staging_import_point(&self) -> kaspa_database::prelude::StoreResult<super::branch_readiness::ReadinessPoint> {
+        let _pruning = self.pruning_point_store.read();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        Ok(super::branch_readiness::ReadinessPoint { hash, index })
+    }
+
+    #[cfg(test)]
+    pub(super) fn commit_staging_promotion(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        self.commit_staging_promotion_checked(lease, proof, child, false)
+    }
+
+    pub(crate) fn has_verified_promotion_record(&self) -> kaspa_database::prelude::StoreResult<bool> {
+        Ok(self.db.get(super::staging_import::PROMOTION_KEY)?.as_deref() == Some(b"promotion-ready".as_slice()))
+    }
+
+    pub(super) fn commit_staging_promotion_checked(
+        &self,
+        lease: super::persistent_branch_authority::PersistentBranchLease,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        verify_virtual: bool,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        batch.put_raw(&self.db, super::staging_import::PROMOTION_KEY, b"promotion-ready")?;
+        self.with_authority_point(|point| {
+            // Retain the virtual read guard through the durable marker write.
+            let mut virtual_guard = None;
+            let result = self.branch_authority.commit_rechecked(point, lease, batch, |db, point| {
+                super::import_readiness::verify_pruning_utxos(db, point)?;
+                self.verify_authority_smt(db, point)?;
+                self.verify_authenticated_staging(db, point, proof, child, None)?;
+                if verify_virtual {
+                    virtual_guard = Some(self.try_read_staging_virtual()?);
+                    super::import_readiness::verify_virtual_utxos(db, point)?;
+                }
+                Ok(())
+            });
+            drop(virtual_guard);
+            result
+        })
+    }
+
+    /// Apply a pruning UTXO import chunk through the session's worker permit.
+    #[cfg(test)]
+    pub(super) fn append_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        self.append_guarded_staging_utxos(operation, utxos, multiset)
+    }
+
+    pub(super) fn commit_guarded_shielded_batch(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        batch: kaspa_database::prelude::DeferredDbBatch<'_>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let prefixes: Vec<_> =
+            super::staging_import::StagingComponent::Shielded.write_prefixes().iter().copied().map(u8::from).collect();
+        batch.ensure_key_prefixes(&prefixes)?;
+        operation.apply(&self.branch_authority, batch)
+    }
+
+    pub(super) fn append_guarded_staging_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        utxos: &[(kaspa_consensus_core::tx::TransactionOutpoint, kaspa_consensus_core::tx::UtxoEntry)],
+        multiset: &mut MuHash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use kaspa_consensus_core::muhash::MuHashExtensions;
+
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.utxo_set.stage_import_chunk(&mut batch, utxos)?;
+        operation.apply(&self.branch_authority, batch)?;
+        for (outpoint, entry) in utxos {
+            multiset.combine(&MuHash::from_utxo(outpoint, entry));
+        }
+        Ok(())
+    }
+
+    /// Write the completion rows only after hashing the committed UTXO set.
+    #[cfg(test)]
+    pub(super) fn complete_authorized_pruning_utxos(
+        &self,
+        operation: &mut super::import_operation::ImportOperation,
+        expected_point: Hash,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        let _session = self.pruning_lock.blocking_read();
+        let _pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        let (hash, index) = DbPruningStore::new(self.db.clone()).pruning_point_and_index()?;
+        if hash != expected_point {
+            return Err(StoreError::DataInconsistency("staged UTXO pruning point changed".into()));
+        }
+        super::import_readiness::verify_pruning_utxos(&self.db, super::branch_readiness::ReadinessPoint { hash, index })?;
+        let mut batch = kaspa_database::prelude::DeferredDbBatch::new(self.db.clone());
+        metadata.stage_utxoset_completion(&mut batch, hash)?;
+        operation.apply(&self.branch_authority, batch)
+    }
+
+    pub(super) fn finish_verified_ibd_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| {
+            let _virtual = self.try_read_staging_virtual()?;
+            self.finish_authority_import_at(token, point, point, |db, point| {
+                self.verify_authenticated_staging(db, point, proof, child, None)?;
+                super::import_readiness::verify_virtual_utxos(db, point)
+            })
+        })
+    }
+
+    fn try_read_staging_virtual(&self) -> kaspa_database::prelude::StoreResult<parking_lot::RwLockReadGuard<'_, VirtualStores>> {
+        self.virtual_stores
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during staging verification".into()))
+    }
+
+    /// Complete an isolated receiver only after proof and shielded corroboration.
+    /// The caller must quiesce header and virtual processing on this receiver.
+    #[cfg(test)]
+    pub(super) fn finish_authenticated_authority_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.finish_authority_import(token, retention, |db, point| self.verify_authenticated_staging(db, point, proof, child, None))
+    }
+
+    /// Recover an opened database against its committed selected chain. Busy
+    /// virtual or chain locks fail closed to avoid reversing the live order.
+    #[cfg(test)]
+    pub(super) fn recover_authenticated_staging(
+        &self,
+        retention: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        tip_child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        use crate::model::stores::virtual_state::DbVirtualStateStore;
+
+        self.with_authority_point(|point| {
+            let _virtual_state = self
+                .virtual_stores
+                .try_upgradable_read()
+                .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during restart verification".into()))?;
+            let _chain = self
+                .selected_chain_store
+                .try_read()
+                .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during restart verification".into()))?;
+            let token = self.branch_authority.begin_import()?;
+            let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+            self.finish_authority_import_at(token, point, retention, |db, point| {
+                self.verify_authenticated_staging(db, point, proof, child, Some((tip, tip_child)))
+            })
+        })
+    }
+
+    /// Capture metadata and rows under one pinned pruning and virtual view.
+    pub(crate) fn capture_shielded_export_snapshot(
+        &self,
+        pp: Hash,
+    ) -> kaspa_database::prelude::StoreResult<kaspa_consensus_core::api::ShieldedExportSnapshot> {
+        use super::import_shielded_readiness::{authenticated_commitment, descendant_nullifiers};
+        use crate::{
+            model::stores::virtual_state::DbVirtualStateStore,
+            processes::shielded::{PruningPointShieldedMetadata, ShieldedStateManager},
+        };
+        use kaspa_consensus_core::{
+            api::{MAX_SHIELDED_NULLIFIER_IMPORT_COUNT, ShieldedExportMetadata, ShieldedExportSnapshot},
+            block::Block,
+        };
+
+        let pruning = self.pruning_point_store.read();
+        let metadata_guard = self.pruning_meta_stores.read();
+        if pruning.pruning_point()? != pp || !metadata_guard.pruning_shielded_stable_flag() {
+            return Err(StoreError::DataInconsistency("shielded export pruning point changed or is unready".into()));
+        }
+        let _virtual = self
+            .virtual_stores
+            .try_upgradable_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during shielded export".into()))?;
+        let chain = self
+            .selected_chain_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during shielded export".into()))?;
+        let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+        let (tip_index, indexed_tip) = chain.get_tip()?;
+        let pp_index = chain.get_by_hash(pp)?;
+        if tip != indexed_tip || pp_index >= tip_index {
+            return Err(StoreError::DataInconsistency("shielded export has no committed selected child".into()));
+        }
+        let child_hash = chain.get_by_index(pp_index + 1)?;
+        let child = Block::from_arcs(self.headers_store.get_header(child_hash)?, self.block_transactions_store.get(child_hash)?);
+        let expected = authenticated_commitment(&self.db, pp, &child, child_hash)?;
+        let mut added = descendant_nullifiers(&self.db, pp, child_hash, tip)?;
+        let mut nullifiers = Vec::new();
+        for row in self.shielded_state_manager.nullifiers().iter_all() {
+            let nullifier = row?;
+            if !added.remove(&nullifier) {
+                if nullifiers.len() as u64 == MAX_SHIELDED_NULLIFIER_IMPORT_COUNT {
+                    return Err(StoreError::DataInconsistency("shielded export exceeds the nullifier limit".into()));
+                }
+                nullifiers.push(nullifier);
+            }
+        }
+        if !added.is_empty() {
+            return Err(StoreError::DataInconsistency("shielded export is missing committed descendant nullifiers".into()));
+        }
+
+        let metadata = match self.shielded_export_metadata(pp, || self.shielded_export_window_blocks(pp, &chain))? {
+            Some(metadata) => {
+                ShieldedStateManager::verify_import_binding(&metadata, expected).map_err(StoreError::DataInconsistency)?;
+                ShieldedStateManager::verify_pruning_point_shielded(&metadata, nullifiers.iter())
+                    .map_err(StoreError::DataInconsistency)?;
+                Some(ShieldedExportMetadata { data: metadata.to_wire_bytes(), nullifier_count: nullifiers.len() as u64 })
+            }
+            None => {
+                if !nullifiers.is_empty()
+                    || expected != PruningPointShieldedMetadata::empty_state_root()
+                    || self.shielded_state_manager.state_root_at(pp)? != expected
+                {
+                    return Err(StoreError::DataInconsistency("shielded export does not match the authenticated empty state".into()));
+                }
+                None
+            }
+        };
+        Ok(ShieldedExportSnapshot { metadata, nullifiers })
+    }
+
+    /// Called with the proxy's pruning session pinned. Only the shielded flag
+    /// may change, after both committed views have been authenticated.
+    pub(crate) fn reconcile_descendant_shielded_readiness(
+        &self,
+        expected_point: Hash,
+        expected_tip: Hash,
+        child: &kaspa_consensus_core::block::Block,
+        tip_child: &kaspa_consensus_core::block::Block,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use crate::model::stores::{headers_selected_tip::HeadersSelectedTipStoreReader, virtual_state::DbVirtualStateStore};
+        use kaspa_database::prelude::DeferredDbBatch;
+
+        let pruning = self.pruning_point_store.read();
+        let metadata = self.pruning_meta_stores.write();
+        // The upgradable guard excludes virtual processing even before it commits
+        // its chain index, when it can already be writing shielded rows.
+        let _virtual = self
+            .virtual_stores
+            .try_upgradable_read()
+            .ok_or_else(|| StoreError::DataInconsistency("virtual state is busy during shielded reconciliation".into()))?;
+        let _chain = self
+            .selected_chain_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during shielded reconciliation".into()))?;
+        let (hash, index) = pruning.pruning_point_and_index()?;
+        let tip = DbVirtualStateStore::read_committed(self.db.clone())?.ghostdag_data.selected_parent;
+        if hash != expected_point || tip != expected_tip || hash == tip {
+            return Err(StoreError::DataInconsistency(
+                "pruning point or descendant tip changed during shielded reconciliation".into(),
+            ));
+        }
+
+        let point = super::branch_readiness::ReadinessPoint { hash, index };
+        super::import_shielded_readiness::verify_pruning_shielded_at_tip(
+            &self.db,
+            point,
+            child,
+            child.hash(),
+            Some((tip, tip_child)),
+        )?;
+        // Pin the latest selected header only during the final ancestry check
+        // and publication, so the history scan does not block header processing.
+        let header_tip_guard = self
+            .headers_selected_tip_store
+            .try_read()
+            .ok_or_else(|| StoreError::DataInconsistency("selected header tip is busy during shielded reconciliation".into()))?;
+        let header_tip = header_tip_guard.get()?.hash;
+        if !self
+            .reachability_service
+            .try_is_chain_ancestor_of(tip_child.hash(), header_tip)
+            .map_err(|error| StoreError::DataInconsistency(error.to_string()))?
+        {
+            return Err(StoreError::DataInconsistency("descendant commitment child is off the selected header chain".into()));
+        }
+        let mut batch = DeferredDbBatch::new(self.db.clone());
+        metadata.stage_pruning_shielded_stable(&mut batch, true)?;
+        batch.commit()
+    }
+
+    fn verify_authenticated_staging(
+        &self,
+        db: &Arc<DB>,
+        point: super::branch_readiness::ReadinessPoint,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        selected_tip: Option<(Hash, &kaspa_consensus_core::block::Block)>,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        use crate::model::stores::headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStoreReader};
+
+        proof.verify_committed(db, point)?;
+        let tip = DbHeadersSelectedTipStore::new(db.clone()).get()?.hash;
+        let commitment_child = selected_tip.map_or(child, |(_, tip_child)| tip_child);
+        if !self
+            .reachability_service
+            .try_is_chain_ancestor_of(commitment_child.hash(), tip)
+            .map_err(|err| StoreError::DataInconsistency(err.to_string()))?
+        {
+            return Err(StoreError::DataInconsistency("shielded commitment child is off the selected header chain".into()));
+        }
+        if selected_tip.is_some() {
+            super::import_shielded_readiness::verify_pruning_shielded_at_tip(db, point, child, child.hash(), selected_tip)
+        } else {
+            super::import_shielded_readiness::verify_pruning_shielded(db, point, child, child.hash())
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn finish_authority_import(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        retention: super::branch_readiness::ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.with_authority_point(|point| self.finish_authority_import_at(token, point, retention, verify_remaining))
+    }
+
+    fn finish_authority_import_at(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        point: super::branch_readiness::ReadinessPoint,
+        retention: super::branch_readiness::ReadinessPoint,
+        verify_remaining: impl FnOnce(&Arc<DB>, super::branch_readiness::ReadinessPoint) -> kaspa_database::prelude::StoreResult<()>,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.branch_authority.complete_verified_import(token, point, retention, |db, point| {
+            self.verify_authority_smt(db, point)?;
+            verify_remaining(db, point)
+        })
+    }
+
+    fn verify_authority_smt(
+        &self,
+        db: &Arc<DB>,
+        point: super::branch_readiness::ReadinessPoint,
+    ) -> kaspa_database::prelude::StoreResult<()> {
+        super::import_smt_readiness::verify_pruning_smt(db, point, self.genesis.hash, self.toccata_activation, self.finality_depth)
+            .map(|_| ())
+    }
 }

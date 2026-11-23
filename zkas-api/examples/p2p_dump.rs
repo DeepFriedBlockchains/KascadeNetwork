@@ -2,7 +2,7 @@ use kaspa_p2p_lib::{
     Adaptor, ConnectionInitializer, KaspadMessagePayloadType, Router,
     common::ProtocolError,
     dequeue_with_timeout, make_message,
-    pb::{KaspadMessage, PingMessage, PongMessage, ReadyMessage, VerackMessage, VersionMessage, kaspad_message::Payload},
+    pb::{KaspadMessage, PongMessage, ReadyMessage, VerackMessage, VersionMessage, kaspad_message::Payload},
 };
 use std::{
     sync::Arc,

@@ -28,7 +28,7 @@ impl PruningPointInfo {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PruningProofDescriptor {
     /// The pruning point associated with this proof descriptor
     pub(crate) pruning_point: Hash,

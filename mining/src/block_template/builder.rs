@@ -126,11 +126,10 @@ impl BlockTemplateBuilder {
                 (Some(last), Some(dev_spk)) if last.script_public_key == dev_spk => outputs.len() - 1,
                 _ => outputs.len(),
             };
-            match outputs[..scan_len].iter_mut().rev().find(|o| o.script_public_key == old_spk) {
-                Some(red_output) => red_output.script_public_key = new_miner_data.script_public_key.clone(),
-                // Defensive: layout not as expected. Rewriting the wrong output would only yield the
-                // same disqualification, so leave outputs untouched rather than guess.
-                None => {}
+            // Defensive: if the layout is not as expected, leave outputs untouched rather than
+            // guess. Rewriting the wrong output would only yield the same disqualification.
+            if let Some(red_output) = outputs[..scan_len].iter_mut().rev().find(|o| o.script_public_key == old_spk) {
+                red_output.script_public_key = new_miner_data.script_public_key.clone();
             }
         }
         // Update the hash merkle root according to the modified transactions

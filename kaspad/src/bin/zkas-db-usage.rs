@@ -123,14 +123,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             header_sizes.push(value.len() as u64);
             // Key layout is `prefix || hash`; sample sparsely so the anatomy pass
             // stays cheap on a large DB.
-            if header_sizes.len() % 50 == 0 && key.len() >= 33 {
-                if let Ok(bytes) = <[u8; 32]>::try_from(&key[key.len() - 32..]) {
-                    header_samples.push(Hash::from_bytes(bytes));
-                }
+            if header_sizes.len().is_multiple_of(50)
+                && key.len() >= 33
+                && let Ok(bytes) = <[u8; 32]>::try_from(&key[key.len() - 32..])
+            {
+                header_samples.push(Hash::from_bytes(bytes));
             }
         }
         scanned += 1;
-        if scanned % 5_000_000 == 0 {
+        if scanned.is_multiple_of(5_000_000) {
             eprintln!("  .. {scanned} entries scanned");
         }
     }

@@ -128,7 +128,7 @@ mod circuit_verify {
         value::ValueCommitment,
     };
     use pasta_curves::pallas;
-    use rand_core::{CryptoRng, RngCore};
+    use rand_core::CryptoRng;
     use std::sync::OnceLock;
 
     /// The Orchard action-circuit verifying key. Building it is expensive (it
@@ -187,8 +187,8 @@ mod circuit_verify {
 
             // `Instance::from_parts` itself returns None on an identity rk — a
             // second, independent line of defence against the same bug class.
-            let instance = Instance::from_parts(anchor, cv_net.clone(), nf, rk.clone(), cmx, flags.clone())
-                .ok_or(BundleVerifyError::IdentityRk)?;
+            let instance =
+                Instance::from_parts(anchor, cv_net.clone(), nf, rk.clone(), cmx, flags).ok_or(BundleVerifyError::IdentityRk)?;
             instances.push(instance);
 
             cv_sum = Some(match cv_sum.take() {
@@ -270,10 +270,7 @@ mod circuit_verify {
     /// All-or-nothing: returns `Ok(())` iff *every* bundle's proof and signatures
     /// are valid. On failure the caller should fall back to per-bundle
     /// [`verify_bundle`] to identify the offending transaction.
-    pub fn verify_bundles_batched(
-        items: &[(&ShieldedBundle, [u8; 32])],
-        rng: impl RngCore + CryptoRng,
-    ) -> Result<(), BundleVerifyError> {
+    pub fn verify_bundles_batched(items: &[(&ShieldedBundle, [u8; 32])], rng: impl CryptoRng) -> Result<(), BundleVerifyError> {
         let mut batch = BatchValidator::new(verifying_key());
         for (wire, sighash) in items {
             let bundle = to_orchard_bundle(wire)?;
@@ -369,7 +366,9 @@ mod e2e {
         let fvk = FullViewingKey::from(&sk);
         let recipient = fvk.address_at(0u32, Scope::External);
 
-        let mut builder = Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, Anchor::empty_tree()).expect("orchard v2 ENABLED flags are always representable");
+        let mut builder =
+            Builder::new(BundleType::DEFAULT, crate::verify::BUNDLE_VERSION, orchard::bundle::Flags::ENABLED, Anchor::empty_tree())
+                .expect("orchard v2 ENABLED flags are always representable");
         builder.add_output(None, recipient, NoteValue::from_raw(5000), [0u8; 512]).unwrap();
         let (unauth, _meta) = builder.build::<i64>(&mut rng).unwrap().unwrap();
 
@@ -420,6 +419,37 @@ mod e2e {
         super::verify_bundles_batched(&[(&wire, msg), (&wire, msg)], rand::rng()).expect("batch of valid bundles verifies");
         assert!(super::verify_bundles_batched(&[(&wire, msg), (&bad_proof, msg)], rand::rng()).is_err());
     }
+}
+
+/// Wire semantics of the bundle `flags` byte: Orchard pool, v5-style flags — bits 0/1 only,
+/// bit 2 MUST be zero, cross-address transfers always permitted. Exactly what the chain has
+/// always enforced (`flags & !0b11 != 0` is rejected as non-canonical).
+pub const BUNDLE_VERSION: orchard::bundle::BundleVersion = orchard::bundle::BundleVersion::orchard_v2();
+
+/// The Orchard Action circuit the chain's verifying key is built from. `FixedPostNu6_2` is the
+/// anchored-base circuit of halo2_gadgets 0.5.0 / orchard 0.14.0 — the circuit every proof on
+/// the live chain has been verified against. `PostNu6_3` adds a constrained public input and is
+/// a DIFFERENT circuit: changing this constant is a hard fork.
+#[cfg(feature = "circuit")]
+pub const CIRCUIT_VERSION: orchard::circuit::OrchardCircuitVersion = orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2;
+
+/// The Orchard crate this build links, as `name version sha256` read from the
+/// workspace `Cargo.lock` at build time (see `build.rs`). With
+/// [`CIRCUIT_VERSION`] this fixes the verifying key; both are reported by
+/// [`circuit_identity`] so a running node can be checked against a peer.
+pub const ORCHARD_CRATE: &str = env!("ZKAS_ORCHARD_CRATE");
+/// The halo2_gadgets crate this build links (`name version sha256`); the ECC
+/// gadget carrying the June-2026 base-anchoring fix lives here.
+pub const HALO2_GADGETS_CRATE: &str = env!("ZKAS_HALO2_GADGETS_CRATE");
+
+/// One line identifying the shielded circuit this node verifies against.
+/// Intended for the startup log and for `getInfo`-style RPC exposure.
+pub fn circuit_identity() -> String {
+    #[cfg(feature = "circuit")]
+    let version = format!("{CIRCUIT_VERSION:?}");
+    #[cfg(not(feature = "circuit"))]
+    let version = "no-circuit-feature".to_string();
+    format!("circuit={version} orchard=[{ORCHARD_CRATE}] halo2_gadgets=[{HALO2_GADGETS_CRATE}]")
 }
 
 #[cfg(test)]
@@ -492,35 +522,4 @@ mod tests {
         b2.proof[0] ^= 1;
         assert_eq!(sighash(&b2, &NET_A, b""), s, "sighash must not cover proof/signatures");
     }
-}
-
-/// Wire semantics of the bundle `flags` byte: Orchard pool, v5-style flags — bits 0/1 only,
-/// bit 2 MUST be zero, cross-address transfers always permitted. Exactly what the chain has
-/// always enforced (`flags & !0b11 != 0` is rejected as non-canonical).
-pub const BUNDLE_VERSION: orchard::bundle::BundleVersion = orchard::bundle::BundleVersion::orchard_v2();
-
-/// The Orchard Action circuit the chain's verifying key is built from. `FixedPostNu6_2` is the
-/// anchored-base circuit of halo2_gadgets 0.5.0 / orchard 0.14.0 — the circuit every proof on
-/// the live chain has been verified against. `PostNu6_3` adds a constrained public input and is
-/// a DIFFERENT circuit: changing this constant is a hard fork.
-#[cfg(feature = "circuit")]
-pub const CIRCUIT_VERSION: orchard::circuit::OrchardCircuitVersion = orchard::circuit::OrchardCircuitVersion::FixedPostNu6_2;
-
-/// The Orchard crate this build links, as `name version sha256` read from the
-/// workspace `Cargo.lock` at build time (see `build.rs`). With
-/// [`CIRCUIT_VERSION`] this fixes the verifying key; both are reported by
-/// [`circuit_identity`] so a running node can be checked against a peer.
-pub const ORCHARD_CRATE: &str = env!("ZKAS_ORCHARD_CRATE");
-/// The halo2_gadgets crate this build links (`name version sha256`); the ECC
-/// gadget carrying the June-2026 base-anchoring fix lives here.
-pub const HALO2_GADGETS_CRATE: &str = env!("ZKAS_HALO2_GADGETS_CRATE");
-
-/// One line identifying the shielded circuit this node verifies against.
-/// Intended for the startup log and for `getInfo`-style RPC exposure.
-pub fn circuit_identity() -> String {
-    #[cfg(feature = "circuit")]
-    let version = format!("{CIRCUIT_VERSION:?}");
-    #[cfg(not(feature = "circuit"))]
-    let version = "no-circuit-feature".to_string();
-    format!("circuit={version} orchard=[{ORCHARD_CRATE}] halo2_gadgets=[{HALO2_GADGETS_CRATE}]")
 }

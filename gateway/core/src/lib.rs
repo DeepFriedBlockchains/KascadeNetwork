@@ -142,10 +142,10 @@ impl Gateway {
         if request.expires_in == 0 {
             return Err(GatewayError::InvalidExpiry);
         }
-        if let Some(key) = request.idempotency_key.as_ref() {
-            if let Some(id) = self.idempotency.get(key) {
-                return Ok(self.invoices[id].clone());
-            }
+        if let Some(key) = request.idempotency_key.as_ref()
+            && let Some(id) = self.idempotency.get(key)
+        {
+            return Ok(self.invoices[id].clone());
         }
         let index = self.next_diversifier;
         self.next_diversifier = self.next_diversifier.checked_add(1).ok_or(GatewayError::DiversifierExhausted)?;

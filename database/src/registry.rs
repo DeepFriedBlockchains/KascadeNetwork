@@ -152,6 +152,12 @@ pub enum DatabaseStorePrefixes {
     /// block forever.
     ShieldedAnchorGcQueue = 94,
 
+    /// Committed branch readiness state, independent of pruning metadata.
+    KascadeBranchReadiness = 96,
+
+    /// Data written through the inactive branch authority lease.
+    KascadeBranchAuthorityData = 97,
+
     // ---- Separator ----
     /// Reserved as a separator
     Separator = SEPARATOR,

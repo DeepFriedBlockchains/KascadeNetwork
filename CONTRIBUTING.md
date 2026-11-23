@@ -1,79 +1,53 @@
 # Contributing to KASCADE
 
-KASCADE is pre-release, unaudited, and under active development. Contributions are welcome,
-with one structural caveat that you should read before you spend time on a patch.
+KascadeNetwork is the primary public development repository. Contributions use
+feature branches and pull requests.
 
-## This repository is a snapshot, not the development branch
+## Send a change
 
-The public repository is a **curated export** of the private development tree. It has no
-shared Git history with it. See [`PUBLICATION.md`](./PUBLICATION.md) for the mechanics.
+1. Fork this repository and branch from the current public `main`.
+2. Keep each change focused. Discuss changes to consensus, monetary policy or
+   import and pruning behavior with maintainers before implementation.
+3. Add regression coverage for consensus or database behavior that changes.
+4. Run the relevant tests, formatting and Clippy. Include the commands and
+   results in the pull request description.
+5. Open a pull request. Maintainers review the code and the checks before merging.
 
-The practical consequences:
+A substantial proposal should begin with an issue describing the concrete
+problem and expected behavior. Report security findings privately using
+[SECURITY.md](./SECURITY.md).
 
-- **Pull requests opened against this repository cannot be merged directly.** There is no
-  common ancestor to merge from.
-- A patch you send is reviewed, and if accepted it is applied in the private development
-  repository, tested there, and appears in a later snapshot with the fix attributed to you.
-- Your commit will therefore not appear in this repository's history under your name. If
-  that matters to you, say so in the issue and we will credit you in the snapshot commit
-  message and in `NOTICE` where appropriate.
-- Force-pushing, rewriting this repository's history, or adding commits to it directly is
-  not possible for outside contributors and should not be attempted.
+## Validation
 
-If you want to work on something substantial, **open an issue first**. It is much cheaper
-for both of us to agree on the approach before the code exists.
+Install the dependencies in [docs/BUILDING.md](./docs/BUILDING.md), then run
+the checks relevant to your change.
 
-## What is useful right now
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --tests --benches --examples -- -D warnings
+cargo test --locked -p kaspa-consensus --lib
+```
 
-The project is not short of features to imagine. It is short of correctness work on what
-already exists:
+GitHub Actions runs the workspace tests, compilation, formatting, Clippy,
+WASM checks and release builds. Document any skipped or failed tests.
+Consensus and persistence changes also need targeted tests that exercise
+the affected entry points, including failure and retry behavior.
 
-- **Consensus invariant tests.** The shielded state — nullifier set, note-commitment tree,
-  anchor, turnstile supply accounting — has to stay consistent under GHOSTDAG's
-  out-of-order block acceptance and under reorgs. Tests that try to break that are the
-  single most valuable contribution available.
-- **Crash-consistency work.** The pruning-point import path is known not to be reliably
-  fail-closed after a restart. Reproductions and analysis are wanted; see the "known not to
-  work" section of the README.
-- **Differential testing against upstream.** KASCADE is a fork of `rusty-kaspa`. Where
-  behaviour is supposed to be identical (proof-of-work, transaction mass, script
-  evaluation), a test that proves it is still identical is worth having.
-- **Documentation that is true.** Several documents in `docs/` describe a predecessor
-  deployment rather than KASCADE. Corrections are welcome.
-- **Build and packaging friction.** Windows cross-compilation, musl static builds, and the
-  GPU backend all have rough edges.
+## Review boundaries
 
-## What is not useful right now
+Maintainers control repository administration, merging and releases.
+Outside contributors can fork the public repository and submit pull requests.
+Consensus-critical functionality stays inactive until validated and explicitly
+authorized for activation.
 
-- New consensus features, new monetary rules, or new tokenomics. Those are being designed
-  elsewhere and a patch here will not be considered.
-- Rebranding. The `zkas`/`ZKMM` identifiers are consensus-visible; renaming them is a
-  consensus change, not a cosmetic one.
-- Dependency bumps with no stated reason.
-- Large reformatting-only diffs.
+Preserve existing monetary policy, network and cryptographic parameters unless
+a maintainer explicitly approves a policy change. Keep unresolved parameters
+unresolved. Separate mechanical changes from semantic changes.
 
-## Ground rules for patches
+Commit source and public development evidence. Credentials, wallet material,
+private review reports and operational details belong in restricted channels.
 
-1. **Do not change consensus-visible behaviour without saying so explicitly** in the issue
-   and the patch description. That includes address prefixes, network magic, genesis,
-   difficulty adjustment, emission, mass rules, and AuxPoW binding.
-2. **Do not invent consensus constants.** If a value is unresolved, it stays unresolved and
-   the code says so. Guessing a GHOSTDAG `k`, a pruning depth, a genesis hash or a treasury
-   address is worse than leaving it marked as a placeholder.
-3. **Add a test that fails before your fix.** For consensus and database code this is not
-   optional.
-4. **Keep the diff reviewable.** Separate mechanical changes from semantic ones.
-5. **Match the surrounding style.** `cargo fmt` and `cargo clippy` before sending.
+## Licensing
 
-## Reporting bugs
-
-Ordinary bugs: open an issue. Include the snapshot commit, what you ran, what happened, and
-what you expected.
-
-Security problems: **do not open a public issue.** See [`SECURITY.md`](./SECURITY.md).
-
-## Licensing of contributions
-
-By contributing you agree that your contribution is licensed under the ISC licence, the same
-terms as the rest of the repository. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE) for
-the provenance of the upstream code your patch will sit next to.
+Contributions use the repository's ISC license. Retain upstream attribution.
+See [LICENSE](./LICENSE) and [NOTICE](./NOTICE).

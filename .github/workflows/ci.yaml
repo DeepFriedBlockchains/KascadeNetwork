@@ -1,6 +1,16 @@
 name: Tests
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -22,10 +32,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run cargo check
-        run: cargo check --tests --workspace --benches
+        run: cargo check --tests --workspace --benches --features kaspa-testing-integration/phase6-staging-preview
 
   test:
     name: Test Suite
+    env:
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_BUILD_JOBS: '2'
     # runs-on: ${{ matrix.os }}
     runs-on: ubuntu-latest
     strategy:
@@ -96,6 +110,29 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run bounded shielded persistent reopen regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(bounded_shielded_partial_stream_reopens_unready_and_retries_fresh)'
+
+      - name: Run bounded failed-import cleanup regressions
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(bounded_cleanup_)'
+
+      - name: Run descendant recovery and export regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(authority_integration_promotes_and_recovers_a_committed_descendant_chain)'
+
+      - name: Run two-node Simnet descendant recovery regression
+        env:
+          RUST_BACKTRACE: '1'
+        run: cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview -E 'test(authority_integration_preview_recovers_descendants_after_header_sync)'
+
+      - name: Run isolated Simnet native proof-of-work regression
+        run: cargo nextest run -p kaspa-testing-integration --test phase6_native_pow_relay --features phase6-staging-preview
+
       - name: Run 29B emission reference vectors
         if: github.head_ref == 'design/29b-emission-validation-20261122' || github.ref_name == 'design/29b-emission-validation-20261122'
         run: cargo nextest run -p kaspa-consensus --test phase6_monetary_policy_model
@@ -103,8 +140,11 @@ jobs:
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
+      - name: Run Phase 6 authority integration regressions
+        run: cargo nextest run --workspace --test-threads=2 --features kaspa-testing-integration/phase6-staging-preview -E 'test(authority_integration_) | test(bounded_shielded_) | test(bounded_cleanup_)'
+
       - name: Run cargo test regular features
-        run: cargo nextest run --workspace
+        run: cargo nextest run --workspace --no-fail-fast
 
       - name: Run cargo doc tests
         run: cargo test --doc --workspace
@@ -119,7 +159,6 @@ jobs:
         run: cargo doc --no-deps --workspace
       - name: Run kip-10 example
         run: cargo run --example kip-10
-
 
   # test-release:
   #   name: Test Suite Release
@@ -195,7 +234,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run cargo clippy
-        run: cargo clippy --workspace --tests --benches --examples -- -D warnings
+        run: cargo clippy --workspace --tests --benches --examples --features kaspa-testing-integration/phase6-staging-preview -- -D warnings
 
   check-no-std:
     name: Check no_std
@@ -222,7 +261,6 @@ jobs:
           -p kaspa-smt
           -p kaspa-seq-commit
           -p kaspa-utils
-
 
   check-wasm32:
     name: Check WASM32

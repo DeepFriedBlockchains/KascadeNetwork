@@ -268,11 +268,11 @@ impl CoinbaseManager {
         } else {
             (0, dev_accrued_after)
         };
-        if let Some(recipient) = self.dev_fee_recipient {
-            if dev_fee_paid > 0 {
-                let dev_spk = ScriptPublicKey::new(0, ScriptVec::from_slice(&recipient));
-                outputs.push(TransactionOutput::new(dev_fee_paid, dev_spk));
-            }
+        if let Some(recipient) = self.dev_fee_recipient
+            && dev_fee_paid > 0
+        {
+            let dev_spk = ScriptPublicKey::new(0, ScriptVec::from_slice(&recipient));
+            outputs.push(TransactionOutput::new(dev_fee_paid, dev_spk));
         }
 
         // Build the current block's payload
@@ -838,9 +838,7 @@ mod tests {
         let blue = Hash::from_bytes([7u8; 32]);
         let blue_script = ScriptPublicKey::new(0, ScriptVec::from_slice(&[9u8, 9, 9]));
 
-        let mut ghostdag_data = GhostdagData::default();
-        ghostdag_data.mergeset_blues = Arc::new(vec![blue]);
-        ghostdag_data.blue_score = 1;
+        let ghostdag_data = GhostdagData { mergeset_blues: Arc::new(vec![blue]), blue_score: 1, ..Default::default() };
 
         let mut mergeset_rewards: BlockHashMap<BlockRewardData> = Default::default();
         mergeset_rewards.insert(blue, BlockRewardData::new(subsidy, fees, blue_script.clone()));
@@ -919,9 +917,7 @@ mod tests {
         let dev_cut = subsidy * 50 / 1000;
         let blue = Hash::from_bytes([7u8; 32]);
         let blue_script = ScriptPublicKey::new(0, ScriptVec::from_slice(&[9u8, 9, 9]));
-        let mut ghostdag_data = GhostdagData::default();
-        ghostdag_data.mergeset_blues = Arc::new(vec![blue]);
-        ghostdag_data.blue_score = 1;
+        let ghostdag_data = GhostdagData { mergeset_blues: Arc::new(vec![blue]), blue_score: 1, ..Default::default() };
         let mut mergeset_rewards: BlockHashMap<BlockRewardData> = Default::default();
         mergeset_rewards.insert(blue, BlockRewardData::new(subsidy, 0, blue_script.clone()));
         let non_daa: BlockHashSet = Default::default();
@@ -969,7 +965,7 @@ mod tests {
 
         // Conservation: every sompi the old scheme would have minted is either paid or
         // still carried. This is the invariant the whole change rests on.
-        let blocks = (last - first) as u64;
+        let blocks = last - first;
         assert_eq!(paid_out + accrued, dev_cut * blocks, "accrual must neither mint nor burn dev fee");
         assert_eq!(payout_blocks, 2, "one payout per interval crossed");
     }

@@ -38,6 +38,8 @@ impl ConsensusCtl for Ctl {
 
     fn make_active(&self) {
         // TODO: pass a value to make sure the correct consensus is committed
+        #[cfg(any(test, feature = "phase6-staging-preview"))]
+        self.consensus.set_staging_receiver(false);
         self.management_store.write().commit_staging_consensus().unwrap();
     }
 }

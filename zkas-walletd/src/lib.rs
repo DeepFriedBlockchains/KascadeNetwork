@@ -70,8 +70,8 @@ use kaspa_shielded_core::tree::{FrontierState, GlobalTree, NoteCommitmentTree};
 use kaspa_shielded_core::wallet::CompactActionRecord;
 use kaspa_shielded_core::wallet::address_bytes_from_seed;
 use kaspa_shielded_core::wallet::build::{
-    MultiOutput, MultiSpend, PreparedPayment, build_wallet_payment, build_wallet_payment_multi, finalize_payment,
-    fvk_from_bytes, prepare_multiparty, prepare_payment, proving_key, spend_offer_from_bytes, spend_offer_to_bytes,
+    MultiOutput, MultiSpend, PreparedPayment, build_wallet_payment, build_wallet_payment_multi, finalize_payment, fvk_from_bytes,
+    prepare_multiparty, prepare_payment, proving_key, spend_offer_from_bytes, spend_offer_to_bytes,
 };
 use kaspa_shielded_core::walletdb::{BlockMeta, HistoryKind, OwnedNote, Preview, WalletDb};
 use kaspa_shielded_wallet::{payment_tx, payment_tx_context};
@@ -478,7 +478,7 @@ impl Default for ResourceLimits {
 /// one proof uses every core, so a second slot only absorbs the overlap between a
 /// finishing proof and a waiting caller — but never more slots than cores.
 pub fn default_max_concurrent_proves() -> usize {
-    std::thread::available_parallelism().map(|c| c.get()).unwrap_or(1).min(2).max(1)
+    std::thread::available_parallelism().map(|c| c.get()).unwrap_or(1).clamp(1, 2)
 }
 
 /// 403 for seed-requiring endpoints when the daemon runs with custodial wallets
@@ -525,7 +525,7 @@ fn hex(b: &[u8]) -> String {
 
 fn unhex(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
@@ -995,7 +995,7 @@ fn wallet_exists(dir: &str, token: &str) -> bool {
 fn save_seed(dir: &str, token: &str, network: &str, seed: &[u8; 32], birthday: u64, secret: Option<&str>) -> std::io::Result<()> {
     let (seed_hex, encrypted) = match secret {
         Some(s) => {
-            let blob = encrypt_seed(seed, s).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let blob = encrypt_seed(seed, s).map_err(std::io::Error::other)?;
             (hex(&blob), true)
         }
         None => (hex(seed), false),
@@ -1125,15 +1125,6 @@ const TWIN_ADOPT_LEAD: u64 = 5_000;
 #[allow(dead_code)]
 const WITNESS_ADVANCE_CAP: u64 = 4000;
 
-/// Total per-pass budget for eager witness catch-up, in (leaf × witness) hash units.
-/// `advance_witnesses_capped(cap)` costs `cap × (owned-note count)` Sinsemilla hashes —
-/// so a fixed leaf cap makes a many-note wallet's step blow up: a pool/miner wallet with
-/// thousands of notes was observed taking **7–15 s per step**, which pins the sync loop
-/// and freezes every other wallet's scan. Deriving the per-pass leaf cap as
-/// `BUDGET / note_count` (floored at [`WITNESS_MIN_STEP`]) bounds the step to roughly this
-/// many hashes regardless of wallet size, keeping the loop responsive. Witnesses that
-/// don't finish catching up here are rebuilt on demand at spend time anyway.
-const WITNESS_ADVANCE_BUDGET: u64 = 400_000;
 /// Floor on the per-pass leaf cap, so even a huge wallet still makes some progress.
 const WITNESS_MIN_STEP: u64 = 32;
 
@@ -1228,7 +1219,6 @@ const SUBTREE_CACHE_MIN_SPAN: u64 = 20_000;
 /// action-keyed trigger would essentially never fire.
 const SCAN_COST_REPORT_LEAVES: u64 = 20_000;
 
-
 /// Free memory the daemon refuses to build a subtree cache below.
 ///
 /// The cache itself is small (~4 B/leaf of span) but building it forces that wallet's
@@ -1243,7 +1233,6 @@ const SCAN_COST_REPORT_LEAVES: u64 = 20_000;
 /// 16.1 s to witness 3 notes where a cached wallet took 32 ms). Gating on live free
 /// memory is self-regulating — builds stop as memory tightens and resume when it frees
 /// — and it reconsiders a skipped wallet on a later pass instead of writing it off.
-
 /// How long a `MemAvailable` reading is reused. The gate is consulted per wallet per
 /// sync pass; re-reading `/proc/meminfo` every time would be pointless syscall traffic,
 /// and memory does not move fast enough for a stale-by-seconds figure to matter.
@@ -1257,10 +1246,10 @@ static MEM_AVAILABLE_MB: std::sync::Mutex<Option<(u64, std::time::Instant)>> = s
 /// callers then skip the memory gate rather than refuse to work.
 fn mem_available_mb() -> Option<u64> {
     let mut slot = MEM_AVAILABLE_MB.lock().ok()?;
-    if let Some((mb, at)) = *slot {
-        if at.elapsed() < MEM_AVAILABLE_TTL {
-            return Some(mb);
-        }
+    if let Some((mb, at)) = *slot
+        && at.elapsed() < MEM_AVAILABLE_TTL
+    {
+        return Some(mb);
     }
     let text = std::fs::read_to_string("/proc/meminfo").ok()?;
     let kb: u64 = text
@@ -1493,7 +1482,6 @@ const CHECKPOINT_ADOPT_WAIT: std::time::Duration = std::time::Duration::from_sec
 /// A wallet is synced by the background loop only while it has been touched by a
 /// request within this window; after that it is parked until the next request. Keeps a
 /// public daemon's CPU proportional to *active* wallets, not total tokens ever seen.
-
 /// How many active wallets the sync loop advances **concurrently**. The per-wallet
 /// scan is CPU-bound (Sinsemilla appends + trial decryption) with no await inside, so
 /// a single sequential loop pins exactly one core while the other cores sit idle — a
@@ -1522,7 +1510,6 @@ fn sync_concurrency(resources: &ResourceLimits) -> usize {
 /// the HTTP handlers, the node RPC and Halo 2 proving combined — so one user's first send
 /// visibly slowed everyone else's sync. Ordinary incremental sync is unaffected by this
 /// cap; only the heavy catch-up queues behind it.
-
 /// Real sleep between wallets in the sync loop, to guarantee CPU headroom for the HTTP
 /// handlers even while scans run. Caps sync throughput; keeps the daemon responsive.
 /// Hard ceiling on any single node RPC made from the shared sync loop. The loop drives
@@ -2092,12 +2079,12 @@ fn select_coinbase_cmx(
     }
     match kaspa_shielded_core::coinbase::coinbase_note_commitment(desc, value).ok() {
         Some(derived) => {
-            if let Some(sup) = supplied {
-                if sup.to_bytes() != derived.to_bytes() {
-                    log::warn!(
-                        "coinbase commitment mismatch: node-supplied value != local derivation; using derived (node may be faulty or malicious)"
-                    );
-                }
+            if let Some(sup) = supplied
+                && sup.to_bytes() != derived.to_bytes()
+            {
+                log::warn!(
+                    "coinbase commitment mismatch: node-supplied value != local derivation; using derived (node may be faulty or malicious)"
+                );
             }
             Some(derived)
         }
@@ -2123,9 +2110,9 @@ fn decode_block(b: &kaspa_rpc_core::RpcShieldedChainBlock) -> DecodedBlock {
             // Only keep a note that commits — exactly `WalletDb::ingest_block`'s skip
             // rule, so the shared leaf stream matches the recompute path leaf-for-leaf.
             let supplied = out.commitment.and_then(|bytes| {
-                Option::<kaspa_shielded_core::ExtractedNoteCommitment>::from(
-                    kaspa_shielded_core::ExtractedNoteCommitment::from_bytes(&bytes),
-                )
+                Option::<kaspa_shielded_core::ExtractedNoteCommitment>::from(kaspa_shielded_core::ExtractedNoteCommitment::from_bytes(
+                    &bytes,
+                ))
             });
             // Never trust a coinbase leaf we cannot reproduce: derive it from the
             // PoW-committed block fields and reject a valid-but-wrong node value
@@ -2224,7 +2211,7 @@ async fn fetch_bundle_for_tx(client: &GrpcClient, chain: RpcHash, txid: &[u8; 32
 }
 
 fn decode_compact_actions(bytes: &[u8]) -> Option<Vec<CompactActionRecord>> {
-    if bytes.len() % CompactActionRecord::SERIALIZED_LEN != 0 {
+    if !bytes.len().is_multiple_of(CompactActionRecord::SERIALIZED_LEN) {
         return None;
     }
     bytes.chunks_exact(CompactActionRecord::SERIALIZED_LEN).map(CompactActionRecord::from_bytes).collect()
@@ -2312,11 +2299,7 @@ async fn deep_prefetch(state: std::sync::Arc<AppState>, client: GrpcClient, star
         let st = state.clone();
         let cl = client.clone();
         tokio::spawn(async move {
-            let _ = tokio::time::timeout(
-                SYNC_RPC_TIMEOUT,
-                fetch_shielded_page(&cl, &st.page_cache, cur, SHIELDED_PAGE),
-            )
-            .await;
+            let _ = tokio::time::timeout(SYNC_RPC_TIMEOUT, fetch_shielded_page(&cl, &st.page_cache, cur, SHIELDED_PAGE)).await;
         });
     };
     // Page 1: the very next page the loop will ask for (deduped against the loop's
@@ -2340,12 +2323,7 @@ async fn deep_prefetch(state: std::sync::Arc<AppState>, client: GrpcClient, star
         }
     }
     while warmed < depth {
-        let meta = match tokio::time::timeout(
-            SYNC_RPC_TIMEOUT,
-            client.get_shielded_block_metadata(anchor, 2 * SHIELDED_PAGE),
-        )
-        .await
-        {
+        let meta = match tokio::time::timeout(SYNC_RPC_TIMEOUT, client.get_shielded_block_metadata(anchor, 2 * SHIELDED_PAGE)).await {
             Ok(Ok(m)) if !m.reorged => m,
             // Scout failed / reorged / node busy: stop. The loop's own fetch still
             // covers `start`; the next chunk retries the read-ahead.
@@ -2382,12 +2360,12 @@ async fn fetch_shielded_page(
     let key = (low, limit);
     {
         let mut c = cache.lock().await;
-        if let Some((at, resp)) = c.map.get(&key) {
-            if at.elapsed() < c.ttl {
-                let resp = resp.clone();
-                c.hits += 1;
-                return Ok(resp);
-            }
+        if let Some((at, resp)) = c.map.get(&key)
+            && at.elapsed() < c.ttl
+        {
+            let resp = resp.clone();
+            c.hits += 1;
+            return Ok(resp);
         }
     }
     // Miss. Everyone who misses the SAME page queues behind one fetch rather than
@@ -2415,12 +2393,12 @@ async fn fetch_shielded_page(
     // The leader may have filled the cache while we waited, which is the whole point.
     {
         let mut c = cache.lock().await;
-        if let Some((at, resp)) = c.map.get(&key) {
-            if at.elapsed() < c.ttl {
-                let resp = resp.clone();
-                c.dedup_hits += 1;
-                return Ok(resp);
-            }
+        if let Some((at, resp)) = c.map.get(&key)
+            && at.elapsed() < c.ttl
+        {
+            let resp = resp.clone();
+            c.dedup_hits += 1;
+            return Ok(resp);
         }
         c.misses += 1;
         let (h, d, m) = (c.hits, c.dedup_hits, c.misses);
@@ -2459,10 +2437,8 @@ async fn fetch_shielded_page(
             // the cohort's shared curve work; see `DecodedPage::epks`.
             let flat: Vec<kaspa_shielded_core::wallet::CompactActionRecord> =
                 blocks.iter().flat_map(|b| b.compact.iter().flatten().copied()).collect();
-            let epks: Vec<Option<kaspa_shielded_core::pasta_curves::pallas::Point>> = flat
-                .par_iter()
-                .map(|r| kaspa_shielded_core::wallet::decompress_epk(&r.ephemeral_key))
-                .collect();
+            let epks: Vec<Option<kaspa_shielded_core::pasta_curves::pallas::Point>> =
+                flat.par_iter().map(|r| kaspa_shielded_core::wallet::decompress_epk(&r.ephemeral_key)).collect();
             (blocks, epks)
         })
     });
@@ -2480,10 +2456,10 @@ async fn fetch_shielded_page(
         }
         c.next.insert(low, last.hash);
     }
-    if c.map.insert(key, (std::time::Instant::now(), decoded.clone())).is_some() {
-        if let Some(pos) = c.order.iter().position(|k| *k == key) {
-            c.order.remove(pos);
-        }
+    if c.map.insert(key, (std::time::Instant::now(), decoded.clone())).is_some()
+        && let Some(pos) = c.order.iter().position(|k| *k == key)
+    {
+        c.order.remove(pos);
     }
     c.order.push_back(key);
     // Expired pages go NOW, not when `cap` pushes them out. The TTL used to be read
@@ -2499,10 +2475,10 @@ async fn fetch_shielded_page(
         c.order.pop_front();
         c.map.remove(&old);
     }
-    if c.order.len() > c.cap {
-        if let Some(old) = c.order.pop_front() {
-            c.map.remove(&old);
-        }
+    if c.order.len() > c.cap
+        && let Some(old) = c.order.pop_front()
+    {
+        c.map.remove(&old);
     }
     c.in_flight.remove(&key);
     Ok(decoded)
@@ -2643,9 +2619,6 @@ struct WalletEntry {
     /// A detached subtree-cache build is already folding for this wallet. Without it,
     /// every sync pass during the ~247 s fold would queue another identical build.
     build_in_flight: bool,
-    /// Last logged completion percentage of a sliced subtree-cache build, so progress is
-    /// reported once per 10% instead of on every 250 ms slice.
-    subtree_build_pct_logged: u64,
     /// Wall time spent WAITING for pages, and the wall time spent ingesting them.
     /// Kept next to the scan-cost counters so the log can no longer report a slice of
     /// the work as though it were the work.
@@ -2769,7 +2742,6 @@ impl WalletEntry {
             wants_cache_build: false,
             warm_priority: false,
             build_in_flight: false,
-            subtree_build_pct_logged: 0,
             page_fetch_ns: 0,
             page_ingest_ns: 0,
             page_count: 0,
@@ -2824,7 +2796,11 @@ impl WalletEntry {
             log::info!(
                 "history: own send {} at daa {daa} — {}",
                 hex(&txid[..8]),
-                if recovered { "recipient/amount/memo/fee recovered from the full transaction" } else { "fee recovered; no recipient (sent without this wallet's OVK)" }
+                if recovered {
+                    "recipient/amount/memo/fee recovered from the full transaction"
+                } else {
+                    "fee recovered; no recipient (sent without this wallet's OVK)"
+                }
             );
         }
         if done > 0 {
@@ -2968,8 +2944,7 @@ impl WalletEntry {
         // so a wallet whose oldest note is below the shared base is NOT covered and must keep
         // maintaining its own tree — borrowing would strand those old notes at spend time.
         let oldest_note = self.db.notes().iter().map(|n| n.position).min().unwrap_or(u64::MAX);
-        let covered =
-            !self.db.is_leaves_only() && shared_tree_covers >= self.db.size() && shared_tree_base <= oldest_note;
+        let covered = !self.db.is_leaves_only() && shared_tree_covers >= self.db.size() && shared_tree_base <= oldest_note;
         self.db.set_borrow_tree(covered || !self.db.tree_is_valid());
 
         // Set when a small caught-up page comes back FULL: more blocks than it
@@ -3113,18 +3088,17 @@ impl WalletEntry {
             // page: that was tried and measured slower end to end (892 vs 2,219
             // blocks/s) because the page is also the unit of work held under the
             // wallet lock - overlap attacks the fetch without touching that trade.
-            if page_limit == SHIELDED_PAGE && resp.blocks.len() as u64 == page_limit {
-                if let Some(next_cursor) = resp.blocks.last().map(|b| b.hash) {
-                    let st = state.clone();
-                    let cl = client.clone();
-                    tokio::spawn(async move {
-                        let _ = tokio::time::timeout(
-                            SYNC_RPC_TIMEOUT,
-                            fetch_shielded_page(&cl, &st.page_cache, next_cursor, SHIELDED_PAGE),
-                        )
-                        .await;
-                    });
-                }
+            if page_limit == SHIELDED_PAGE
+                && resp.blocks.len() as u64 == page_limit
+                && let Some(next_cursor) = resp.blocks.last().map(|b| b.hash)
+            {
+                let st = state.clone();
+                let cl = client.clone();
+                tokio::spawn(async move {
+                    let _ =
+                        tokio::time::timeout(SYNC_RPC_TIMEOUT, fetch_shielded_page(&cl, &st.page_cache, next_cursor, SHIELDED_PAGE))
+                            .await;
+                });
             }
             let settled = resp.sink_blue_score.saturating_sub(SYNC_TIP_MARGIN);
             // This section is synchronous trial-decryption/tree work. Mark it as
@@ -3363,377 +3337,371 @@ impl WalletEntry {
         // backlog of never-scanned wallets cannot claim build slots: the reason the
         // original gate existed was to stop wallets sitting on a slot they could not use,
         // and that still holds for everything nobody is waiting on.
-        if self.caught_up || warm_overlap {
-            if let Some(matured) = self.matured_leaves() {
-                // How many witnesses this wallet maintains. Every step below costs
-                // `leaves × budget`, so pinning the budget to a constant for a note-heavy
-                // wallet is what keeps its catch-up bounded — see EAGER_WARM_MAX_NOTES.
-                let note_count = self.db.notes().len() as u64;
-                let budget = if note_count > EAGER_WARM_MAX_NOTES { SPENDABLE_WITNESS_BUDGET } else { note_count.max(1) as usize };
-                self.db.set_witness_budget(budget);
-                // Note-heavy wallets are served at spend time by the batch builder
-                // (`witness_paths_at`, one O(chain) pass for all selected notes), which does
-                // NOT read the legacy live-witness set. So the per-note ~30 s O(chain)
-                // `install_witness` adopts below are pure waste — and worse, they run on a
-                // blocking thread and steal CPU from the actual Halo 2 proof of a concurrent
-                // send. Skip them: mark warm (bypasses the adopt loop) and keep a minimal
-                // live set. The base still rolls up on the cheap steady path below.
-                if note_count > EAGER_WARM_MAX_NOTES {
-                    self.db.set_witness_budget(1);
-                    self.witnesses_warm = true;
+        if (self.caught_up || warm_overlap)
+            && let Some(matured) = self.matured_leaves()
+        {
+            // How many witnesses this wallet maintains. Every step below costs
+            // `leaves × budget`, so pinning the budget to a constant for a note-heavy
+            // wallet is what keeps its catch-up bounded — see EAGER_WARM_MAX_NOTES.
+            let note_count = self.db.notes().len() as u64;
+            let budget = if note_count > EAGER_WARM_MAX_NOTES { SPENDABLE_WITNESS_BUDGET } else { note_count.max(1) as usize };
+            self.db.set_witness_budget(budget);
+            // Note-heavy wallets are served at spend time by the batch builder
+            // (`witness_paths_at`, one O(chain) pass for all selected notes), which does
+            // NOT read the legacy live-witness set. So the per-note ~30 s O(chain)
+            // `install_witness` adopts below are pure waste — and worse, they run on a
+            // blocking thread and steal CPU from the actual Halo 2 proof of a concurrent
+            // send. Skip them: mark warm (bypasses the adopt loop) and keep a minimal
+            // live set. The base still rolls up on the cheap steady path below.
+            if note_count > EAGER_WARM_MAX_NOTES {
+                self.db.set_witness_budget(1);
+                self.witnesses_warm = true;
+            }
+            // Retain the tree's COMPLETE subtree roots once. Every authentication
+            // sibling of every note is then either one of those (a lookup), the empty
+            // root, or the single subtree straddling the anchor — so a spend witnesses
+            // in O(depth) instead of replaying the chain. Measured at 200 K leaves:
+            // 29.4 s per send -> 0.36 s, and ~4 ms/note thereafter.
+            //
+            // One O(chain) pass, on a BLOCKING thread (never the async runtime — see
+            // the 2026-07-12 freeze), then `append_leaf` keeps it current for the same
+            // one-hash-per-leaf the tip mirror already costs. Only built once the
+            // replay it replaces is actually slow, so ordinary wallets pay no memory.
+            let span = matured.saturating_sub(self.db.base_size());
+            // Stand down while any payment is proving: the build is one-time and can
+            // wait a tick, a user's send cannot. Deliberately does NOT mark the wallet
+            // charged, so it is retried once the daemon is idle again.
+            //
+            // It deliberately does NOT stand down for `backfilling_now()` any more.
+            // That flag is GLOBAL and sticky: any single wallet more than
+            // BACKFILL_BEHIND_BLOCKS behind stamps it for every other wallet. With a
+            // backlog of never-scanned wallets it is permanently set, so the build
+            // that makes a wallet fast was starved forever by the wallets that are
+            // slow — a self-sustaining inversion. Observed on the public daemon:
+            // 0 cache builds, 0 deferrals, and every resident wallet stuck on the
+            // O(leaves x budget) climb instead. Backfill is background work nobody
+            // waits on; a proof is not. Yield to the proof, not to the backlog.
+            //
+            // The build is bounded instead by the warm gate (`--warm-wallets`),
+            // acquired below and held across it, so a burst of cold wallets can no
+            // longer put one O(chain) sweep per sync slot on the box at once.
+            // `subtree_cache_failed` is checked too: a wallet the cache cannot serve
+            // must not sit on a build slot re-attempting a build that will be
+            // rejected again.
+            // The subtree cache exists to make THIS wallet's spends O(depth). If the
+            // shared tree already covers `matured`, it answers those spends and this
+            // wallet's own cache would be a second copy of the same public structure,
+            // built at the same cost: ~324 s of Sinsemilla over ~2.07 M leaves,
+            // measured, PER WALLET. That is 45% of a wallet's whole cold cost, spent
+            // reproducing something the daemon already has.
+            //
+            // The shared tree itself is exempt — it is the copy everyone else is
+            // relying on, so it must build. `shared_tree_covers` is 0 for it anyway
+            // (its own lock is held by this very sync pass), but say so explicitly
+            // rather than depend on that.
+            // The shared tree serves only positions at or above its own base. A wallet
+            // whose OLDEST note is below that base (an old miner wallet, once the shared
+            // tree's base was raised by the 2026-08 compaction bug) is not covered — the
+            // tree declines those positions and the spend climbs O(chain). Gate on the
+            // oldest note so such a wallet builds its own cache instead of relying on a
+            // shared tree that cannot reach its history.
+            let oldest_note = self.db.notes().iter().map(|n| n.position).min().unwrap_or(u64::MAX);
+            let shared_serves =
+                !self.db.is_leaves_only() && shared_tree_covers >= matured && matured > 0 && shared_tree_base <= oldest_note;
+            let needs_cache = span >= SUBTREE_CACHE_MIN_SPAN
+                && !self.db.subtree_cache_ready(matured)
+                && !self.db.subtree_cache_failed()
+                && !shared_serves;
+            // Stand the priority down once there is nothing left to prepare. The flag
+            // buys a wallet the right to warm while still behind; it must not become a
+            // permanent claim on a build slot, or the first wallet anyone opens keeps
+            // one forever. `witnesses_warm` and the cache are the whole of "prepared",
+            // so when neither is outstanding this wallet is as ready as it can be.
+            if self.warm_priority && !needs_cache && self.witnesses_warm {
+                self.warm_priority = false;
+            }
+            // Take a build slot and KEEP it across passes until the build finishes —
+            // see `build_permit`. Releasing the moment a wallet no longer needs one
+            // hands the slot straight to whoever is queued.
+            // The build itself no longer runs under this lock — see `SubtreeBuildJob`.
+            // Record the intent and let `sync_one_wallet` snapshot and fold it after
+            // the guard is released.
+            //
+            // Slicing it to keep the lock available was the previous answer, and it
+            // did not work: one 2 s slice per sync lap is a ~10 % duty cycle, so on
+            // the live daemon builds crawled and NONE completed, while users kept
+            // paying the whole 247 s inline on their first send. Off the lock there is
+            // no reason to slice at all.
+            if needs_cache && !self.build_in_flight {
+                if self.build_permit.is_none() {
+                    self.build_permit = warm_gate.clone().try_acquire_owned().ok();
                 }
-                // Retain the tree's COMPLETE subtree roots once. Every authentication
-                // sibling of every note is then either one of those (a lookup), the empty
-                // root, or the single subtree straddling the anchor — so a spend witnesses
-                // in O(depth) instead of replaying the chain. Measured at 200 K leaves:
-                // 29.4 s per send -> 0.36 s, and ~4 ms/note thereafter.
-                //
-                // One O(chain) pass, on a BLOCKING thread (never the async runtime — see
-                // the 2026-07-12 freeze), then `append_leaf` keeps it current for the same
-                // one-hash-per-leaf the tip mirror already costs. Only built once the
-                // replay it replaces is actually slow, so ordinary wallets pay no memory.
-                let span = matured.saturating_sub(self.db.base_size());
-                // Stand down while any payment is proving: the build is one-time and can
-                // wait a tick, a user's send cannot. Deliberately does NOT mark the wallet
-                // charged, so it is retried once the daemon is idle again.
-                //
-                // It deliberately does NOT stand down for `backfilling_now()` any more.
-                // That flag is GLOBAL and sticky: any single wallet more than
-                // BACKFILL_BEHIND_BLOCKS behind stamps it for every other wallet. With a
-                // backlog of never-scanned wallets it is permanently set, so the build
-                // that makes a wallet fast was starved forever by the wallets that are
-                // slow — a self-sustaining inversion. Observed on the public daemon:
-                // 0 cache builds, 0 deferrals, and every resident wallet stuck on the
-                // O(leaves x budget) climb instead. Backfill is background work nobody
-                // waits on; a proof is not. Yield to the proof, not to the backlog.
-                //
-                // The build is bounded instead by the warm gate (`--warm-wallets`),
-                // acquired below and held across it, so a burst of cold wallets can no
-                // longer put one O(chain) sweep per sync slot on the box at once.
-                // `subtree_cache_failed` is checked too: a wallet the cache cannot serve
-                // must not sit on a build slot re-attempting a build that will be
-                // rejected again.
-                // The subtree cache exists to make THIS wallet's spends O(depth). If the
-                // shared tree already covers `matured`, it answers those spends and this
-                // wallet's own cache would be a second copy of the same public structure,
-                // built at the same cost: ~324 s of Sinsemilla over ~2.07 M leaves,
-                // measured, PER WALLET. That is 45% of a wallet's whole cold cost, spent
-                // reproducing something the daemon already has.
-                //
-                // The shared tree itself is exempt — it is the copy everyone else is
-                // relying on, so it must build. `shared_tree_covers` is 0 for it anyway
-                // (its own lock is held by this very sync pass), but say so explicitly
-                // rather than depend on that.
-                // The shared tree serves only positions at or above its own base. A wallet
-                // whose OLDEST note is below that base (an old miner wallet, once the shared
-                // tree's base was raised by the 2026-08 compaction bug) is not covered — the
-                // tree declines those positions and the spend climbs O(chain). Gate on the
-                // oldest note so such a wallet builds its own cache instead of relying on a
-                // shared tree that cannot reach its history.
-                let oldest_note = self.db.notes().iter().map(|n| n.position).min().unwrap_or(u64::MAX);
-                let shared_serves = !self.db.is_leaves_only()
-                    && shared_tree_covers >= matured
-                    && matured > 0
-                    && shared_tree_base <= oldest_note;
-                let needs_cache = span >= SUBTREE_CACHE_MIN_SPAN
-                    && !self.db.subtree_cache_ready(matured)
-                    && !self.db.subtree_cache_failed()
-                    && !shared_serves;
-                // Stand the priority down once there is nothing left to prepare. The flag
-                // buys a wallet the right to warm while still behind; it must not become a
-                // permanent claim on a build slot, or the first wallet anyone opens keeps
-                // one forever. `witnesses_warm` and the cache are the whole of "prepared",
-                // so when neither is outstanding this wallet is as ready as it can be.
-                if self.warm_priority && !needs_cache && self.witnesses_warm {
-                    self.warm_priority = false;
-                }
-                // Take a build slot and KEEP it across passes until the build finishes —
-                // see `build_permit`. Releasing the moment a wallet no longer needs one
-                // hands the slot straight to whoever is queued.
-                // The build itself no longer runs under this lock — see `SubtreeBuildJob`.
-                // Record the intent and let `sync_one_wallet` snapshot and fold it after
-                // the guard is released.
-                //
-                // Slicing it to keep the lock available was the previous answer, and it
-                // did not work: one 2 s slice per sync lap is a ~10 % duty cycle, so on
-                // the live daemon builds crawled and NONE completed, while users kept
-                // paying the whole 247 s inline on their first send. Off the lock there is
-                // no reason to slice at all.
-                if needs_cache && !self.build_in_flight {
-                    if self.build_permit.is_none() {
-                        self.build_permit = warm_gate.clone().try_acquire_owned().ok();
-                    }
-                    // A payment in flight still wins: the box has finite cores and the
-                    // user is watching that one.
-                    if self.build_permit.is_some() && !proving_now() {
-                        // Only refuse when the kernel says memory is genuinely tight. A
-                        // wallet skipped here is retried on a later pass, so a transient
-                        // squeeze costs this wallet one slow send, not its whole session.
-                        // Sized to the job on a single-wallet daemon — see
-                        // `subtree_build_floor_mb`: a flat 1.2 GB floor kept laptops from
-                        // ever pre-building, and then charged the same fold to the send.
-                        let floor = subtree_build_floor_mb(subtree_free_floor_mb, span, !state.build_shared_tree);
-                        match mem_available_mb() {
-                            Some(free) if free < floor => {
-                                // Once per wallet per SUBTREE_LOW_MEM_RELOG, not once per sync pass.
-                                if self.subtree_low_mem_logged.is_none_or(|at| at.elapsed() >= SUBTREE_LOW_MEM_RELOG) {
-                                    self.subtree_low_mem_logged = Some(std::time::Instant::now());
-                                    log::warn!(
-                                        "subtree cache deferred ({span} leaves): only {free} MB free, floor is {floor} MB; this wallet keeps the replay path for now (a send will build it off-lock instead)"
-                                    );
-                                }
-                            }
-                            _ => {
-                                self.subtree_low_mem_logged = None;
-                                self.wants_cache_build = true;
+                // A payment in flight still wins: the box has finite cores and the
+                // user is watching that one.
+                if self.build_permit.is_some() && !proving_now() {
+                    // Only refuse when the kernel says memory is genuinely tight. A
+                    // wallet skipped here is retried on a later pass, so a transient
+                    // squeeze costs this wallet one slow send, not its whole session.
+                    // Sized to the job on a single-wallet daemon — see
+                    // `subtree_build_floor_mb`: a flat 1.2 GB floor kept laptops from
+                    // ever pre-building, and then charged the same fold to the send.
+                    let floor = subtree_build_floor_mb(subtree_free_floor_mb, span, !state.build_shared_tree);
+                    match mem_available_mb() {
+                        Some(free) if free < floor => {
+                            // Once per wallet per SUBTREE_LOW_MEM_RELOG, not once per sync pass.
+                            if self.subtree_low_mem_logged.is_none_or(|at| at.elapsed() >= SUBTREE_LOW_MEM_RELOG) {
+                                self.subtree_low_mem_logged = Some(std::time::Instant::now());
+                                log::warn!(
+                                    "subtree cache deferred ({span} leaves): only {free} MB free, floor is {floor} MB; this wallet keeps the replay path for now (a send will build it off-lock instead)"
+                                );
                             }
                         }
-                    }
-                } else if self.build_permit.is_some() {
-                    self.build_permit = None;
-                }
-                // Once the complete-subtree cache covers the matured anchor, EVERY spend
-                // path reaches `witness_paths_at`, which serves from `subtree_paths` in
-                // O(depth) and returns before it ever looks at the live-witness set. The
-                // warm below then builds a structure nothing reads: phase 2 is a
-                // leaf-by-leaf climb costing `leaves × budget`, phase 3 one O(chain)
-                // replay per adopted note.
-                //
-                // This is the same argument the note-heavy branch above already makes —
-                // it was just tied to the wrong condition. Being served by the batch
-                // builder is not a property of holding many notes; it is a property of
-                // the cache being ready, which is equally true of a 4-note wallet.
-                // Live cost of getting that wrong: 48 resident wallets each burning
-                // 4–7 s ticks with ~1 M leaves still to climb, `adopted 0` on every one
-                // of them, walletd pinned at 470% CPU — for witnesses no send consumes.
-                //
-                // Declaring the wallet warm here is not a claim that its witness set
-                // reached the anchor; it is a claim that it does not need to. If the
-                // cache is later rejected or invalidated the latch is released below and
-                // the ordinary climb resumes, so the failure mode is the old behaviour.
-                // `matured > base_size` is `subtree_paths`' own precondition: below it the
-                // cache declines and the wallet would silently be left with neither a
-                // cache nor a witness set.
-                // Served by EITHER this wallet's own cache or the shared tree. Checking
-                // only the former was a bug of exactly the kind this whole file keeps
-                // producing: a borrowing wallet never builds a cache of its own, so the
-                // condition was permanently false and the wallet dropped into the
-                // leaf-by-leaf witness climb — the very work the shared tree exists to
-                // make unnecessary — and sat in "Almost ready" indefinitely.
-                //
-                // The question was never "do I have a cache", it is "can somebody
-                // witness for me".
-                let cache_serves = (self.db.subtree_cache_ready(matured) || shared_serves) && matured > self.db.base_size();
-                // Surface the true "can I pay without climbing?" answer to status.
-                self.spend_fast_ready = cache_serves;
-                // A wallet whose cache is still building must not ALSO run the warm. Both
-                // are one-time heavy work aiming at the same outcome — a fast spend — and
-                // the cache is the one that achieves it, in a fraction of the work. Left
-                // unguarded this tick spends 250 ms building the cache and then 4 s
-                // climbing witnesses the cache is about to make redundant, which is the
-                // treadmill this whole change removes, reintroduced at 94% strength.
-                //
-                // `!subtree_cache_failed()` matters: a rejected cache never becomes ready,
-                // so without it `needs_cache` would stay true forever and suppress the warm
-                // permanently, leaving the wallet with no fast path at all.
-                let cache_pending = needs_cache && !self.db.subtree_cache_failed();
-                if cache_serves {
-                    if !self.witnesses_warm {
-                        self.force_checkpoint = true;
-                        log::info!(
-                            "wallet spend-ready from the subtree cache (notes={note_count}, matured={matured}) — skipping a {}-leaf witness climb it would never read",
-                            matured.saturating_sub(self.db.witnessed_upto())
-                        );
-                    }
-                    self.witnesses_warm = true;
-                    self.warm_via_subtree_cache = true;
-                } else if cache_pending {
-                    // Cache still building: hold the warm off rather than race it. The
-                    // latch is reused only to skip the phases — this is "deferred", not a
-                    // claim the witness set reached the anchor, and nothing reads it as one.
-                    self.witnesses_warm = true;
-                    self.warm_via_subtree_cache = true;
-                } else if self.warm_via_subtree_cache {
-                    // Neither serving nor pending — the cache was rejected by its root gate
-                    // or invalidated by a rebuild, and will not come back. Resume actually
-                    // maintaining witnesses; the climb is slow but it is the only path left.
-                    self.warm_via_subtree_cache = false;
-                    self.witnesses_warm = false;
-                    // Only worth a warning when there is actually a climb to resume.
-                    //
-                    // This fired for every empty or freshly fast-synced wallet, where
-                    // `matured == base_size` and there are no notes: a warning about
-                    // resuming work that amounts to nothing. It ran tens of thousands of
-                    // times and buried the lines that mattered — a wallet stuck
-                    // re-quarantining its checkpoint every 60 s, and a payment spending
-                    // 392 s on a witness climb, both of which had to be found by
-                    // filtering this message out. A log nobody can read is not a log.
-                    let climb = matured.saturating_sub(self.db.witnessed_upto());
-                    let idle = self.db.notes().is_empty() || climb == 0;
-                    if idle {
-                        log::debug!(
-                            "subtree cache not serving at matured={matured}, but nothing to climb (notes={}, climb={climb})",
-                            self.db.notes().len()
-                        );
-                    } else {
-                        log::warn!(
-                            "subtree cache unavailable at matured={matured} (failed={}); resuming a {climb}-leaf witness climb for this wallet",
-                            self.db.subtree_cache_failed()
-                        );
+                        _ => {
+                            self.subtree_low_mem_logged = None;
+                            self.wants_cache_build = true;
+                        }
                     }
                 }
-                // Take a warm permit, or leave the heavy catch-up to another tick. This is
-                // `try_acquire`, not `acquire`: a wallet that can't warm right now should
-                // fall through and keep doing its cheap incremental sync rather than block
-                // a sync slot waiting. Ordinary sync never touches this gate.
-                // The warm climb takes its own short-lived permit. It is throttled work,
-                // not a build that must run to completion, so it must not sit on a slot a
-                // queued cache build could use.
-                let warm_permit = if self.witnesses_warm { None } else { warm_gate.try_acquire().ok() };
-                if !self.witnesses_warm && warm_permit.is_some() {
-                    // Roll the base up to our notes first (cheap: cost is leaves, not
-                    // leaves×budget), then warm the witnesses to the matured anchor.
-                    // Bound each step by WORK (≈ leaves×budget ≤ COLD_WARM_BUDGET) so every
-                    // wallet's step costs the same regardless of its size.
-                    let wstep = (COLD_WARM_BUDGET / budget as u64).clamp(WITNESS_MIN_STEP, COLD_WARM_STEP);
-                    // Run every phase of the warm back-to-back inside one tick, instead of
-                    // one step per sync pass.
-                    //
-                    // Spreading it out was the real cost. The three phases are sequential —
-                    // roll the base, sweep the witnesses to `matured`, then adopt the notes
-                    // the sweep passed — and adoption is the ONLY phase that makes a spend
-                    // fast. On the live miner wallet the sweep had ~46 K leaves to climb
-                    // while opening zero witnesses (every eligible note sits below it), which
-                    // is ~8 s of actual work; at one 2 730-leaf step per pass that became a
-                    // 30-minute prologue, and adoption never ran at all. Meanwhile every
-                    // send paid 6 × 22 s of rebuilds. Same total work, run to completion.
-                    let deadline = std::time::Instant::now() + COLD_WARM_TICK;
-                    let t_tick = std::time::Instant::now();
-                    let mut adopted = 0usize;
-                    loop {
-                        if std::time::Instant::now() >= deadline {
-                            break;
-                        }
-                        // Phase 1: roll the base up to our notes (cost is leaves, not
-                        // leaves×budget), which shortens every later replay.
-                        // Freeze base compaction while an off-lock cache build is in flight.
-                        // The build snapshots (base, leaves) and `install_subtree_cache`
-                        // rejects it if the base moved since — so a wallet whose base kept
-                        // advancing (consolidation spends its oldest note, the cap rises,
-                        // the base rolls up) rebuilt forever, never installing (117 "the
-                        // stream moved" failures live). The base is a memory optimisation;
-                        // it can wait the ~minutes a build takes, then resume.
-                        if !self.build_in_flight
-                            && tokio::task::block_in_place(|| self.db.advance_base_capped(matured, COLD_WARM_STEP))
-                        {
-                            continue;
-                        }
-                        // A wallet holding ZERO notes has nothing to witness: phases 2-3
-                        // would sweep the whole tree (~1.5M leaves at 4.4 s/tick, observed
-                        // live after a rescan) for exactly zero benefit. Mark warm once the
-                        // base is rolled; notes arriving later always land ABOVE the matured
-                        // anchor and get witnessed by the steady incremental advance as it
-                        // passes them, and a rescan that finds notes comes back through here
-                        // with note_count > 0 anyway.
-                        if note_count == 0 {
-                            self.witnesses_warm = true;
-                            break;
-                        }
-                        // Phase 2: sweep the witness set forward to the matured anchor.
-                        if tokio::task::block_in_place(|| self.db.advance_witnesses_capped(matured, wstep)) {
-                            continue;
-                        }
-                        // Phase 3: the sweep only opens a witness for a note it PASSES, so
-                        // notes below it — a note-heavy wallet's entire holding — get none
-                        // and would replay on every spend forever. Adopt them: one O(chain)
-                        // replay each, paid here rather than on the send path, kept for good.
-                        let Some(pos) = self.db.next_note_needing_witness() else {
-                            self.witnesses_warm = true;
-                            break;
-                        };
-                        let t = std::time::Instant::now();
-                        let ok = tokio::task::block_in_place(|| self.db.install_witness(pos, matured));
-                        adopted += 1;
-                        log::info!(
-                            "adopted witness for note@{pos} in {:.1?} (ok={ok}, {}/{} slots warm) — this note no longer replays at spend time",
-                            t.elapsed(),
-                            self.db.live_witness_count(),
-                            budget,
-                        );
-                        if !ok {
-                            break;
-                        }
-                    }
-                    // Persist only when this tick achieved something worth a checkpoint.
-                    //
-                    // A checkpoint serialises the whole leaf stream — 15–29 MB on these
-                    // wallets — so forcing one every tick (as this did) meant tens of MB of
-                    // write amplification per wallet per few seconds, on top of the warm's
-                    // own CPU. Adoption is expensive to redo (a full replay each) so it is
-                    // always persisted; raw sweep progress is cheap by comparison and rides
-                    // the ordinary `CHECKPOINT_EVERY` cadence instead.
-                    if adopted > 0 || self.witnesses_warm {
-                        self.force_checkpoint = true;
-                    }
-                    if self.witnesses_warm {
-                        log::info!(
-                            "witnesses warmed for wallet (notes={}, witness_budget={}, warm={}, adopted {} this tick, base_size={}, witnessed_upto={} == matured {})",
-                            note_count,
-                            budget,
-                            self.db.live_witness_count(),
-                            adopted,
-                            self.db.base_size(),
-                            self.db.witnessed_upto(),
-                            matured,
-                        );
-                    } else {
-                        log::info!(
-                            "warming wallet: {:.1?} this tick (notes={}, warm={}/{}, adopted {}, witnessed_upto={} of matured {}, {} leaves to go)",
-                            t_tick.elapsed(),
-                            note_count,
-                            self.db.live_witness_count(),
-                            budget,
-                            adopted,
-                            self.db.witnessed_upto(),
-                            matured,
-                            matured.saturating_sub(self.db.witnessed_upto()),
-                        );
-                    }
+            } else if self.build_permit.is_some() {
+                self.build_permit = None;
+            }
+            // Once the complete-subtree cache covers the matured anchor, EVERY spend
+            // path reaches `witness_paths_at`, which serves from `subtree_paths` in
+            // O(depth) and returns before it ever looks at the live-witness set. The
+            // warm below then builds a structure nothing reads: phase 2 is a
+            // leaf-by-leaf climb costing `leaves × budget`, phase 3 one O(chain)
+            // replay per adopted note.
+            //
+            // This is the same argument the note-heavy branch above already makes —
+            // it was just tied to the wrong condition. Being served by the batch
+            // builder is not a property of holding many notes; it is a property of
+            // the cache being ready, which is equally true of a 4-note wallet.
+            // Live cost of getting that wrong: 48 resident wallets each burning
+            // 4–7 s ticks with ~1 M leaves still to climb, `adopted 0` on every one
+            // of them, walletd pinned at 470% CPU — for witnesses no send consumes.
+            //
+            // Declaring the wallet warm here is not a claim that its witness set
+            // reached the anchor; it is a claim that it does not need to. If the
+            // cache is later rejected or invalidated the latch is released below and
+            // the ordinary climb resumes, so the failure mode is the old behaviour.
+            // `matured > base_size` is `subtree_paths`' own precondition: below it the
+            // cache declines and the wallet would silently be left with neither a
+            // cache nor a witness set.
+            // Served by EITHER this wallet's own cache or the shared tree. Checking
+            // only the former was a bug of exactly the kind this whole file keeps
+            // producing: a borrowing wallet never builds a cache of its own, so the
+            // condition was permanently false and the wallet dropped into the
+            // leaf-by-leaf witness climb — the very work the shared tree exists to
+            // make unnecessary — and sat in "Almost ready" indefinitely.
+            //
+            // The question was never "do I have a cache", it is "can somebody
+            // witness for me".
+            let cache_serves = (self.db.subtree_cache_ready(matured) || shared_serves) && matured > self.db.base_size();
+            // Surface the true "can I pay without climbing?" answer to status.
+            self.spend_fast_ready = cache_serves;
+            // A wallet whose cache is still building must not ALSO run the warm. Both
+            // are one-time heavy work aiming at the same outcome — a fast spend — and
+            // the cache is the one that achieves it, in a fraction of the work. Left
+            // unguarded this tick spends 250 ms building the cache and then 4 s
+            // climbing witnesses the cache is about to make redundant, which is the
+            // treadmill this whole change removes, reintroduced at 94% strength.
+            //
+            // `!subtree_cache_failed()` matters: a rejected cache never becomes ready,
+            // so without it `needs_cache` would stay true forever and suppress the warm
+            // permanently, leaving the wallet with no fast path at all.
+            let cache_pending = needs_cache && !self.db.subtree_cache_failed();
+            if cache_serves {
+                if !self.witnesses_warm {
+                    self.force_checkpoint = true;
+                    log::info!(
+                        "wallet spend-ready from the subtree cache (notes={note_count}, matured={matured}) — skipping a {}-leaf witness climb it would never read",
+                        matured.saturating_sub(self.db.witnessed_upto())
+                    );
+                }
+                self.witnesses_warm = true;
+                self.warm_via_subtree_cache = true;
+            } else if cache_pending {
+                // Cache still building: hold the warm off rather than race it. The
+                // latch is reused only to skip the phases — this is "deferred", not a
+                // claim the witness set reached the anchor, and nothing reads it as one.
+                self.witnesses_warm = true;
+                self.warm_via_subtree_cache = true;
+            } else if self.warm_via_subtree_cache {
+                // Neither serving nor pending — the cache was rejected by its root gate
+                // or invalidated by a rebuild, and will not come back. Resume actually
+                // maintaining witnesses; the climb is slow but it is the only path left.
+                self.warm_via_subtree_cache = false;
+                self.witnesses_warm = false;
+                // Only worth a warning when there is actually a climb to resume.
+                //
+                // This fired for every empty or freshly fast-synced wallet, where
+                // `matured == base_size` and there are no notes: a warning about
+                // resuming work that amounts to nothing. It ran tens of thousands of
+                // times and buried the lines that mattered — a wallet stuck
+                // re-quarantining its checkpoint every 60 s, and a payment spending
+                // 392 s on a witness climb, both of which had to be found by
+                // filtering this message out. A log nobody can read is not a log.
+                let climb = matured.saturating_sub(self.db.witnessed_upto());
+                let idle = self.db.notes().is_empty() || climb == 0;
+                if idle {
+                    log::debug!(
+                        "subtree cache not serving at matured={matured}, but nothing to climb (notes={}, climb={climb})",
+                        self.db.notes().len()
+                    );
                 } else {
-                    let due = self.last_witness_advance.map(|t| t.elapsed() >= WITNESS_ADVANCE_INTERVAL).unwrap_or(true);
-                    if due {
-                        // Bound the step by WORK, not leaves. `WITNESS_ADVANCE_CAP` is a
-                        // LEAF cap sized when only ≤32-note wallets reached this path; with
-                        // a 12-witness budget it costs 4 000 × 12 ≈ 48 000 Sinsemilla
-                        // appends ≈ 8 s — once per second, per wallet, holding the wallet
-                        // lock. Every note-heavy wallet that loses the race for a warm
-                        // permit lands here, so that alone saturated the box and starved
-                        // ordinary sync (a 1-note wallet stuck at "syncing 97%").
-                        let steady_cap = (COLD_WARM_BUDGET / budget as u64).clamp(WITNESS_MIN_STEP, WITNESS_ADVANCE_CAP);
-                        tokio::task::block_in_place(|| {
-                            if !self.build_in_flight {
-                                self.db.advance_base_capped(matured, BASE_ADVANCE_STEP);
-                            }
-                            // Only a WARM wallet belongs on the incremental step: it is a
-                            // few appends per new leaf (one leaf per block at 1 BPS). A
-                            // wallet still waiting for a warm permit must NOT do its
-                            // catch-up here — that is the warm's job, under the gate that
-                            // bounds how many run at once.
-                            // `warm_via_subtree_cache` wallets are excluded: the sweep
-                            // still costs one `lag_tree` append per leaf even with an
-                            // empty witness set, so leaving them on it would just move
-                            // the same wasted Sinsemilla work from the warm tick to the
-                            // steady tick. Their paths come from the cache, which
-                            // `append_leaf` keeps current for one hash per leaf.
-                            if self.witnesses_warm
-                                && !self.warm_via_subtree_cache
-                                && self.db.advance_witnesses_capped(matured, steady_cap)
-                            {
-                                self.witnesses_warm = false;
-                            }
-                        });
-                        self.last_witness_advance = Some(std::time::Instant::now());
+                    log::warn!(
+                        "subtree cache unavailable at matured={matured} (failed={}); resuming a {climb}-leaf witness climb for this wallet",
+                        self.db.subtree_cache_failed()
+                    );
+                }
+            }
+            // Take a warm permit, or leave the heavy catch-up to another tick. This is
+            // `try_acquire`, not `acquire`: a wallet that can't warm right now should
+            // fall through and keep doing its cheap incremental sync rather than block
+            // a sync slot waiting. Ordinary sync never touches this gate.
+            // The warm climb takes its own short-lived permit. It is throttled work,
+            // not a build that must run to completion, so it must not sit on a slot a
+            // queued cache build could use.
+            let warm_permit = if self.witnesses_warm { None } else { warm_gate.try_acquire().ok() };
+            if !self.witnesses_warm && warm_permit.is_some() {
+                // Roll the base up to our notes first (cheap: cost is leaves, not
+                // leaves×budget), then warm the witnesses to the matured anchor.
+                // Bound each step by WORK (≈ leaves×budget ≤ COLD_WARM_BUDGET) so every
+                // wallet's step costs the same regardless of its size.
+                let wstep = (COLD_WARM_BUDGET / budget as u64).clamp(WITNESS_MIN_STEP, COLD_WARM_STEP);
+                // Run every phase of the warm back-to-back inside one tick, instead of
+                // one step per sync pass.
+                //
+                // Spreading it out was the real cost. The three phases are sequential —
+                // roll the base, sweep the witnesses to `matured`, then adopt the notes
+                // the sweep passed — and adoption is the ONLY phase that makes a spend
+                // fast. On the live miner wallet the sweep had ~46 K leaves to climb
+                // while opening zero witnesses (every eligible note sits below it), which
+                // is ~8 s of actual work; at one 2 730-leaf step per pass that became a
+                // 30-minute prologue, and adoption never ran at all. Meanwhile every
+                // send paid 6 × 22 s of rebuilds. Same total work, run to completion.
+                let deadline = std::time::Instant::now() + COLD_WARM_TICK;
+                let t_tick = std::time::Instant::now();
+                let mut adopted = 0usize;
+                loop {
+                    if std::time::Instant::now() >= deadline {
+                        break;
                     }
+                    // Phase 1: roll the base up to our notes (cost is leaves, not
+                    // leaves×budget), which shortens every later replay.
+                    // Freeze base compaction while an off-lock cache build is in flight.
+                    // The build snapshots (base, leaves) and `install_subtree_cache`
+                    // rejects it if the base moved since — so a wallet whose base kept
+                    // advancing (consolidation spends its oldest note, the cap rises,
+                    // the base rolls up) rebuilt forever, never installing (117 "the
+                    // stream moved" failures live). The base is a memory optimisation;
+                    // it can wait the ~minutes a build takes, then resume.
+                    if !self.build_in_flight && tokio::task::block_in_place(|| self.db.advance_base_capped(matured, COLD_WARM_STEP)) {
+                        continue;
+                    }
+                    // A wallet holding ZERO notes has nothing to witness: phases 2-3
+                    // would sweep the whole tree (~1.5M leaves at 4.4 s/tick, observed
+                    // live after a rescan) for exactly zero benefit. Mark warm once the
+                    // base is rolled; notes arriving later always land ABOVE the matured
+                    // anchor and get witnessed by the steady incremental advance as it
+                    // passes them, and a rescan that finds notes comes back through here
+                    // with note_count > 0 anyway.
+                    if note_count == 0 {
+                        self.witnesses_warm = true;
+                        break;
+                    }
+                    // Phase 2: sweep the witness set forward to the matured anchor.
+                    if tokio::task::block_in_place(|| self.db.advance_witnesses_capped(matured, wstep)) {
+                        continue;
+                    }
+                    // Phase 3: the sweep only opens a witness for a note it PASSES, so
+                    // notes below it — a note-heavy wallet's entire holding — get none
+                    // and would replay on every spend forever. Adopt them: one O(chain)
+                    // replay each, paid here rather than on the send path, kept for good.
+                    let Some(pos) = self.db.next_note_needing_witness() else {
+                        self.witnesses_warm = true;
+                        break;
+                    };
+                    let t = std::time::Instant::now();
+                    let ok = tokio::task::block_in_place(|| self.db.install_witness(pos, matured));
+                    adopted += 1;
+                    log::info!(
+                        "adopted witness for note@{pos} in {:.1?} (ok={ok}, {}/{} slots warm) — this note no longer replays at spend time",
+                        t.elapsed(),
+                        self.db.live_witness_count(),
+                        budget,
+                    );
+                    if !ok {
+                        break;
+                    }
+                }
+                // Persist only when this tick achieved something worth a checkpoint.
+                //
+                // A checkpoint serialises the whole leaf stream — 15–29 MB on these
+                // wallets — so forcing one every tick (as this did) meant tens of MB of
+                // write amplification per wallet per few seconds, on top of the warm's
+                // own CPU. Adoption is expensive to redo (a full replay each) so it is
+                // always persisted; raw sweep progress is cheap by comparison and rides
+                // the ordinary `CHECKPOINT_EVERY` cadence instead.
+                if adopted > 0 || self.witnesses_warm {
+                    self.force_checkpoint = true;
+                }
+                if self.witnesses_warm {
+                    log::info!(
+                        "witnesses warmed for wallet (notes={}, witness_budget={}, warm={}, adopted {} this tick, base_size={}, witnessed_upto={} == matured {})",
+                        note_count,
+                        budget,
+                        self.db.live_witness_count(),
+                        adopted,
+                        self.db.base_size(),
+                        self.db.witnessed_upto(),
+                        matured,
+                    );
+                } else {
+                    log::info!(
+                        "warming wallet: {:.1?} this tick (notes={}, warm={}/{}, adopted {}, witnessed_upto={} of matured {}, {} leaves to go)",
+                        t_tick.elapsed(),
+                        note_count,
+                        self.db.live_witness_count(),
+                        budget,
+                        adopted,
+                        self.db.witnessed_upto(),
+                        matured,
+                        matured.saturating_sub(self.db.witnessed_upto()),
+                    );
+                }
+            } else {
+                let due = self.last_witness_advance.map(|t| t.elapsed() >= WITNESS_ADVANCE_INTERVAL).unwrap_or(true);
+                if due {
+                    // Bound the step by WORK, not leaves. `WITNESS_ADVANCE_CAP` is a
+                    // LEAF cap sized when only ≤32-note wallets reached this path; with
+                    // a 12-witness budget it costs 4 000 × 12 ≈ 48 000 Sinsemilla
+                    // appends ≈ 8 s — once per second, per wallet, holding the wallet
+                    // lock. Every note-heavy wallet that loses the race for a warm
+                    // permit lands here, so that alone saturated the box and starved
+                    // ordinary sync (a 1-note wallet stuck at "syncing 97%").
+                    let steady_cap = (COLD_WARM_BUDGET / budget as u64).clamp(WITNESS_MIN_STEP, WITNESS_ADVANCE_CAP);
+                    tokio::task::block_in_place(|| {
+                        if !self.build_in_flight {
+                            self.db.advance_base_capped(matured, BASE_ADVANCE_STEP);
+                        }
+                        // Only a WARM wallet belongs on the incremental step: it is a
+                        // few appends per new leaf (one leaf per block at 1 BPS). A
+                        // wallet still waiting for a warm permit must NOT do its
+                        // catch-up here — that is the warm's job, under the gate that
+                        // bounds how many run at once.
+                        // `warm_via_subtree_cache` wallets are excluded: the sweep
+                        // still costs one `lag_tree` append per leaf even with an
+                        // empty witness set, so leaving them on it would just move
+                        // the same wasted Sinsemilla work from the warm tick to the
+                        // steady tick. Their paths come from the cache, which
+                        // `append_leaf` keeps current for one hash per leaf.
+                        if self.witnesses_warm && !self.warm_via_subtree_cache && self.db.advance_witnesses_capped(matured, steady_cap)
+                        {
+                            self.witnesses_warm = false;
+                        }
+                    });
+                    self.last_witness_advance = Some(std::time::Instant::now());
                 }
             }
         }
@@ -3791,10 +3759,8 @@ impl WalletEntry {
         // AND its base must reach down to this wallet's oldest note (else those old
         // positions decline and the spend climbs O(chain) — the consolidation killer).
         let oldest_note = self.db.notes().iter().map(|n| n.position).min().unwrap_or(u64::MAX);
-        let shared_serves = !self.db.is_leaves_only()
-            && shared_tree_covers >= matured
-            && matured > 0
-            && shared_tree_base <= oldest_note;
+        let shared_serves =
+            !self.db.is_leaves_only() && shared_tree_covers >= matured && matured > 0 && shared_tree_base <= oldest_note;
         if (self.db.subtree_cache_ready(matured) || shared_serves) && matured > self.db.base_size() {
             return;
         }
@@ -3830,10 +3796,8 @@ impl WalletEntry {
     fn send_needs_cache_build(&self, shared_tree_covers: u64, shared_tree_base: u64) -> bool {
         let Some(matured) = self.matured_leaves() else { return false };
         let oldest_note = self.db.notes().iter().map(|n| n.position).min().unwrap_or(u64::MAX);
-        let shared_serves = !self.db.is_leaves_only()
-            && shared_tree_covers >= matured
-            && matured > 0
-            && shared_tree_base <= oldest_note;
+        let shared_serves =
+            !self.db.is_leaves_only() && shared_tree_covers >= matured && matured > 0 && shared_tree_base <= oldest_note;
         if (self.db.subtree_cache_ready(matured) || shared_serves) && matured > self.db.base_size() {
             return false;
         }
@@ -4036,7 +4000,13 @@ async fn run_subtree_build(
 /// install, and persist. DETACHED on purpose — the sync loop joins its wallet tasks per
 /// lap, and a client that gives up on a send must not take the build down with it.
 /// `origin` names the path that asked, for the log.
-fn spawn_subtree_build(state: &Arc<AppState>, token: &str, w: &Wallet, job: kaspa_shielded_core::walletdb::SubtreeBuildJob, origin: &'static str) {
+fn spawn_subtree_build(
+    state: &Arc<AppState>,
+    token: &str,
+    w: &Wallet,
+    job: kaspa_shielded_core::walletdb::SubtreeBuildJob,
+    origin: &'static str,
+) {
     let state = state.clone();
     let w2 = w.clone();
     let who = token.to_string();
@@ -4624,12 +4594,7 @@ impl AppState {
     /// for a token that already resolved to a loaded wallet, so the map is bounded by
     /// the wallets this daemon holds.
     async fn send_gate(&self, token: &str) -> Arc<tokio::sync::Mutex<()>> {
-        self.send_gates
-            .lock()
-            .await
-            .entry(token.to_string())
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
-            .clone()
+        self.send_gates.lock().await.entry(token.to_string()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
     }
 
     /// The request-path channel, or `None` while the node is unreachable.
@@ -4854,10 +4819,13 @@ impl AppState {
         // node's finality-point walk can be pathologically slow on a degenerate DAG
         // (e.g. difficulty collapsed to the floor). Time it out and fall back to a full
         // scan rather than hanging the wallet.
-        let cp = match tokio::time::timeout(std::time::Duration::from_secs(5), self.request_client().await?.get_shielded_tree_state(None)).await {
-            Ok(Ok(cp)) => cp,
-            _ => return None,
-        };
+        let cp =
+            match tokio::time::timeout(std::time::Duration::from_secs(5), self.request_client().await?.get_shielded_tree_state(None))
+                .await
+            {
+                Ok(Ok(cp)) => cp,
+                _ => return None,
+            };
         // A birthday OLDER than the finality checkpoint used to mean "full scan
         // required" — and a full scan anchors at GENESIS, i.e. every block the chain
         // ever had. Any wallet older than the ~12 h finality window hit it, and on a
@@ -4960,15 +4928,23 @@ impl AppState {
     /// from two walk pages earlier: the node searches at most 2,100 blocks forward from there,
     /// so its answer is at or before `base`. The wallet scans a few thousand extra blocks
     /// instead of the whole chain.
-    async fn frontier_at_or_before(&self, base: RpcHash, two_back: Option<RpcHash>) -> Option<(RpcHash, u64, u64, RpcHash, Vec<RpcHash>)> {
-        if let Ok(ts) = self.request_client().await?.get_shielded_tree_state(Some(base)).await {
-            if ts.block_hash == base {
-                return Some((ts.block_hash, ts.daa_score, ts.size, ts.leaf, ts.ommers));
-            }
+    async fn frontier_at_or_before(
+        &self,
+        base: RpcHash,
+        two_back: Option<RpcHash>,
+    ) -> Option<(RpcHash, u64, u64, RpcHash, Vec<RpcHash>)> {
+        if let Ok(ts) = self.request_client().await?.get_shielded_tree_state(Some(base)).await
+            && ts.block_hash == base
+        {
+            return Some((ts.block_hash, ts.daa_score, ts.size, ts.leaf, ts.ommers));
         }
         let earlier = two_back?;
         let ts = self.request_client().await?.get_shielded_tree_state(Some(earlier)).await.ok()?;
-        log::info!("birthday below the node's retained headers: starting from frontier checkpoint at daa {} (block {})", ts.daa_score, ts.block_hash);
+        log::info!(
+            "birthday below the node's retained headers: starting from frontier checkpoint at daa {} (block {})",
+            ts.daa_score,
+            ts.block_hash
+        );
         Some((ts.block_hash, ts.daa_score, ts.size, ts.leaf, ts.ommers))
     }
 
@@ -4980,10 +4956,13 @@ impl AppState {
     /// tells the two apart and never lets an overshooting frontier skip the birthday's notes.
     async fn frontier_below_daa(&self, birthday: u64) -> Option<(RpcHash, u64, u64, RpcHash, Vec<RpcHash>)> {
         let req = kaspa_rpc_core::GetShieldedTreeStateRequest { block_hash: None, below_daa_score: Some(birthday) };
-        let ts = tokio::time::timeout(std::time::Duration::from_secs(30), self.request_client().await?.get_shielded_tree_state_call(None, req))
-            .await
-            .ok()?
-            .ok()?;
+        let ts = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            self.request_client().await?.get_shielded_tree_state_call(None, req),
+        )
+        .await
+        .ok()?
+        .ok()?;
         if ts.daa_score >= birthday {
             return None;
         }
@@ -4991,7 +4970,12 @@ impl AppState {
         Some((ts.block_hash, ts.daa_score, ts.size, ts.leaf, ts.ommers))
     }
 
-    async fn birthday_start(&self, from: RpcHash, birthday: u64, max_pages: u32) -> Option<(RpcHash, u64, u64, RpcHash, Vec<RpcHash>)> {
+    async fn birthday_start(
+        &self,
+        from: RpcHash,
+        birthday: u64,
+        max_pages: u32,
+    ) -> Option<(RpcHash, u64, u64, RpcHash, Vec<RpcHash>)> {
         const WALK_PAGE: u64 = 2000; // RPC MAX_LIMIT — few round-trips across the window
         let mut cursor = from;
         // The last selected-chain block seen with daa < birthday. The tree starts from
@@ -5014,7 +4998,9 @@ impl AppState {
                 }
             };
             if page.reorged {
-                log::info!("birthday walk stopped after {pages} page(s) at cursor {cursor}: node reports the cursor reorged off the selected chain");
+                log::info!(
+                    "birthday walk stopped after {pages} page(s) at cursor {cursor}: node reports the cursor reorged off the selected chain"
+                );
                 return None;
             }
             let Some(last) = page.blocks.last() else {
@@ -5213,12 +5199,11 @@ impl AppState {
                 tokio::task::spawn_blocking(move || build_fvk_index(&dir, secret.as_deref())),
             )
             .await
+                && let Some(found) = map.get(fvk)
             {
-                if let Some(found) = map.get(fvk) {
-                    candidates = found.iter().filter(|t| t.as_str() != token).cloned().collect();
-                    let mut index = self.fvk_index.lock().await;
-                    index.entry(*fvk).or_default().extend(found.iter().cloned());
-                }
+                candidates = found.iter().filter(|t| t.as_str() != token).cloned().collect();
+                let mut index = self.fvk_index.lock().await;
+                index.entry(*fvk).or_default().extend(found.iter().cloned());
             }
         }
         if candidates.is_empty() {
@@ -5251,7 +5236,7 @@ impl AppState {
                     .is_ok()
                 {
                     e.saved_scanned = e.scanned;
-            e.last_checkpoint_at = std::time::Instant::now();
+                    e.last_checkpoint_at = std::time::Instant::now();
                     e.force_checkpoint = false;
                 }
             }
@@ -5287,10 +5272,10 @@ impl AppState {
         {
             let map = self.wallets.lock().await;
             for t in &candidates {
-                if let Some(w) = map.get(t) {
-                    if let Ok(e) = w.try_lock() {
-                        best = best.max(e.scanned as u64);
-                    }
+                if let Some(w) = map.get(t)
+                    && let Ok(e) = w.try_lock()
+                {
+                    best = best.max(e.scanned as u64);
                 }
             }
         }
@@ -5391,7 +5376,10 @@ impl AppState {
             Err(_) => return None,
         };
         if ts.block_hash != cursor {
-            log::info!("wallet {token}: node cannot serve the frontier at quarantined cursor {cursor} (served {}); not restoring", ts.block_hash);
+            log::info!(
+                "wallet {token}: node cannot serve the frontier at quarantined cursor {cursor} (served {}); not restoring",
+                ts.block_hash
+            );
             return None;
         }
         let fs = kaspa_shielded_core::tree::FrontierState {
@@ -5550,14 +5538,14 @@ impl AppState {
                 // (e.g. Orbot up but the node unreachable) hangs the load forever with no
                 // error -- the wallet sits on "opening" and blocks every other load.
                 let c = self.request_client().await?;
-                let verified = match tokio::time::timeout(std::time::Duration::from_secs(8), c.get_shielded_tree_state(Some(cursor))).await
-                {
-                    Ok(r) => r,
-                    Err(_) => {
-                        log::warn!("checkpoint cursor verification timed out ({cursor}); keeping checkpoint and retrying");
-                        return None;
-                    }
-                };
+                let verified =
+                    match tokio::time::timeout(std::time::Duration::from_secs(8), c.get_shielded_tree_state(Some(cursor))).await {
+                        Ok(r) => r,
+                        Err(_) => {
+                            log::warn!("checkpoint cursor verification timed out ({cursor}); keeping checkpoint and retrying");
+                            return None;
+                        }
+                    };
                 match verified {
                     // The node serves the NEAREST checkpointed block at-or-after a cursor
                     // it holds no frontier for (below its pruning point, or still
@@ -5595,7 +5583,9 @@ impl AppState {
                                 abandoned_checkpoint = true;
                                 None
                             } else {
-                                log::warn!("cannot quarantine stale checkpoint (foreign block served); keeping checkpoint and retrying");
+                                log::warn!(
+                                    "cannot quarantine stale checkpoint (foreign block served); keeping checkpoint and retrying"
+                                );
                                 return None;
                             }
                         } else {
@@ -5725,9 +5715,7 @@ impl AppState {
             (true, Some(fvk)) => {
                 // Only worth the argon2/decrypt of adoption if a twin is >TWIN_ADOPT_LEAD
                 // blocks ahead — a small lead is cheaper to just scan than to clone.
-                self.best_twin_scanned(token, &fvk)
-                    .await
-                    .is_some_and(|twin_scanned| twin_scanned > mine_scanned + TWIN_ADOPT_LEAD)
+                self.best_twin_scanned(token, &fvk).await.is_some_and(|twin_scanned| twin_scanned > mine_scanned + TWIN_ADOPT_LEAD)
             }
             _ => false,
         };
@@ -5923,22 +5911,21 @@ async fn mempool_loop(state: Arc<AppState>) {
         };
         if ready > 0 {
             // One decode of the mempool, shared by every wallet.
-            let bundles: Vec<ShieldedBundle> =
-                match tokio::time::timeout(SYNC_RPC_TIMEOUT, async {
-                    match state.request_client().await {
-                        Some(c) => c.get_mempool_entries(false, false).await,
-                        None => Err(kaspa_rpc_core::RpcError::General("node unavailable".into())),
-                    }
-                })
-                .await
-                {
-                    Ok(Ok(entries)) => entries
-                        .iter()
-                        .filter(|e| e.transaction.version == TX_VERSION_SHIELDED)
-                        .filter_map(|e| ShieldedBundle::from_bytes(&e.transaction.payload).ok())
-                        .collect(),
-                    _ => Vec::new(), // node hiccup: no preview this tick, never a stall
-                };
+            let bundles: Vec<ShieldedBundle> = match tokio::time::timeout(SYNC_RPC_TIMEOUT, async {
+                match state.request_client().await {
+                    Some(c) => c.get_mempool_entries(false, false).await,
+                    None => Err(kaspa_rpc_core::RpcError::General("node unavailable".into())),
+                }
+            })
+            .await
+            {
+                Ok(Ok(entries)) => entries
+                    .iter()
+                    .filter(|e| e.transaction.version == TX_VERSION_SHIELDED)
+                    .filter_map(|e| ShieldedBundle::from_bytes(&e.transaction.payload).ok())
+                    .collect(),
+                _ => Vec::new(), // node hiccup: no preview this tick, never a stall
+            };
             // Log only on change — this loop runs sub-second. Without this line there is no
             // way to tell "the mempool preview is working and the tx simply isn't there yet"
             // apart from "the mempool preview is silently broken", which is exactly the hole
@@ -6126,8 +6113,18 @@ async fn sync_one_wallet(state: Arc<AppState>, token: String, w: Wallet, chain_l
     let mut was_caught_up = was_caught_up;
     let mut chain_tree_pages = 0usize;
     loop {
-        e.sync_chunk(&sync_client, &state.page_cache, &state.warm_gate, &state, &token, was_caught_up, state.resources.subtree_free_floor_mb, shared_tree_covers, shared_tree_base)
-            .await;
+        e.sync_chunk(
+            &sync_client,
+            &state.page_cache,
+            &state.warm_gate,
+            &state,
+            &token,
+            was_caught_up,
+            state.resources.subtree_free_floor_mb,
+            shared_tree_covers,
+            shared_tree_base,
+        )
+        .await;
         let behind_by = chain_len.saturating_sub(e.scanned as u64);
         if token == CHAIN_TREE_TOKEN {
             chain_tree_pages += 1;
@@ -6170,10 +6167,10 @@ async fn sync_one_wallet(state: Arc<AppState>, token: String, w: Wallet, chain_l
     // Re-peeked after the chunk rather than reused from before it: both trees moved.
     if !e.db.tree_is_valid() {
         let fs = state.chain_tree_frontier.lock().await.clone();
-        if let Some(fs) = fs {
-            if e.db.adopt_tip_frontier(&fs) {
-                log::debug!("wallet adopted the shared tree's frontier at {} leaves", fs.size);
-            }
+        if let Some(fs) = fs
+            && e.db.adopt_tip_frontier(&fs)
+        {
+            log::debug!("wallet adopted the shared tree's frontier at {} leaves", fs.size);
         }
     }
 
@@ -6373,10 +6370,7 @@ async fn sync_one_wallet(state: Arc<AppState>, token: String, w: Wallet, chain_l
     // the write is in flight is not lost; a failed write hands it back.
     let pending_checkpoint = if e.error.is_none() && (due_by_blocks || (just_caught_up && advanced > 0) || force || overdue) {
         e.force_checkpoint = false;
-        Some((
-            checkpoint_bytes(&e.genesis, &e.low, e.scanned as u64, &e.db, &e.boundaries, e.sink_blue, e.blind_below),
-            e.scanned,
-        ))
+        Some((checkpoint_bytes(&e.genesis, &e.low, e.scanned as u64, &e.db, &e.boundaries, e.sink_blue, e.blind_below), e.scanned))
     } else {
         None
     };
@@ -6522,8 +6516,9 @@ async fn evict_idle_wallets(state: &Arc<AppState>) {
             // Flush a dirty victim so eviction is free of rescan cost. A wallet in an
             // error state is evicted as-is — its checkpoint already lagged and the
             // reload path re-derives whatever it can.
-            if e.error.is_none() && e.saved_scanned != e.scanned {
-                if save_checkpoint(
+            if e.error.is_none()
+                && e.saved_scanned != e.scanned
+                && save_checkpoint(
                     &state.wallet_dir,
                     &token,
                     &e.genesis,
@@ -6535,11 +6530,10 @@ async fn evict_idle_wallets(state: &Arc<AppState>) {
                     e.blind_below,
                 )
                 .is_ok()
-                {
-                    e.saved_scanned = e.scanned;
-            e.last_checkpoint_at = std::time::Instant::now();
-                    e.force_checkpoint = false;
-                }
+            {
+                e.saved_scanned = e.scanned;
+                e.last_checkpoint_at = std::time::Instant::now();
+                e.force_checkpoint = false;
             }
         }
         // Remove only if the map still holds THIS instance (a retire/reload racing the
@@ -6590,11 +6584,7 @@ async fn prune_token_bookkeeping(state: &Arc<AppState>) {
     // than inventing a second one that could drift from it.
     let window = std::time::Duration::from_secs(state.resources.active_sync_secs);
     let now = std::time::Instant::now();
-    state
-        .last_touch
-        .lock()
-        .await
-        .retain(|token, at| keep_touch(now.duration_since(*at), window, resident.contains(token)));
+    state.last_touch.lock().await.retain(|token, at| keep_touch(now.duration_since(*at), window, resident.contains(token)));
     state.snapshots.lock().await.retain(|token, _| resident.contains(token));
 }
 
@@ -6615,7 +6605,9 @@ async fn sync_loop(state: Arc<AppState>) {
     let tip_slots = sync_concurrency(&state.resources).saturating_sub(cold_slots).max(1);
     let sync_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(tip_slots));
     let cold_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(cold_slots));
-    log::info!("sync lanes: {tip_slots} tip slot(s) + {cold_slots} cold slot(s) (cold = at least {CATCHUP_BURST_MIN_BEHIND} DAA behind)");
+    log::info!(
+        "sync lanes: {tip_slots} tip slot(s) + {cold_slots} cold slot(s) (cold = at least {CATCHUP_BURST_MIN_BEHIND} DAA behind)"
+    );
     // On a SINGLE-wallet daemon, stand the scan down while a payment is proving.
     //
     // Every other background job already does this — cache builds, consolidation, the
@@ -6796,9 +6788,7 @@ async fn sync_loop(state: Arc<AppState>) {
                     && behind.get(&token).is_some_and(|b| *b >= CATCHUP_BURST_MIN_BEHIND);
                 let sem = if cold { cold_sem.clone() } else { sync_sem.clone() };
                 let Some(guard) = InPassGuard::claim(&state, &token) else { continue };
-                let Ok(Ok(permit)) =
-                    tokio::time::timeout(PERMIT_WAIT, sem.clone().acquire_owned()).await
-                else {
+                let Ok(Ok(permit)) = tokio::time::timeout(PERMIT_WAIT, sem.clone().acquire_owned()).await else {
                     // Every slot is busy. Skip this wallet for now — `guard` drops here and
                     // frees the claim, so the next lap picks it up.
                     continue;
@@ -6856,10 +6846,7 @@ async fn sync_loop(state: Arc<AppState>) {
             // (same `Arc`, so `state.chain_tree` follows) and let it rescan; its
             // checkpoint has already been retired to .bak by the retire path.
             if reorged_tokens.iter().any(|t| t == CHAIN_TREE_TOKEN) {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 let last = CHAIN_TREE_LAST_RESET.load(std::sync::atomic::Ordering::Relaxed);
                 if now.saturating_sub(last) >= CHAIN_TREE_RESET_MIN_INTERVAL {
                     // First reset (or the first after the back-off window): a real reorg
@@ -7274,29 +7261,25 @@ async fn load_new_wallet(
     // Same-wallet-on-another-device fast path (see wallet_watch): a re-imported seed
     // whose viewing key some other token already scanned resumes from that
     // checkpoint instead of rescanning history the daemon already walked.
-    if adopt_twin {
-        if let Some(fvk) = key.fvk_bytes() {
-            // A freshly written seed wallet starts with history OFF (save_seed), so any twin qualifies.
-            if let Some((donor, keep_birthday)) = state.adopt_twin(token, &fvk, birthday, false).await {
-                if keep_birthday != birthday {
-                    save_seed(&state.wallet_dir, token, &state.network, &seed, keep_birthday, state.wallet_secret.as_deref())
-                        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write wallet file: {e}")))?;
-                }
-                state.wallets.lock().await.remove(token);
-                if state.get_wallet(token).await.is_some() {
-                    state.index_fvk(token, &key).await;
-                    log::info!(
-                        "imported wallet for token {token}: adopted checkpoint from twin token {donor} (birthday {keep_birthday})"
-                    );
-                    return Ok(());
-                }
-                // The clone failed to load — fall back to the honest scan from the
-                // REQUESTED birthday (restore it if the adoption lowered it).
-                let _ = std::fs::remove_file(scan_path(&state.wallet_dir, token));
-                if keep_birthday != birthday {
-                    save_seed(&state.wallet_dir, token, &state.network, &seed, birthday, state.wallet_secret.as_deref())
-                        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write wallet file: {e}")))?;
-                }
+    if adopt_twin && let Some(fvk) = key.fvk_bytes() {
+        // A freshly written seed wallet starts with history OFF (save_seed), so any twin qualifies.
+        if let Some((donor, keep_birthday)) = state.adopt_twin(token, &fvk, birthday, false).await {
+            if keep_birthday != birthday {
+                save_seed(&state.wallet_dir, token, &state.network, &seed, keep_birthday, state.wallet_secret.as_deref())
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write wallet file: {e}")))?;
+            }
+            state.wallets.lock().await.remove(token);
+            if state.get_wallet(token).await.is_some() {
+                state.index_fvk(token, &key).await;
+                log::info!("imported wallet for token {token}: adopted checkpoint from twin token {donor} (birthday {keep_birthday})");
+                return Ok(());
+            }
+            // The clone failed to load — fall back to the honest scan from the
+            // REQUESTED birthday (restore it if the adoption lowered it).
+            let _ = std::fs::remove_file(scan_path(&state.wallet_dir, token));
+            if keep_birthday != birthday {
+                save_seed(&state.wallet_dir, token, &state.network, &seed, birthday, state.wallet_secret.as_deref())
+                    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to write wallet file: {e}")))?;
             }
         }
     }
@@ -7547,7 +7530,11 @@ async fn wallet_balance(
             .map(|n| NoteInfo {
                 position: n.position,
                 value: n.value(),
-                recipient: String::from(&Address::new(state.prefix, Version::ShieldedOrchard, &n.note.recipient().to_raw_address_bytes())),
+                recipient: String::from(&Address::new(
+                    state.prefix,
+                    Version::ShieldedOrchard,
+                    &n.note.recipient().to_raw_address_bytes(),
+                )),
             })
             .collect()
     });
@@ -7660,13 +7647,12 @@ async fn wallet_proof(
     let w = state.get_wallet(&token).await.ok_or_else(|| err(StatusCode::NOT_FOUND, "no wallet loaded"))?;
     let (daa, ovk, mine) = {
         let e = w.lock().await;
-        let row = e
-            .db
-            .history()
-            .iter()
-            .rev()
-            .find(|h| h.kind == HistoryKind::Sent && h.txid == txid)
-            .ok_or_else(|| err(StatusCode::NOT_FOUND, "this wallet has no send with that transaction id"))?;
+        let row =
+            e.db.history()
+                .iter()
+                .rev()
+                .find(|h| h.kind == HistoryKind::Sent && h.txid == txid)
+                .ok_or_else(|| err(StatusCode::NOT_FOUND, "this wallet has no send with that transaction id"))?;
         (row.daa_score, e.db.ovk(), e.db.my_address_bytes())
     };
     let client = state.request_client().await.ok_or_else(|| err(StatusCode::BAD_GATEWAY, "node unreachable"))?;
@@ -7862,11 +7848,11 @@ async fn wallet_settings(
         wf.recoverable_history = HISTORY_ALWAYS_ON;
         dirty = true;
     }
-    if let Some(v) = req.private_sends {
-        if wf.private_sends != v {
-            wf.private_sends = v;
-            dirty = true;
-        }
+    if let Some(v) = req.private_sends
+        && wf.private_sends != v
+    {
+        wf.private_sends = v;
+        dirty = true;
     }
     if dirty {
         write_wallet_file(&state.wallet_dir, &token, &wf)
@@ -7934,9 +7920,9 @@ async fn wallet_scan_receipt_export(
     // stream to rebuild one from. Top them up first; the export refuses if they still lag.
     tokio::task::block_in_place(|| e.advance_spend_witnesses_bounded(shared_covers, shared_base));
     let scanned = e.scanned as u64;
-    let bytes = e.db.to_scan_receipt(state.genesis.as_bytes(), scanned).map_err(|why| {
-        err(StatusCode::CONFLICT, format!("this wallet cannot be exported as a receipt yet: {why}"))
-    })?;
+    let bytes =
+        e.db.to_scan_receipt(state.genesis.as_bytes(), scanned)
+            .map_err(|why| err(StatusCode::CONFLICT, format!("this wallet cannot be exported as a receipt yet: {why}")))?;
     let notes = e.db.notes().len();
     let anchor = e.db.size();
     drop(e);
@@ -7970,7 +7956,7 @@ async fn wallet_scan_receipt_import(
     // CPU-bound and the node call below must never happen under the entry lock.
     let (key, was_scanned) = {
         let e = w.lock().await;
-        (e.key.clone(), e.scanned)
+        (e.key, e.scanned)
     };
     let genesis = state.genesis.as_bytes();
     let parsed = tokio::task::block_in_place(|| match &key {
@@ -8349,7 +8335,10 @@ async fn wallet_send(
     // byte-proportional minimum for however many notes that chunk spends.
     let fee = req.fee.unwrap_or(DEFAULT_FEE_SOMPI);
 
-let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
+    let client = state
+        .request_client()
+        .await
+        .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
     let client = &client;
     // The shielded sighash network domain: the GENESIS hash — what consensus
     // verifies signatures against (`params.genesis.hash`). The moving pruning
@@ -8388,7 +8377,8 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
     // slack` blue units below the sink — a matured, canonical chain-block root
     // consensus accepts (`is_shielded_anchor_final`; maturity is measured in blue
     // score). The entry lock is held only for selection + witness building.
-    let mut planned: Option<(Vec<(Vec<_>, u64, Vec<u64>, u64)>, u64, bool, u64)> = None;
+    type PlannedChunk = (Vec<(kaspa_shielded_core::Note, kaspa_shielded_core::MerklePath)>, u64, Vec<u64>, u64);
+    let mut planned: Option<(Vec<PlannedChunk>, u64, bool, u64)> = None;
     // A first send may need the wallet's subtree cache built: do that OFF the lock, on
     // every core, before taking it — see `build_send_cache_off_lock`.
     build_send_cache_off_lock(&state, &token, &w).await;
@@ -8404,7 +8394,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
         let cutoff_blue = e.sink_blue.saturating_sub(DEFAULT_ANCHOR_DEPTH + ANCHOR_SLACK);
         if let Some(matured) = e.boundaries.iter().rev().find(|(bs, _)| *bs <= cutoff_blue).map(|&(_, lc)| lc) {
             let (mut candidates, stranded_value) = matured_candidates(&e.db, matured);
-            candidates.sort_by(|a, b| b.value().cmp(&a.value()));
+            candidates.sort_by_key(|n| std::cmp::Reverse(n.value()));
             let values: Vec<u64> = candidates.iter().map(|n| n.value()).collect();
             let have: u64 = values.iter().sum();
             match plan_chunks(&values, amount, fee, max_per_tx) {
@@ -8429,7 +8419,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
                                 None => tokio::task::block_in_place(|| e.db.witness_path_at(note.position, matured))
                                     .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?,
                             };
-                            inputs.push((note.note.clone(), path));
+                            inputs.push((note.note, path));
                             positions.push(note.position);
                         }
                         idx += n_notes;
@@ -8455,7 +8445,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
             let fresh = WalletDb::from_seed(seed).ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "bad seed"))?;
             let db = replay_matured(client, state.genesis, fresh).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
             let mut candidates = db.notes().to_vec();
-            candidates.sort_by(|a, b| b.value().cmp(&a.value()));
+            candidates.sort_by_key(|n| std::cmp::Reverse(n.value()));
             let values: Vec<u64> = candidates.iter().map(|n| n.value()).collect();
             let have: u64 = values.iter().sum();
             let plan = plan_chunks(&values, amount, fee, max_per_tx).ok_or_else(|| insufficient(have, 0))?;
@@ -8477,7 +8467,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
                             .witness_path(note.position)
                             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?,
                     };
-                    inputs.push((note.note.clone(), path));
+                    inputs.push((note.note, path));
                     positions.push(note.position);
                 }
                 idx += n_notes;
@@ -8489,17 +8479,17 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
 
     // The whole plan's fee, known before any proving starts.
     let planned_fee: u64 = chunks.iter().map(|c| c.3).sum();
-    if let Some(cap) = req.max_total_fee {
-        if planned_fee > cap {
-            return Err(err(
-                StatusCode::CONFLICT,
-                format!(
-                    "this send needs {} transactions and would pay {planned_fee} sompi in fees, over the {cap} sompi ceiling; \
+    if let Some(cap) = req.max_total_fee
+        && planned_fee > cap
+    {
+        return Err(err(
+            StatusCode::CONFLICT,
+            format!(
+                "this send needs {} transactions and would pay {planned_fee} sompi in fees, over the {cap} sompi ceiling; \
                      consolidate first or raise max_total_fee",
-                    chunks.len()
-                ),
-            ));
-        }
+                chunks.len()
+            ),
+        ));
     }
 
     // Prove + submit each chunk sequentially. Proving runs on a blocking thread so
@@ -8737,9 +8727,13 @@ async fn wallet_send_many(
         None => DEFAULT_FEE_SOMPI,
     };
     let per_tx = max_payees_per_tx();
-    let groups: Vec<Vec<([u8; 43], u64, [u8; 512])>> = resolved.chunks(per_tx).map(|c| c.to_vec()).collect();
+    type PayoutGroup = ([u8; 43], u64, [u8; 512]);
+    let groups: Vec<Vec<PayoutGroup>> = resolved.chunks(per_tx).map(|c| c.to_vec()).collect();
     let net: [u8; 32] = state.genesis.as_bytes();
-let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
+    let client = state
+        .request_client()
+        .await
+        .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
     let client = &client;
 
     // Select notes and build witnesses for EVERY group under one lock, so no note is
@@ -8760,7 +8754,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
         tokio::task::block_in_place(|| e.advance_spend_witnesses_bounded(shared_covers, shared_base));
         let matured = e.matured_leaves().ok_or_else(|| err(StatusCode::CONFLICT, "wallet has no matured anchor yet"))?;
         let (mut candidates, stranded) = matured_candidates(&e.db, matured);
-        candidates.sort_by(|a, b| b.value().cmp(&a.value()));
+        candidates.sort_by_key(|n| std::cmp::Reverse(n.value()));
         let have: u64 = candidates.iter().map(|n| n.value()).sum();
 
         // Walk the groups, consuming value-descending notes as each is covered. The
@@ -8820,7 +8814,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
                     None => tokio::task::block_in_place(|| e.db.witness_path_at(note.position, matured))
                         .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?,
                 };
-                inputs.push((note.note.clone(), path));
+                inputs.push((note.note, path));
                 positions.push(note.position);
             }
             batches.push(Batch { payees: groups[gi].clone(), inputs, positions, fee });
@@ -9060,7 +9054,7 @@ async fn consolidate_once(
                 None => tokio::task::block_in_place(|| e.db.witness_path_at(n.position, matured))
                     .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?,
             };
-            inputs.push((n.note.clone(), path));
+            inputs.push((n.note, path));
             positions.push(n.position);
         }
         (inputs, positions, sum, fee)
@@ -9079,10 +9073,9 @@ async fn consolidate_once(
     .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, format!("failed to build consolidation: {e:?}")))?;
 
     let tx: Transaction = payment_tx(payload);
-    let node = state
-        .request_client()
-        .await
-        .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node to broadcast; nothing was sent"))?;
+    let node = state.request_client().await.ok_or_else(|| {
+        err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node to broadcast; nothing was sent")
+    })?;
     match node.submit_transaction(RpcTransaction::from(&tx), false).await {
         Ok(accepted) => {
             let mut e = w.lock().await;
@@ -9297,7 +9290,10 @@ async fn wallet_prepare(
     };
     let mut fee = chunk_fee(base_fee, 1);
 
-let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
+    let client = state
+        .request_client()
+        .await
+        .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node right now; retry shortly"))?;
     let client = &client;
     let net: [u8; 32] = state.genesis.as_bytes();
 
@@ -9325,115 +9321,115 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
     // wallet to record against.
     let mut spent_positions: Vec<u64> = Vec::new();
     let mut session_token: Option<String> = None;
-    if let Ok(token) = token_from(&headers, state.allow_default_token) {
-        if let Some(w) = state.get_wallet(&token).await {
-            ensure_canonical_checkpoint(&state, &w).await?;
-            // A first send may need this wallet's subtree cache built: do it OFF the
-            // lock, on every core, before taking the lock below — the hour-long,
-            // single-core, silent inline build was the "sent a tx, walletd pinned a core
-            // for an hour" report. Only for the wallet this request is actually about.
-            if w.lock().await.db.fvk().to_bytes() == fvk_bytes {
-                build_send_cache_off_lock(&state, &token, &w).await;
+    if let Ok(token) = token_from(&headers, state.allow_default_token)
+        && let Some(w) = state.get_wallet(&token).await
+    {
+        ensure_canonical_checkpoint(&state, &w).await?;
+        // A first send may need this wallet's subtree cache built: do it OFF the
+        // lock, on every core, before taking the lock below — the hour-long,
+        // single-core, silent inline build was the "sent a tx, walletd pinned a core
+        // for an hour" report. Only for the wallet this request is actually about.
+        if w.lock().await.db.fvk().to_bytes() == fvk_bytes {
+            build_send_cache_off_lock(&state, &token, &w).await;
+        }
+        let mut e = w.lock().await;
+        if e.db.fvk().to_bytes() == fvk_bytes {
+            // Gate on a matured anchor being available + no in-progress reorg repair,
+            // not on scanned-vs-tip — see the note in `wallet_send`. A note-heavy or
+            // busy wallet legitimately trails the live tip while every note it would
+            // spend is already matured and spendable.
+            if e.reorged_strikes > 0 {
+                return Err(err(StatusCode::CONFLICT, "wallet checkpoint is being repaired after a reorg; retry shortly"));
             }
-            let mut e = w.lock().await;
-            if e.db.fvk().to_bytes() == fvk_bytes {
-                // Gate on a matured anchor being available + no in-progress reorg repair,
-                // not on scanned-vs-tip — see the note in `wallet_send`. A note-heavy or
-                // busy wallet legitimately trails the live tip while every note it would
-                // spend is already matured and spendable.
-                if e.reorged_strikes > 0 {
-                    return Err(err(StatusCode::CONFLICT, "wallet checkpoint is being repaired after a reorg; retry shortly"));
+            if e.matured_leaves().is_none() {
+                return Err(err(
+                    StatusCode::CONFLICT,
+                    format!("wallet has not established a matured anchor yet (scanned DAA {}); wait for initial sync", e.scanned),
+                ));
+            }
+            let matured_leaves = e.matured_leaves().unwrap_or(0);
+            let warm_before = e.db.witnessed_upto();
+            let climb = matured_leaves.saturating_sub(warm_before);
+            let t_w = std::time::Instant::now();
+            // Bounded + block_in_place: the uncapped inline climb here is what froze
+            // the whole daemon for ~50 min on 2026-07-17 (3,304-note wallet).
+            // The shared tree's reach decides whether this wallet must climb at all.
+            let shared_covers = state.chain_tree_size.load(std::sync::atomic::Ordering::Relaxed);
+            let shared_base = state.chain_tree_base.load(std::sync::atomic::Ordering::Relaxed);
+            tokio::task::block_in_place(|| e.advance_spend_witnesses_bounded(shared_covers, shared_base));
+            log::info!(
+                "prepare: witness advance took {:.1?} (notes={}, base_size={}, witnessed_upto {}→{} of matured {}, climbed {} leaves; {} at send time)",
+                t_w.elapsed(),
+                e.db.notes().len(),
+                e.db.base_size(),
+                warm_before,
+                e.db.witnessed_upto(),
+                matured_leaves,
+                climb,
+                if climb == 0 { "WARM — background pre-advance kept up" } else { "COLD — witnesses were behind" },
+            );
+            let cutoff_blue = e.sink_blue.saturating_sub(DEFAULT_ANCHOR_DEPTH + ANCHOR_SLACK);
+            if let Some(matured) = e.boundaries.iter().rev().find(|(bs, _)| *bs <= cutoff_blue).map(|&(_, lc)| lc) {
+                let (mut candidates, _stranded) = matured_candidates(&e.db, matured);
+                candidates.sort_by_key(|n| std::cmp::Reverse(n.value()));
+                have_total = Some(candidates.iter().map(|n| n.value()).sum());
+                fast_path = true;
+                let values: Vec<u64> = candidates.iter().map(|n| n.value()).collect();
+                let (mut take, mut dyn_fee) = select_spend_count(&values, amount, base_fee, max_per_tx);
+                // Size a SELF-payment's round to the fee the caller held back.
+                //
+                // Identical to the slow path below, and it belongs here far more: the
+                // slow path serves untracked FVK-only callers, while every wallet the
+                // hosted daemon actually tracks — which is every wallet that presses
+                // Consolidate in the app — arrives HERE. Landing the fix on one branch
+                // meant shipping it to nobody, and the same "insufficient matured funds"
+                // reports kept coming in against a daemon that supposedly fixed them.
+                //
+                // Fee scales with note count, so merging fewer notes both fits the
+                // caller's reserve and stays under the signing ceiling older builds
+                // enforce. A caller that reserves properly is untouched.
+                if self_payment {
+                    let budget = have_total.unwrap_or(0).saturating_sub(amount);
+                    while take > 2 && dyn_fee > budget {
+                        take -= 1;
+                        dyn_fee = chunk_fee(base_fee, take);
+                    }
                 }
-                if e.matured_leaves().is_none() {
-                    return Err(err(
-                        StatusCode::CONFLICT,
-                        format!("wallet has not established a matured anchor yet (scanned DAA {}); wait for initial sync", e.scanned),
-                    ));
-                }
-                let matured_leaves = e.matured_leaves().unwrap_or(0);
-                let warm_before = e.db.witnessed_upto();
-                let climb = matured_leaves.saturating_sub(warm_before);
-                let t_w = std::time::Instant::now();
-                // Bounded + block_in_place: the uncapped inline climb here is what froze
-                // the whole daemon for ~50 min on 2026-07-17 (3,304-note wallet).
-                // The shared tree's reach decides whether this wallet must climb at all.
-                let shared_covers = state.chain_tree_size.load(std::sync::atomic::Ordering::Relaxed);
-                let shared_base = state.chain_tree_base.load(std::sync::atomic::Ordering::Relaxed);
-                tokio::task::block_in_place(|| e.advance_spend_witnesses_bounded(shared_covers, shared_base));
+                let take = take;
+                fee = dyn_fee;
+                need = amount.saturating_add(fee);
+                // Build every selected note's witness in ONE base→matured pass
+                // (O(chain + N·depth)) instead of N independent O(chain) replays —
+                // the difference between ~one pass and N × ~26 s on a note-heavy
+                // wallet. Any note the batch declines (warm-miss edge / out of window)
+                // falls back to the exact per-note rebuild, so this is never wrong.
+                let selected_notes: Vec<_> = candidates.iter().take(take).cloned().collect();
+                let positions: Vec<u64> = selected_notes.iter().map(|n| n.position).collect();
+                let t_b = std::time::Instant::now();
+                let paths = tokio::task::block_in_place(|| state.batch_witness_paths(&e.db, &positions, matured));
+                let batched = paths.iter().filter(|p| p.is_some()).count();
                 log::info!(
-                    "prepare: witness advance took {:.1?} (notes={}, base_size={}, witnessed_upto {}→{} of matured {}, climbed {} leaves; {} at send time)",
-                    t_w.elapsed(),
-                    e.db.notes().len(),
-                    e.db.base_size(),
-                    warm_before,
-                    e.db.witnessed_upto(),
-                    matured_leaves,
-                    climb,
-                    if climb == 0 { "WARM — background pre-advance kept up" } else { "COLD — witnesses were behind" },
+                    "prepare: batch-witnessed {}/{} notes in {:.1?} (rest rebuild individually)",
+                    batched,
+                    positions.len(),
+                    t_b.elapsed(),
                 );
-                let cutoff_blue = e.sink_blue.saturating_sub(DEFAULT_ANCHOR_DEPTH + ANCHOR_SLACK);
-                if let Some(matured) = e.boundaries.iter().rev().find(|(bs, _)| *bs <= cutoff_blue).map(|&(_, lc)| lc) {
-                    let (mut candidates, _stranded) = matured_candidates(&e.db, matured);
-                    candidates.sort_by(|a, b| b.value().cmp(&a.value()));
-                    have_total = Some(candidates.iter().map(|n| n.value()).sum());
-                    fast_path = true;
-                    let values: Vec<u64> = candidates.iter().map(|n| n.value()).collect();
-                    let (mut take, mut dyn_fee) = select_spend_count(&values, amount, base_fee, max_per_tx);
-                    // Size a SELF-payment's round to the fee the caller held back.
-                    //
-                    // Identical to the slow path below, and it belongs here far more: the
-                    // slow path serves untracked FVK-only callers, while every wallet the
-                    // hosted daemon actually tracks — which is every wallet that presses
-                    // Consolidate in the app — arrives HERE. Landing the fix on one branch
-                    // meant shipping it to nobody, and the same "insufficient matured funds"
-                    // reports kept coming in against a daemon that supposedly fixed them.
-                    //
-                    // Fee scales with note count, so merging fewer notes both fits the
-                    // caller's reserve and stays under the signing ceiling older builds
-                    // enforce. A caller that reserves properly is untouched.
-                    if self_payment {
-                        let budget = have_total.unwrap_or(0).saturating_sub(amount);
-                        while take > 2 && dyn_fee > budget {
-                            take -= 1;
-                            dyn_fee = chunk_fee(base_fee, take);
+                for (i, n) in selected_notes.iter().enumerate() {
+                    let path = match paths[i].clone() {
+                        Some(p) => p,
+                        None => {
+                            let t_p = std::time::Instant::now();
+                            let p = tokio::task::block_in_place(|| e.db.witness_path_at(n.position, matured))
+                                .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?;
+                            log::info!("prepare: fallback witness_path_at(note@{}) took {:.1?}", n.position, t_p.elapsed());
+                            p
                         }
-                    }
-                    let take = take;
-                    fee = dyn_fee;
-                    need = amount.saturating_add(fee);
-                    // Build every selected note's witness in ONE base→matured pass
-                    // (O(chain + N·depth)) instead of N independent O(chain) replays —
-                    // the difference between ~one pass and N × ~26 s on a note-heavy
-                    // wallet. Any note the batch declines (warm-miss edge / out of window)
-                    // falls back to the exact per-note rebuild, so this is never wrong.
-                    let selected_notes: Vec<_> = candidates.iter().take(take).cloned().collect();
-                    let positions: Vec<u64> = selected_notes.iter().map(|n| n.position).collect();
-                    let t_b = std::time::Instant::now();
-                    let paths = tokio::task::block_in_place(|| state.batch_witness_paths(&e.db, &positions, matured));
-                    let batched = paths.iter().filter(|p| p.is_some()).count();
-                    log::info!(
-                        "prepare: batch-witnessed {}/{} notes in {:.1?} (rest rebuild individually)",
-                        batched,
-                        positions.len(),
-                        t_b.elapsed(),
-                    );
-                    for (i, n) in selected_notes.iter().enumerate() {
-                        let path = match paths[i].clone() {
-                            Some(p) => p,
-                            None => {
-                                let t_p = std::time::Instant::now();
-                                let p = tokio::task::block_in_place(|| e.db.witness_path_at(n.position, matured))
-                                    .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?;
-                                log::info!("prepare: fallback witness_path_at(note@{}) took {:.1?}", n.position, t_p.elapsed());
-                                p
-                            }
-                        };
-                        inputs.push((n.note.clone(), path));
-                        spent_positions.push(n.position);
-                        selected += n.value();
-                    }
-                    session_token = Some(token.clone());
+                    };
+                    inputs.push((n.note, path));
+                    spent_positions.push(n.position);
+                    selected += n.value();
                 }
+                session_token = Some(token.clone());
             }
         }
     }
@@ -9447,7 +9443,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
         log::info!("non-custodial prepare: watch-only matured chain replay...");
         let db = replay_matured(client, state.genesis, db).await.map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
         let mut candidates = db.notes().to_vec();
-        candidates.sort_by(|a, b| b.value().cmp(&a.value()));
+        candidates.sort_by_key(|n| std::cmp::Reverse(n.value()));
         have_total = Some(candidates.iter().map(|n| n.value()).sum());
         let values: Vec<u64> = candidates.iter().map(|n| n.value()).collect();
         let (mut take, mut dyn_fee) = select_spend_count(&values, amount, base_fee, max_per_tx);
@@ -9482,7 +9478,7 @@ let client = state.request_client().await.ok_or_else(|| err(StatusCode::SERVICE_
             let path = db
                 .witness_path(n.position)
                 .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "matured note has no witness path"))?;
-            inputs.push((n.note.clone(), path));
+            inputs.push((n.note, path));
             selected += n.value();
         }
     }
@@ -9814,10 +9810,9 @@ async fn wallet_submit(
         )
     })?;
     let tx: Transaction = payment_tx(bundle.to_bytes());
-    let node = state
-        .request_client()
-        .await
-        .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node to broadcast; nothing was sent"))?;
+    let node = state.request_client().await.ok_or_else(|| {
+        err(StatusCode::SERVICE_UNAVAILABLE, "the wallet service cannot reach its node to broadcast; nothing was sent")
+    })?;
     match node.submit_transaction(RpcTransaction::from(&tx), false).await {
         Ok(accepted) => {
             // The node has the transaction: park the notes it spends so they leave the
@@ -9826,25 +9821,25 @@ async fn wallet_submit(
             // safe — `reclaim_expired` returns the notes if the transaction never lands.
             // Skipping this is what let a second send inside that window re-select the
             // same notes and build a transaction consensus drops as a double-spend.
-            if let Some(token) = token {
-                if let Some(w) = state.get_wallet(&token).await {
-                    let mut e = w.lock().await;
-                    let now_daa = e.scanned as u64;
-                    for p in &positions {
-                        e.db.mark_spent(*p, accepted.as_bytes(), now_daa);
-                    }
-                    // The parked notes are worth more than amount + fee: the rest is
-                    // CHANGE, and until the block carrying it is previewed nothing else
-                    // in the status carries it — a one-note wallet read "0" for the
-                    // 1-3 s in between. Record the outflow now (the only moment the
-                    // daemon holds amount, fee and the parked notes together) and drop
-                    // cached mempool previews so one taken before the park (classified
-                    // as `outgoing = amount + fee`) is re-derived on the next tick
-                    // instead of stacking on top of the already-reduced balance.
-                    e.db.note_pending_outflow(accepted.as_bytes(), amount.saturating_add(fee));
-                    e.forget_stale_outflow_previews();
-                    log::info!("submit: parked {} spent note(s) for tx {}", positions.len(), accepted);
+            if let Some(token) = token
+                && let Some(w) = state.get_wallet(&token).await
+            {
+                let mut e = w.lock().await;
+                let now_daa = e.scanned as u64;
+                for p in &positions {
+                    e.db.mark_spent(*p, accepted.as_bytes(), now_daa);
                 }
+                // The parked notes are worth more than amount + fee: the rest is
+                // CHANGE, and until the block carrying it is previewed nothing else
+                // in the status carries it — a one-note wallet read "0" for the
+                // 1-3 s in between. Record the outflow now (the only moment the
+                // daemon holds amount, fee and the parked notes together) and drop
+                // cached mempool previews so one taken before the park (classified
+                // as `outgoing = amount + fee`) is re-derived on the next tick
+                // instead of stacking on top of the already-reduced balance.
+                e.db.note_pending_outflow(accepted.as_bytes(), amount.saturating_add(fee));
+                e.forget_stale_outflow_previews();
+                log::info!("submit: parked {} spent note(s) for tx {}", positions.len(), accepted);
             }
             let txid = accepted.to_string();
             Ok(Json(SendResp {
@@ -10114,7 +10109,9 @@ async fn warm_chain_tree(
                         t.elapsed()
                     );
                 } else {
-                    log::warn!("admin warm_chain_tree: shared tree subtree-cache did not install (stream moved under it); call again to retry");
+                    log::warn!(
+                        "admin warm_chain_tree: shared tree subtree-cache did not install (stream moved under it); call again to retry"
+                    );
                 }
             });
             (false, "started")
@@ -10152,10 +10149,8 @@ async fn warm_wallet(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     let token = token_from(&headers, state.allow_default_token)?;
-    let w = state
-        .get_wallet(&token)
-        .await
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "wallet is not loaded; open it first, then retry"))?;
+    let w =
+        state.get_wallet(&token).await.ok_or_else(|| err(StatusCode::NOT_FOUND, "wallet is not loaded; open it first, then retry"))?;
     let started = std::time::Instant::now();
     let (ready, matured, notes) = {
         let mut e = w.lock().await;
@@ -10231,13 +10226,8 @@ async fn wallet_warm(
 /// worked through them in ALPHABETICAL order — somebody who was here five minutes ago
 /// waited behind a wallet last seen in June, which is the opposite of what the sweep is
 /// for.
-const WARM_TIERS: [(&str, u64); 5] = [
-    ("hot", 60 * 60),
-    ("recent", 24 * 60 * 60),
-    ("week", 7 * 24 * 60 * 60),
-    ("month", 30 * 24 * 60 * 60),
-    ("dormant", u64::MAX),
-];
+const WARM_TIERS: [(&str, u64); 5] =
+    [("hot", 60 * 60), ("recent", 24 * 60 * 60), ("week", 7 * 24 * 60 * 60), ("month", 30 * 24 * 60 * 60), ("dormant", u64::MAX)];
 
 /// Share of `--warm-budget` each tier may spend. The hot tier is unbounded on purpose:
 /// those wallets have an owner watching right now, and making them wait for a quiet box
@@ -10365,10 +10355,7 @@ fn snapshot_path(dir: &str) -> String {
 }
 
 fn load_snaps(dir: &str) -> HashMap<String, StatusSnap> {
-    std::fs::read_to_string(snapshot_path(dir))
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default()
+    std::fs::read_to_string(snapshot_path(dir)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
 /// Temp + rename: a half-written file that survived a crash would hand every client a
@@ -10397,12 +10384,12 @@ fn load_activity(dir: &str) -> HashMap<String, u64> {
     let Ok(text) = std::fs::read_to_string(activity_path(dir)) else { return out };
     for line in text.lines() {
         let mut it = line.split_whitespace();
-        if let (Some(tok), Some(at)) = (it.next(), it.next()) {
-            if let Ok(at) = at.parse::<u64>() {
-                if !tok.is_empty() && tok.len() <= 64 {
-                    out.insert(tok.to_string(), at);
-                }
-            }
+        if let (Some(tok), Some(at)) = (it.next(), it.next())
+            && let Ok(at) = at.parse::<u64>()
+            && !tok.is_empty()
+            && tok.len() <= 64
+        {
+            out.insert(tok.to_string(), at);
         }
     }
     out
@@ -10582,12 +10569,8 @@ async fn warm_sweep_loop(state: Arc<AppState>) {
         //     That is gated on real headroom, and skipped entirely when the box is busy.
         let maintain = state.resources.warm_always;
         if maintain > 0 {
-            let hot: Vec<String> = candidates
-                .iter()
-                .take_while(|(_, tier)| *tier <= WARM_TIER_RECENT)
-                .take(maintain)
-                .map(|(t, _)| t.clone())
-                .collect();
+            let hot: Vec<String> =
+                candidates.iter().take_while(|(_, tier)| *tier <= WARM_TIER_RECENT).take(maintain).map(|(t, _)| t.clone()).collect();
             let resident: HashSet<String> = state.wallets.lock().await.keys().cloned().collect();
             let now = std::time::Instant::now();
             let mut kept = 0usize;
@@ -10630,15 +10613,12 @@ async fn warm_sweep_loop(state: Arc<AppState>) {
             // work and must never compete with a payment somebody is waiting for.
             let mut rotated: Option<String> = None;
             ticks = ticks.wrapping_add(1);
-            if ticks % ROTATE_EVERY_TICKS == 0
+            if ticks.is_multiple_of(ROTATE_EVERY_TICKS)
                 && !proving_now()
                 && mem_available_mb().unwrap_or(u64::MAX) > MAINTAIN_LOAD_FLOOR_MB
             {
-                let pool: Vec<&String> = candidates
-                    .iter()
-                    .filter(|(t, tier)| *tier <= ROTATE_MAX_TIER && !hot.contains(t))
-                    .map(|(t, _)| t)
-                    .collect();
+                let pool: Vec<&String> =
+                    candidates.iter().filter(|(t, tier)| *tier <= ROTATE_MAX_TIER && !hot.contains(t)).map(|(t, _)| t).collect();
                 if !pool.is_empty() {
                     rotate_cursor = rotate_cursor.wrapping_add(1);
                     let token = pool[rotate_cursor % pool.len()].clone();
@@ -10766,7 +10746,7 @@ async fn warm_sweep_loop(state: Arc<AppState>) {
 
 #[cfg(test)]
 mod warm_overlap_tests {
-    use super::{warm_overlap_allowed, WARM_OVERLAP_MAX_BEHIND};
+    use super::{WARM_OVERLAP_MAX_BEHIND, warm_overlap_allowed};
 
     /// The case the overlap exists for: an app reopened on a wallet at ~99.4%, ~30k
     /// blocks from the tip. It must warm while it finishes, or the user pays the scan
@@ -10775,10 +10755,7 @@ mod warm_overlap_tests {
     fn a_wallet_near_the_tip_may_warm_while_it_finishes() {
         assert!(warm_overlap_allowed(true, 5_120_000, 5_090_000), "99.4% reopen must overlap");
         assert!(warm_overlap_allowed(true, 5_120_000, 5_120_000), "caught up");
-        assert!(
-            warm_overlap_allowed(true, 5_120_000, 5_120_000 - WARM_OVERLAP_MAX_BEHIND),
-            "the boundary itself is allowed"
-        );
+        assert!(warm_overlap_allowed(true, 5_120_000, 5_120_000 - WARM_OVERLAP_MAX_BEHIND), "the boundary itself is allowed");
     }
 
     /// The regression this bound exists to prevent. `warm_priority` is set by every
@@ -10823,8 +10800,8 @@ mod warm_overlap_tests {
 #[cfg(test)]
 mod warm_sweep_tests {
     use super::{
-        load_activity, save_activity, scan_path, sweep_candidates, sweep_candidates_tiered, tier_admits, warm_tier,
-        WARM_TIERS, WARM_TIER_BUDGET_SCALE,
+        WARM_TIER_BUDGET_SCALE, WARM_TIERS, load_activity, save_activity, scan_path, sweep_candidates, sweep_candidates_tiered,
+        tier_admits, warm_tier,
     };
     use std::collections::HashMap;
 
@@ -10979,7 +10956,10 @@ pub fn release_memory() -> usize {
         }
     }
     if freed > 0 {
-        log::info!("release_memory: dropped {freed} decoded leaves (~{} MiB); they rebuild on the next witness climb", freed * 32 / 1_048_576);
+        log::info!(
+            "release_memory: dropped {freed} decoded leaves (~{} MiB); they rebuild on the next witness climb",
+            freed * 32 / 1_048_576
+        );
     }
     freed
 }
@@ -11484,7 +11464,7 @@ async fn flush_checkpoints(state: &Arc<AppState>, only: Option<&str>) -> (usize,
             .lock()
             .await
             .iter()
-            .filter(|(k, _)| only.map_or(true, |t| t == k.as_str()))
+            .filter(|(k, _)| only.is_none_or(|t| t == k.as_str()))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect()
     };
@@ -11745,7 +11725,8 @@ mod sdk_api_tests {
 
         // A fresh FVK registration adopts the donor's checkpoint, keeping the
         // EARLIER birthday so a later cold rescan can't skip either wallet's notes.
-        let (donor, birthday) = adopt_twin_checkpoint(&dir, "phone", &fvk, 9999, false, &genesis, None, &candidates).expect("must adopt");
+        let (donor, birthday) =
+            adopt_twin_checkpoint(&dir, "phone", &fvk, 9999, false, &genesis, None, &candidates).expect("must adopt");
         assert_eq!(donor, "donor");
         assert_eq!(birthday, 4242, "keeps the earlier of donor/requested birthdays");
         let restored =
@@ -11769,7 +11750,8 @@ mod sdk_api_tests {
         );
         // ...but a registration with NO birthday opinion (0) adopts the donor AND its
         // birthday, instead of rescanning from genesis and persisting 0.
-        let (_, adopted) = adopt_twin_checkpoint(&dir, "phone", &fvk, 0, false, &genesis, None, &candidates).expect("unknown birthday adopts");
+        let (_, adopted) =
+            adopt_twin_checkpoint(&dir, "phone", &fvk, 0, false, &genesis, None, &candidates).expect("unknown birthday adopts");
         assert_eq!(adopted, 4242, "the donor's birthday is adopted when the client has none");
         std::fs::remove_file(scan_path(&dir, "phone")).unwrap();
         // ...and one that asked for the same-or-later birthday.
@@ -11789,12 +11771,24 @@ mod sdk_api_tests {
         );
         std::fs::remove_file(scan_path(&dir, "phone")).ok();
         save_seed(&dir, "donor", "mainnet", &seed, 4242, None).unwrap();
-        std::fs::write(wallet_path(&dir, "donor"), std::fs::read_to_string(wallet_path(&dir, "donor")).unwrap().replace("\"recoverable_history\": false", "\"recoverable_history\": true")).unwrap();
+        std::fs::write(
+            wallet_path(&dir, "donor"),
+            std::fs::read_to_string(wallet_path(&dir, "donor"))
+                .unwrap()
+                .replace("\"recoverable_history\": false", "\"recoverable_history\": true"),
+        )
+        .unwrap();
         assert!(
             adopt_twin_checkpoint(&dir, "phone", &fvk, 5000, true, &genesis, None, &candidates).is_some(),
             "a history-on donor serves a history-on wallet"
         );
-        std::fs::write(wallet_path(&dir, "donor"), std::fs::read_to_string(wallet_path(&dir, "donor")).unwrap().replace("\"recoverable_history\": true", "\"recoverable_history\": false")).unwrap();
+        std::fs::write(
+            wallet_path(&dir, "donor"),
+            std::fs::read_to_string(wallet_path(&dir, "donor"))
+                .unwrap()
+                .replace("\"recoverable_history\": true", "\"recoverable_history\": false"),
+        )
+        .unwrap();
 
         // A wrong-genesis (relaunched-chain) checkpoint must never be adopted.
         std::fs::remove_file(scan_path(&dir, "phone")).unwrap();
@@ -11876,11 +11870,8 @@ mod sdk_api_tests {
         let derived = kaspa_shielded_core::coinbase::coinbase_note_commitment(&desc, value).unwrap();
         let mut other = seed.clone();
         other[35] = 1;
-        let wrong = kaspa_shielded_core::coinbase::coinbase_note_commitment(
-            &derive_coinbase_note_desc(recipient, &other),
-            value,
-        )
-        .unwrap();
+        let wrong =
+            kaspa_shielded_core::coinbase::coinbase_note_commitment(&derive_coinbase_note_desc(recipient, &other), value).unwrap();
         assert_ne!(derived.to_bytes(), wrong.to_bytes());
 
         // verify mode: a wrong supplied value is rejected -> derived wins
@@ -11918,10 +11909,7 @@ fn require_multiparty(state: &AppState) -> Result<(), (StatusCode, Json<serde_js
     if state.enable_multiparty {
         Ok(())
     } else {
-        Err(err(
-            StatusCode::NOT_FOUND,
-            "multi-party bundles are not enabled on this daemon (start it with --enable-multiparty)",
-        ))
+        Err(err(StatusCode::NOT_FOUND, "multi-party bundles are not enabled on this daemon (start it with --enable-multiparty)"))
     }
 }
 
@@ -11931,8 +11919,7 @@ fn recipient_bytes(s: &str) -> Result<[u8; 43], (StatusCode, Json<serde_json::Va
     if addr.version != Version::ShieldedOrchard {
         return Err(err(StatusCode::BAD_REQUEST, "recipient is not a shielded (version 9) address"));
     }
-    <[u8; 43]>::try_from(addr.payload.as_ref())
-        .map_err(|_| err(StatusCode::BAD_REQUEST, "shielded address payload must be 43 bytes"))
+    <[u8; 43]>::try_from(addr.payload.as_ref()).map_err(|_| err(StatusCode::BAD_REQUEST, "shielded address payload must be 43 bytes"))
 }
 
 #[derive(Deserialize)]
@@ -11981,9 +11968,8 @@ async fn bundle_offer(
     let w = state.get_wallet(&token).await.ok_or_else(|| err(StatusCode::NOT_FOUND, "no wallet loaded"))?;
     let e = w.lock().await;
 
-    let mine = e
-        .matured_leaves()
-        .ok_or_else(|| err(StatusCode::CONFLICT, "wallet has no matured anchor yet; wait for initial sync"))?;
+    let mine =
+        e.matured_leaves().ok_or_else(|| err(StatusCode::CONFLICT, "wallet has no matured anchor yet; wait for initial sync"))?;
     let at = q.at_leaves.unwrap_or(mine);
     if at > mine {
         return Err(err(
@@ -12033,13 +12019,7 @@ async fn bundle_offer(
         offers.push(hex(&spend_offer_to_bytes(&n.note, &path)));
     }
 
-    Ok(Json(BundleOfferResp {
-        fvk_hex: hex(&e.db.fvk().to_bytes()),
-        offers,
-        total_sompi: total,
-        at_leaves: at,
-        notes: chosen.len(),
-    }))
+    Ok(Json(BundleOfferResp { fvk_hex: hex(&e.db.fvk().to_bytes()), offers, total_sompi: total, at_leaves: at, notes: chosen.len() }))
 }
 
 #[derive(Deserialize)]
@@ -12104,8 +12084,8 @@ async fn bundle_prepare(
         let fvk = fvk_from_bytes(&fvk_bytes)
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("spend {i}: not a valid full viewing key")))?;
         let raw = unhex(&s.offer_hex).ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("spend {i}: offer_hex is not hex")))?;
-        let (note, path) = spend_offer_from_bytes(&raw)
-            .ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("spend {i}: malformed contribution")))?;
+        let (note, path) =
+            spend_offer_from_bytes(&raw).ok_or_else(|| err(StatusCode::BAD_REQUEST, format!("spend {i}: malformed contribution")))?;
         spends.push(MultiSpend { fvk, note, path });
     }
 
@@ -12242,10 +12222,7 @@ async fn bundle_submit(
 
     let bundle = finalize_payment(taken.payment, taken.sigs).map_err(|e| {
         log::error!("multiparty submit REJECTED for session {}: finalize_payment failed: {e:?}", req.session);
-        err(
-            StatusCode::BAD_REQUEST,
-            "the signatures did not match the prepared bundle. Nothing was sent and no coins moved.",
-        )
+        err(StatusCode::BAD_REQUEST, "the signatures did not match the prepared bundle. Nothing was sent and no coins moved.")
     })?;
     let tx: Transaction = payment_tx(bundle.to_bytes());
     let node = state
@@ -12260,4 +12237,3 @@ async fn bundle_submit(
         }
     }
 }
-

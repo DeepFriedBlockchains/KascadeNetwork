@@ -4,7 +4,7 @@ use crate::{
     prelude::{DbSetAccess, ReadLock},
 };
 
-use super::prelude::{DbKey, DbWriter};
+use super::prelude::{DbKey, DbWriter, DeferredDbBatch};
 use parking_lot::RwLock;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
@@ -142,6 +142,19 @@ impl<T, TLegacy> CachedDbItem<T, TLegacy> {
         *self.cached_item.write() = Some(item.clone());
         let bin_data = bincode::serialize(item)?;
         writer.put(&self.live_key, bin_data)?;
+        Ok(())
+    }
+
+    /// The caller must hold an exclusive store guard through commit, including
+    /// against readers using clones of this item.
+    pub fn stage_exclusive_write<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, item: &T) -> Result<(), StoreError>
+    where
+        T: Serialize,
+    {
+        batch.ensure_database(&self.db)?;
+        let data = bincode::serialize(item).inspect_err(|_| batch.reject())?;
+        batch.writer().put(&self.live_key, data)?;
+        batch.invalidate_after_commit(|| *self.cached_item.write() = None);
         Ok(())
     }
 

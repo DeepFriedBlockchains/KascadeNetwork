@@ -1,6 +1,6 @@
 use futures_util::future::BoxFuture;
 use kaspa_muhash::MuHash;
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 
 use crate::{
     BlockHashSet, BlueWorkType, ChainPath,
@@ -14,7 +14,7 @@ use crate::{
         block::{BlockProcessResult, RuleError},
         coinbase::CoinbaseResult,
         consensus::ConsensusResult,
-        pruning::PruningImportResult,
+        pruning::{PruningImportError, PruningImportResult},
         tx::TxResult,
     },
     header::Header,
@@ -27,6 +27,13 @@ use crate::{
     },
 };
 use kaspa_hashes::Hash;
+
+/// Raw shielded note-commitment tree frontier parts: `(size, last_leaf, ommers)`.
+/// Kept as a plain tuple so `kaspa-shielded-core` stays off this API boundary.
+type ShieldedTreeFrontierParts = (u64, Option<[u8; 32]>, Vec<[u8; 32]>);
+
+/// A page of indexed shielded history: `(records, has_more, next_index)`.
+type ShieldedHistoryPage = (Vec<(u64, ShieldedChainBlockData)>, bool, u64);
 
 pub use self::stats::{BlockCount, ConsensusStats};
 
@@ -174,12 +181,21 @@ pub struct ShieldedExportMetadata {
     pub nullifier_count: u64,
 }
 
+/// Authenticated metadata and nullifiers captured together for one transfer.
+pub struct ShieldedExportSnapshot {
+    pub metadata: Option<ShieldedExportMetadata>,
+    pub nullifiers: Vec<[u8; 32]>,
+}
+
 /// Upper bound on [`ShieldedExportMetadata::nullifier_count`] accepted on import
 /// (audit finding F-08). The count is declared by an untrusted sync peer; the cap
 /// bounds the memory/CPU the import can be made to spend (2^26 ≈ 67M entries ≈
 /// 2 GiB of raw nullifiers) while still far exceeding any realistic near-term
 /// shielded pool.
 pub const MAX_SHIELDED_NULLIFIER_IMPORT_COUNT: u64 = 1 << 26;
+
+/// Maximum nullifiers admitted in one import batch (128 KiB of payload).
+pub const SHIELDED_NULLIFIER_IMPORT_BATCH_LIMIT: usize = 4096;
 
 /// Batches of spent nullifiers (each 32 bytes) streamed during pruning-point
 /// shielded-state import, mirroring [`ImportLaneBatchIterator`].
@@ -225,9 +241,150 @@ pub struct SeqCommitLaneProof {
     pub miner_payload_leaves: Vec<Hash>,
 }
 
+/// The exact pruning proof accepted by the defending consensus.
+pub struct ValidatedStagingPruningProof(PruningPointProof);
+
+impl ValidatedStagingPruningProof {
+    pub fn proof(&self) -> &PruningPointProof {
+        &self.0
+    }
+}
+
+/// An exclusive import reservation issued by a staging receiver.
+pub struct StagingImportSession(Box<dyn Any + Send + Sync>);
+
+impl StagingImportSession {
+    pub fn new<T: Any + Send + Sync>(session: T) -> Self {
+        Self(Box::new(session))
+    }
+
+    pub fn downcast_ref<T: Any + Send + Sync>(&self) -> Result<&T, StagingPromotionError> {
+        self.0.downcast_ref().ok_or(StagingPromotionError::InvalidReceipt)
+    }
+
+    pub fn downcast<T: Any + Send + Sync>(self) -> Result<T, StagingPromotionError> {
+        self.0.downcast::<T>().map(|session| *session).map_err(|_| StagingPromotionError::InvalidReceipt)
+    }
+}
+
+/// Ordered phases of a verified staging import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StagingImportComponent {
+    Proof,
+    Smt,
+    Shielded,
+    Utxo,
+}
+
+/// A single-use receipt carried from authenticated staging completion to its receiver.
+pub struct StagingPromotion(Box<dyn Any + Send>);
+
+impl StagingPromotion {
+    pub fn new<T: Any + Send>(receipt: T) -> Self {
+        Self(Box::new(receipt))
+    }
+
+    pub fn downcast<T: Any + Send>(self) -> Result<T, StagingPromotionError> {
+        self.0.downcast::<T>().map(|receipt| *receipt).map_err(|_| StagingPromotionError::InvalidReceipt)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StagingPromotionError {
+    #[error("authenticated staging promotion is unavailable")]
+    Unsupported,
+    #[error("invalid staging promotion receipt")]
+    InvalidReceipt,
+    #[error("staging promotion authority was rejected: {0}")]
+    Rejected(String),
+}
+
 /// Abstracts the consensus external API
 #[allow(unused_variables)]
 pub trait ConsensusApi: Send + Sync {
+    fn supports_verified_staging_import(&self) -> bool {
+        false
+    }
+
+    /// Report a durable record of verified promotion. This does not issue
+    /// authority or restore an import reservation after reopening.
+    fn has_verified_staging_promotion(&self) -> Result<bool, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn begin_verified_staging_import(
+        &self,
+        _proof: ValidatedStagingPruningProof,
+    ) -> Result<StagingImportSession, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn apply_verified_staging_proof(
+        &self,
+        _session: &StagingImportSession,
+        _trusted: &[TrustedBlock],
+        _header_only_chain_segment: &[Arc<Header>],
+        _pruning_points: PruningPointsList,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn check_verified_staging_component(
+        &self,
+        _session: &StagingImportSession,
+        _component: StagingImportComponent,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn complete_verified_staging_component(
+        &self,
+        _session: &StagingImportSession,
+        _component: StagingImportComponent,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    /// Clear failed shielded payload under the receiver's exact worker permit.
+    /// Readiness stays false throughout the bounded durable deletions.
+    fn clear_verified_staging_shielded(&self, _session: &StagingImportSession, _point: Hash) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    /// Import with the receiver's exact session permit, checked on every durable batch.
+    fn import_verified_staging_shielded(
+        &self,
+        _session: &StagingImportSession,
+        _point: Hash,
+        _metadata: ShieldedExportMetadata,
+        _expected_state_root: [u8; 32],
+        _batches: ShieldedNullifierBatchIterator<'_>,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn append_verified_staging_utxos(
+        &self,
+        _session: &StagingImportSession,
+        _utxos: &[(TransactionOutpoint, UtxoEntry)],
+        _multiset: &mut MuHash,
+    ) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    fn finish_verified_staging_import(
+        &self,
+        _session: StagingImportSession,
+        _child: &Block,
+    ) -> Result<StagingPromotion, StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
+    /// Consume the receiver's exact promotion lease before changing the active consensus.
+    fn authorize_staging_promotion(&self, _promotion: StagingPromotion) -> Result<(), StagingPromotionError> {
+        Err(StagingPromotionError::Unsupported)
+    }
+
     fn build_block_template(
         &self,
         miner_data: MinerData,
@@ -431,6 +588,35 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    fn validate_staging_pruning_proof(
+        &self,
+        proof: PruningPointProof,
+        metadata: &PruningProofMetadata,
+    ) -> PruningImportResult<ValidatedStagingPruningProof> {
+        self.validate_pruning_proof(&proof, metadata)?;
+        Ok(ValidatedStagingPruningProof(proof))
+    }
+
+    fn apply_staging_pruning_proof(
+        &self,
+        proof: ValidatedStagingPruningProof,
+        trusted_set: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+    ) -> PruningImportResult<()> {
+        self.apply_pruning_proof(proof.0, trusted_set, header_only_chain_segment)
+    }
+
+    fn apply_staging_pruning_proof_and_history(
+        &self,
+        proof: ValidatedStagingPruningProof,
+        trusted_set: &[TrustedBlock],
+        header_only_chain_segment: &[Arc<Header>],
+        pruning_points: PruningPointsList,
+    ) -> PruningImportResult<()> {
+        self.apply_staging_pruning_proof(proof, trusted_set, header_only_chain_segment)?;
+        self.import_pruning_points(pruning_points)
+    }
+
     fn apply_pruning_proof(
         &self,
         proof: PruningPointProof,
@@ -473,6 +659,11 @@ pub trait ConsensusApi: Send + Sync {
     /// Compute SMT metadata for the pruning point (for P2P streaming).
     fn get_pruning_point_smt_metadata(&self, _expected_pruning_point: Hash) -> ConsensusResult<SmtExportMetadata> {
         unimplemented!()
+    }
+
+    /// Return a verified export when the Phase 6 preview is available.
+    fn capture_shielded_export_snapshot(&self, _point: Hash) -> ConsensusResult<Option<ShieldedExportSnapshot>> {
+        Ok(None)
     }
 
     /// Compute the shielded-state export metadata at the pruning point (for P2P
@@ -543,7 +734,7 @@ pub trait ConsensusApi: Send + Sync {
     /// starts from: it reconstructs the frontier, then scans only blocks after
     /// `block`, yet still witnesses its notes against the live tip. Raw parts (rather
     /// than a `kaspa-shielded-core` type) keep that crate off this API boundary.
-    fn get_shielded_tree_frontier(&self, _block: Hash) -> ConsensusResult<(u64, Option<[u8; 32]>, Vec<[u8; 32]>)> {
+    fn get_shielded_tree_frontier(&self, _block: Hash) -> ConsensusResult<ShieldedTreeFrontierParts> {
         unimplemented!()
     }
 
@@ -661,11 +852,7 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    fn get_shielded_history_indexed_below(
-        &self,
-        _anchor: Hash,
-        _max_blocks: usize,
-    ) -> ConsensusResult<(Vec<(u64, ShieldedChainBlockData)>, bool, u64)> {
+    fn get_shielded_history_indexed_below(&self, _anchor: Hash, _max_blocks: usize) -> ConsensusResult<ShieldedHistoryPage> {
         unimplemented!()
     }
 
@@ -709,6 +896,11 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
+    /// Use only while the receiver's pruning read guard is held.
+    fn is_chain_ancestor_of_guarded(&self, low: Hash, high: Hash) -> ConsensusResult<bool> {
+        self.is_chain_ancestor_of(low, high)
+    }
+
     fn get_hashes_between(&self, low: Hash, high: Hash, max_blocks: usize) -> ConsensusResult<(Vec<Hash>, Hash)> {
         unimplemented!()
     }
@@ -730,6 +922,12 @@ pub trait ConsensusApi: Send + Sync {
 
     /// Returns the anticone of block `hash` from the POV of `virtual`
     fn get_anticone(&self, hash: Hash) -> ConsensusResult<Vec<Hash>> {
+        unimplemented!()
+    }
+
+    /// Rebuild staging proof data without changing the committed descriptor
+    /// or publishing an entry in the normal pruning proof cache.
+    fn get_staging_pruning_point_proof(&self) -> Arc<PruningPointProof> {
         unimplemented!()
     }
 
@@ -874,13 +1072,28 @@ pub trait ConsensusApi: Send + Sync {
         unimplemented!()
     }
 
-    /// F-15: really clears the shielded import state — the whole global nullifier
-    /// set, the per-block snapshots at the current pruning point, and the stable
-    /// flag, in one atomic batch. Call ONLY immediately before a full re-seed (see
-    /// `ShieldedStateManager::clear_for_pruning_reimport` in `kaspa-consensus` for
-    /// the safety preconditions; the IBD flow enforces them).
-    fn clear_pruning_shielded_stores(&self) {
+    /// F-15: persist false readiness before bounded durable membership deletion,
+    /// then remove the pruning-point snapshots. Call only immediately before
+    /// re-seeding and with no validated descendants; IBD enforces both conditions.
+    /// Failure or interruption leaves readiness false and cleanup can restart.
+    fn clear_pruning_shielded_stores(&self) -> PruningImportResult<()> {
         unimplemented!()
+    }
+
+    fn supports_phase6_descendant_recovery(&self) -> bool {
+        false
+    }
+
+    /// Recheck authenticated pruning-point and descendant state before restoring
+    /// the shielded readiness flag. The caller holds the pruning session.
+    fn reconcile_descendant_shielded_readiness(
+        &self,
+        _point: Hash,
+        _tip: Hash,
+        _child: &Block,
+        _tip_child: &Block,
+    ) -> PruningImportResult<()> {
+        Err(PruningImportError::ShieldedStateError("descendant shielded recovery is unavailable".into()))
     }
 
     fn set_pruning_shielded_stable_flag(&self, _val: bool) {
@@ -918,3 +1131,37 @@ pub trait ConsensusApi: Send + Sync {
 }
 
 pub type DynConsensus = Arc<dyn ConsensusApi>;
+
+#[cfg(test)]
+mod staging_proof_tests {
+    use super::*;
+    use crate::{config::genesis::DEVNET_GENESIS, errors::pruning::PruningImportError};
+
+    struct ProofEndpoint(Arc<Header>);
+
+    impl ConsensusApi for ProofEndpoint {
+        fn validate_pruning_proof(&self, proof: &PruningPointProof, _: &PruningProofMetadata) -> PruningImportResult<()> {
+            if proof.first().and_then(|level| level.last()).is_some_and(|header| Arc::ptr_eq(header, &self.0)) {
+                Ok(())
+            } else {
+                Err(PruningImportError::PruningProofNotEnoughHeaders)
+            }
+        }
+
+        fn apply_pruning_proof(&self, proof: PruningPointProof, _: &[TrustedBlock], _: &[Arc<Header>]) -> PruningImportResult<()> {
+            assert!(Arc::ptr_eq(&proof[0][0], &self.0));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn authority_integration_ibd_carries_defender_accepted_proof() {
+        let header = Arc::new(Header::from(&DEVNET_GENESIS));
+        let metadata = PruningProofMetadata::new(header.blue_work);
+        let defender = ProofEndpoint(header.clone());
+        let receiver = ProofEndpoint(header.clone());
+        assert!(defender.validate_staging_pruning_proof(vec![], &metadata).is_err());
+        let validated = defender.validate_staging_pruning_proof(vec![vec![header]], &metadata).unwrap();
+        receiver.apply_staging_pruning_proof(validated, &[], &[]).unwrap();
+    }
+}

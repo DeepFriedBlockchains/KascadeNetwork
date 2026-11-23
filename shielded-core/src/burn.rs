@@ -189,7 +189,7 @@ impl BurnAccumulator {
                 level.push(empty);
             }
             // Sibling is the other half of our pair.
-            let sibling = if idx % 2 == 0 { level[idx + 1] } else { level[idx - 1] };
+            let sibling = if idx.is_multiple_of(2) { level[idx + 1] } else { level[idx - 1] };
             out.extend_from_slice(&sibling);
             level = level.chunks_exact(2).map(|p| node_hash(&p[0], &p[1])).collect();
             empty = node_hash(&empty, &empty);
@@ -200,7 +200,7 @@ impl BurnAccumulator {
 
     /// Replays a branch the way the peg-out guest does, for host-side self-checks and tests.
     pub fn verify_branch(receipt: &ExitReceipt, index: u32, branch: &[u8], root: &[u8; 32]) -> bool {
-        if branch.len() % 32 != 0 {
+        if !branch.len().is_multiple_of(32) {
             return false;
         }
         let mut acc = receipt.leaf_hash();

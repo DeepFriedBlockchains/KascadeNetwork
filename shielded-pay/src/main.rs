@@ -33,7 +33,7 @@ use std::io::Read;
 
 use clap::{Parser, Subcommand};
 use kaspa_addresses::{Address, Prefix, Version};
-use kaspa_consensus_core::tx::{TX_VERSION_SHIELDED, Transaction};
+use kaspa_consensus_core::tx::Transaction;
 use kaspa_grpc_client::GrpcClient;
 use kaspa_rpc_core::{RpcHash, RpcShieldedChainBlock, RpcTransaction, api::rpc::RpcApi, notify::mode::NotificationMode};
 use kaspa_shielded_core::bundle::expected_wire_len;
@@ -355,28 +355,10 @@ fn hex(b: &[u8]) -> String {
 
 fn unhex(s: &str) -> Option<Vec<u8>> {
     let s = s.trim();
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-
-    use super::seed_from_reader;
-
-    #[test]
-    fn reads_a_seed_from_standard_input() {
-        let seed = seed_from_reader(Cursor::new("0a".repeat(32) + "\n")).expect("valid stdin seed");
-        assert_eq!(seed, [0x0a; 32]);
-    }
-
-    #[test]
-    fn rejects_an_invalid_standard_input_seed() {
-        assert!(seed_from_reader(Cursor::new("not-a-seed")).is_err());
-    }
 }
 
 /// Sign a message with a wallet seed, proving control of the wallet's shielded
@@ -612,7 +594,7 @@ async fn send(rpc_server: String, owner_seed: [u8; 32], to: String, amount: u64,
         n
     };
     let mut candidates: Vec<_> = db.notes().to_vec();
-    candidates.sort_by(|a, b| b.value().cmp(&a.value())); // descending
+    candidates.sort_by_key(|n| std::cmp::Reverse(n.value())); // descending
     let mut inputs = Vec::new();
     let mut selected = 0u64;
     for n in &candidates {
@@ -620,7 +602,7 @@ async fn send(rpc_server: String, owner_seed: [u8; 32], to: String, amount: u64,
             break;
         }
         let path = db.witness_path(n.position).unwrap_or_else(|| fatal("matured note has no witness path".into()));
-        inputs.push((n.note.clone(), path));
+        inputs.push((n.note, path));
         selected += n.value();
         log::info!("  input: note position={} value={}", n.position, n.value());
     }
@@ -720,12 +702,14 @@ async fn main() {
     kaspa_core::log::try_init_logger("info");
     match Cli::parse().cmd {
         Cmd::New { network } => {
-            use rand::RngCore;
             let prefix = prefix_from(&network);
             // A random seed that is a valid Orchard spending key (retry the rare miss).
             let mut seed = [0u8; 32];
             let address = loop {
-                { use rand10::Rng as _; rand10::rng().fill_bytes(&mut seed); }
+                {
+                    use rand10::Rng as _;
+                    rand10::rng().fill_bytes(&mut seed);
+                }
                 if let Some(raw) = address_bytes_from_seed(seed) {
                     break String::from(&Address::new(prefix, Version::ShieldedOrchard, &raw));
                 }
@@ -769,5 +753,23 @@ async fn main() {
         Cmd::Pay { rpc_server, owner_seed_hex, owner_seed_byte, to, fee } => {
             pay(rpc_server, resolve_seed(owner_seed_hex, owner_seed_byte), to, fee).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::seed_from_reader;
+
+    #[test]
+    fn reads_a_seed_from_standard_input() {
+        let seed = seed_from_reader(Cursor::new("0a".repeat(32) + "\n")).expect("valid stdin seed");
+        assert_eq!(seed, [0x0a; 32]);
+    }
+
+    #[test]
+    fn rejects_an_invalid_standard_input_seed() {
+        assert!(seed_from_reader(Cursor::new("not-a-seed")).is_err());
     }
 }

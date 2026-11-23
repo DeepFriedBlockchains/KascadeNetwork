@@ -25,7 +25,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use kaspa_consensus_core::BlockHasher;
-use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DB, StoreError, StoreResult};
+use kaspa_database::prelude::{BatchDbWriter, CachePolicy, CachedDbAccess, DB, DeferredDbBatch, StoreError, StoreResult};
 use kaspa_database::registry::DatabaseStorePrefixes;
 use kaspa_hashes::Hash;
 use kaspa_math::Uint3072;
@@ -78,6 +78,14 @@ pub struct DbNullifierSetStore {
 }
 
 impl DbNullifierSetStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, nullifier: [u8; 32]) -> StoreResult<()> {
+        self.access.delete_deferred(batch, NullifierKey(nullifier))
+    }
+
+    pub(crate) fn insert_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, nullifier: [u8; 32]) -> StoreResult<()> {
+        self.access.write_deferred(batch, NullifierKey(nullifier), 1u8)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedNullifiers.into()) }
     }
@@ -194,6 +202,14 @@ pub struct DbShieldedTreeStore {
 }
 
 impl DbShieldedTreeStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, state: FrontierState) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, StoredFrontier(state))
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedTreeFrontier.into()) }
     }
@@ -245,6 +261,14 @@ pub struct DbShieldedSupplyStore {
 }
 
 impl DbShieldedSupplyStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, totals: SupplyTotals) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, totals)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedSupply.into()) }
     }
@@ -301,6 +325,10 @@ pub struct DbShieldedDevAccruedStore {
 }
 
 impl DbShieldedDevAccruedStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, accrued: u64) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, accrued)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedDevAccrued.into()) }
     }
@@ -349,6 +377,10 @@ pub struct DbShieldedAnchorSourceScoreStore {
 }
 
 impl DbShieldedAnchorSourceScoreStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, source: Hash, blue_score: u64) -> StoreResult<()> {
+        self.access.write_deferred(batch, source, blue_score)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -418,6 +450,14 @@ pub struct DbShieldedBurnStore {
 }
 
 impl DbShieldedBurnStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, receipts: BurnReceipts) -> StoreResult<()> {
+        self.access.write_deferred(batch, block, receipts)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedBurns.into()) }
     }
@@ -474,6 +514,18 @@ pub struct DbShieldedNullifierMuHashStore {
 }
 
 impl DbShieldedNullifierMuHashStore {
+    pub(crate) fn delete_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash) -> StoreResult<()> {
+        self.access.delete_deferred(batch, block)
+    }
+
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, block: Hash, muhash: MuHash) -> StoreResult<()> {
+        self.access.write_deferred(
+            batch,
+            block,
+            muhash.try_into().map_err(|_| StoreError::DataInconsistency("invalid imported nullifier accumulator".into()))?,
+        )
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -574,7 +626,10 @@ pub struct DbAnchorGcQueueStore {
 
 impl DbAnchorGcQueueStore {
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
-        Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchorGcQueue.into()) }
+        Self {
+            db: Arc::clone(&db),
+            access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchorGcQueue.into()),
+        }
     }
 
     pub fn clone_with_new_cache(&self, cache_policy: CachePolicy) -> Self {
@@ -651,6 +706,15 @@ pub struct DbAnchorProducersStore {
 }
 
 impl DbAnchorProducersStore {
+    pub(crate) fn set_deferred<'a>(
+        &'a self,
+        batch: &mut DeferredDbBatch<'a>,
+        anchor: [u8; 32],
+        producers: Vec<Hash>,
+    ) -> StoreResult<()> {
+        self.access.write_deferred(batch, AnchorKey(anchor), producers)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
@@ -739,6 +803,10 @@ pub struct DbAnchorBlockStore {
 }
 
 impl DbAnchorBlockStore {
+    pub(crate) fn set_deferred<'a>(&'a self, batch: &mut DeferredDbBatch<'a>, anchor: [u8; 32], block: Hash) -> StoreResult<()> {
+        self.access.write_deferred(batch, AnchorKey(anchor), block)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self { db: Arc::clone(&db), access: CachedDbAccess::new(db, cache_policy, DatabaseStorePrefixes::ShieldedAnchors.into()) }
     }
@@ -834,6 +902,7 @@ pub struct ShieldedScanBlockData {
     ///      with EOF tolerance (the `UtxoEntry` pattern). Handles pre-field records; requires
     ///      rewriting records already written WITH the field in its current position.
     ///   2. Prefix future records with an explicit version byte and decode by version.
+    ///
     /// Do NOT assume serde papers over the layout change — it does not.
     #[serde(default)]
     pub coinbase_commitments: Vec<[u8; 32]>,
@@ -934,10 +1003,7 @@ impl ShieldedScanBlockStoreReader for DbShieldedScanBlockStore {
             // up — the two are distinguished by which one decodes, since a wrong guess
             // overruns the buffer.
             Err(_) => {
-                let db_key = kaspa_database::prelude::DbKey::new(
-                    &[DatabaseStorePrefixes::ShieldedScanBlock.into()][..],
-                    block,
-                );
+                let db_key = kaspa_database::prelude::DbKey::new(&[DatabaseStorePrefixes::ShieldedScanBlock.into()][..], block);
                 match self.db.get_pinned(&db_key)? {
                     Some(slice) => match bincode::deserialize::<LegacyShieldedScanBlockData>(&slice) {
                         Ok(legacy) => Ok(Some(legacy.into())),
@@ -959,7 +1025,6 @@ mod tests {
     use kaspa_database::create_temp_db;
     use kaspa_database::prelude::ConnBuilder;
 
-    #[test]
     /// `#[serde(default)]` does NOT give bincode forward/backward compatibility.
     ///
     /// bincode is non-self-describing: fields are read POSITIONALLY with no names, so a record
@@ -971,7 +1036,6 @@ mod tests {
     /// Consequence if ignored: a node upgraded to a binary carrying this field can no longer read
     /// the scan records IT ITSELF wrote earlier, so `GetShieldedBlocks` starts failing and wallet
     /// history serving breaks on upgrade.
-    #[test]
     /// The repair for that incompatibility: one reader, both layouts.
     ///
     /// A node upgraded across the `coinbase_commitments` addition, wrote records at the
@@ -1018,8 +1082,7 @@ mod tests {
         );
 
         // ...and decodes correctly as legacy, carrying no commitments.
-        let recovered: ShieldedScanBlockData =
-            bincode::deserialize::<LegacyShieldedScanBlockData>(&legacy_bytes).unwrap().into();
+        let recovered: ShieldedScanBlockData = bincode::deserialize::<LegacyShieldedScanBlockData>(&legacy_bytes).unwrap().into();
         assert_eq!(recovered.blue_score, 7);
         assert_eq!(recovered.daa_score, 8);
         assert_eq!(recovered.coinbase_txid, Hash::from_bytes([3u8; 32]));
@@ -1029,6 +1092,7 @@ mod tests {
         assert_eq!(recovered.accepted[0].action_bytes, vec![9, 9]);
     }
 
+    #[test]
     fn serde_default_does_not_make_bincode_records_forward_compatible() {
         // Exactly `ShieldedScanBlockData` as it was BEFORE `coinbase_commitments` was added.
         #[derive(Serialize)]
@@ -1066,6 +1130,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn scan_block_store_roundtrip() {
         let (_lt, db) = create_temp_db!(ConnBuilder::default().with_files_limit(10));
         let store = DbShieldedScanBlockStore::new(db.clone(), CachePolicy::Count(16));
