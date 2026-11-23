@@ -346,10 +346,7 @@ mod tests {
         let reordered_payment =
             derive(&[DeveloperPayoutRelease { amount: 20, ..early }, DeveloperPayoutRelease { amount: 20, ..late }]).unwrap();
         assert_eq!((reordered_payment.minted, reordered_payment.paid, reordered_payment.deferred), (CAP, CAP, 0));
-        assert_eq!(
-            reordered_payment.verify(genesis, point, CAP, checkpoint.commitment()),
-            Err(VerificationError::CommitmentMismatch)
-        );
+        assert_eq!(reordered_payment.verify(genesis, point, CAP, checkpoint.commitment()), Err(VerificationError::CommitmentMismatch));
 
         let sibling_path = [genesis, parent, sibling];
         let restore = |releases: &[DeveloperPayoutRelease]| {

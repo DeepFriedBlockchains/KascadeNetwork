@@ -1182,9 +1182,15 @@ mod tests {
             IssuanceCheckpoint::derive_from_claims(network, parent, CAP, &[network, parent], &[prior_liability]).unwrap();
         let mut payout_claims = attributed_payout.claims;
         payout_claims.push(prior_liability);
-        let payout_checkpoint =
-            IssuanceCheckpoint::derive_from_settlements(network, current, CAP, &[network, parent, current], &payout_claims, &[release])
-                .unwrap();
+        let payout_checkpoint = IssuanceCheckpoint::derive_from_settlements(
+            network,
+            current,
+            CAP,
+            &[network, parent, current],
+            &payout_claims,
+            &[release],
+        )
+        .unwrap();
         assert_eq!((payout_checkpoint.minted, payout_checkpoint.paid, payout_checkpoint.deferred), (3_180, 3_180, 0));
         assert!(paid.matches_checkpoint_transition(&prior_payout_checkpoint, &payout_checkpoint));
 
