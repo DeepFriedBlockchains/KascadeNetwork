@@ -22,6 +22,63 @@ pub struct IssuanceCheckpoint {
     pub deferred: u64,
 }
 
+/// Size of the proposed versioned issuance field. This codec is inactive:
+/// no transaction parser, block builder or validation rule uses it.
+pub const ISSUANCE_COMMITMENT_FIELD_SIZE: usize = 34;
+const ISSUANCE_COMMITMENT_VERSION: u16 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IssuanceCommitmentField {
+    digest: Hash,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IssuanceFieldError {
+    WrongLength,
+    UnsupportedVersion,
+}
+
+impl IssuanceCommitmentField {
+    /// Construct from a locally verified checkpoint before placing it in a
+    /// proposal. The caller owns verification of the underlying settlement.
+    pub fn from_checkpoint(checkpoint: &IssuanceCheckpoint) -> Self {
+        Self { digest: checkpoint.commitment() }
+    }
+
+    pub fn encode(self) -> [u8; ISSUANCE_COMMITMENT_FIELD_SIZE] {
+        let mut field = [0; ISSUANCE_COMMITMENT_FIELD_SIZE];
+        field[..2].copy_from_slice(&ISSUANCE_COMMITMENT_VERSION.to_le_bytes());
+        field[2..].copy_from_slice(self.digest.as_bytes());
+        field
+    }
+
+    /// Decode only the exact field, without scanning or advancing a payload.
+    /// Decoding establishes syntax. The caller authenticates the bytes and
+    /// establishes the selected parent through independently verified evidence.
+    pub fn decode(bytes: &[u8]) -> Result<Self, IssuanceFieldError> {
+        let field: &[u8; ISSUANCE_COMMITMENT_FIELD_SIZE] = bytes.try_into().map_err(|_| IssuanceFieldError::WrongLength)?;
+        if u16::from_le_bytes([field[0], field[1]]) != ISSUANCE_COMMITMENT_VERSION {
+            return Err(IssuanceFieldError::UnsupportedVersion);
+        }
+        let mut digest = [0; 32];
+        digest.copy_from_slice(&field[2..]);
+        Ok(Self { digest: Hash::from_bytes(digest) })
+    }
+
+    /// Compare a checkpoint against an independently authenticated field. The
+    /// expected parent must be the selected parent and the intended pruning
+    /// point. The caller validates ancestry and the historical settlement.
+    pub fn verify_checkpoint(
+        self,
+        network: Hash,
+        selected_parent: Hash,
+        supply_cap: u64,
+        checkpoint: &IssuanceCheckpoint,
+    ) -> Result<(), VerificationError> {
+        checkpoint.verify(network, selected_parent, supply_cap, self.digest)
+    }
+}
+
 /// One unique reward source attributed to the selected block that settles it.
 /// Paid amounts exclude recycled transaction fees and can include deferred
 /// issuance from an earlier settlement. All amounts are in atomic units.
@@ -251,6 +308,41 @@ mod tests {
             paid: 180,
             deferred: 20,
         }
+    }
+
+    #[test]
+    fn inactive_issuance_field_has_canonical_encoding() {
+        let saved = checkpoint();
+        let field = IssuanceCommitmentField::from_checkpoint(&saved);
+        let mut wire = field.encode();
+        assert_eq!(&wire[..2], &[1, 0]);
+        assert_eq!(&wire[2..], saved.commitment().as_bytes());
+        assert_eq!(IssuanceCommitmentField::decode(&wire), Ok(field));
+        assert_eq!(IssuanceCommitmentField::decode(&wire[..33]), Err(IssuanceFieldError::WrongLength));
+        assert_eq!(IssuanceCommitmentField::decode(&[0; 35]), Err(IssuanceFieldError::WrongLength));
+        wire[1] = 1;
+        assert_eq!(IssuanceCommitmentField::decode(&wire), Err(IssuanceFieldError::UnsupportedVersion));
+    }
+
+    #[test]
+    fn inactive_issuance_field_rejects_context_and_equal_total_substitution() {
+        let saved = checkpoint();
+        let wire = IssuanceCommitmentField::from_checkpoint(&saved).encode();
+        let field = IssuanceCommitmentField::decode(&wire).unwrap();
+        assert_eq!(field.verify_checkpoint(saved.network_id, saved.pruning_point, CAP, &saved), Ok(()));
+        assert_eq!(
+            field.verify_checkpoint(Hash::from_u64_word(7), saved.pruning_point, CAP, &saved),
+            Err(VerificationError::WrongContext)
+        );
+        assert_eq!(
+            field.verify_checkpoint(saved.network_id, Hash::from_u64_word(7), CAP, &saved),
+            Err(VerificationError::WrongContext)
+        );
+        let substituted = IssuanceCheckpoint { ordered_claims_root: Hash::from_u64_word(7), ..saved };
+        assert_eq!(
+            field.verify_checkpoint(saved.network_id, saved.pruning_point, CAP, &substituted),
+            Err(VerificationError::CommitmentMismatch)
+        );
     }
 
     #[test]
