@@ -12,7 +12,7 @@
 //! parent for a live Kaspa `getBlockTemplate` (same struct, same grind); this module is
 //! the reusable engine either way.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use kaspa_consensus_core::{
     auxpow::AuxPow, header::Header, merkle::calc_hash_merkle_root, subnets::SUBNETWORK_ID_COINBASE, tx::Transaction,
@@ -36,12 +36,19 @@ use crate::solver;
 /// kHeavyHash does *not* clear the target, so the block can only be accepted via the
 /// aux path — never a lucky native nonce on an easy test target.
 pub fn build_aux_pow(fc_header: &Header, threads: usize, stop: &AtomicBool) -> Option<(Header, AuxPow)> {
+    if stop.load(Ordering::Relaxed) {
+        return None;
+    }
+
     // Choose a nonce whose native PoW fails (on a non-trivial target nonce 0 already
     // fails; this guarantees it even on an easy genesis target). Recompute H_fc for it.
     let mut fc = fc_header.clone();
     let native = State::new(&fc);
     let mut n = 0u64;
     while native.check_pow(n).0 {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
         n = n.wrapping_add(1);
     }
     fc.nonce = n;
@@ -63,4 +70,40 @@ pub fn build_aux_pow(fc_header: &Header, threads: usize, stop: &AtomicBool) -> O
     parent.nonce = nonce;
 
     Some((fc, AuxPow { parent_header: parent, parent_coinbase: coinbase, coinbase_merkle_branch: vec![] }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kaspa_math::Uint256;
+    use kaspa_pow::auxpow::verify_aux_pow;
+    use kaspa_rpc_core::RpcRawHeader;
+
+    fn template_header() -> Header {
+        let mut header = Header::from_precomputed_hash(ZERO_HASH, vec![Hash::from_u64_word(1)]);
+        header.bits = 0x207f_ffff;
+        header.finalize();
+        header
+    }
+
+    #[test]
+    fn phase6_miner_auxpow_witness_survives_rpc_roundtrip() {
+        let template = template_header();
+        let stop = AtomicBool::new(false);
+        let (child, witness) = build_aux_pow(&template, 1, &stop).expect("synthetic parent mining succeeds");
+        let child_hash = child.hash;
+        let raw = RpcRawHeader::from(child.with_aux_pow(witness));
+        let decoded = Header::try_from(&raw).expect("submitted header decodes");
+        let witness = decoded.aux_pow.as_deref().expect("RPC preserves the witness");
+
+        assert_eq!(decoded.hash, child_hash);
+        assert!(!State::new(&decoded).check_pow(decoded.nonce).0, "child must require AuxPoW");
+        assert!(verify_aux_pow(witness, child_hash, Uint256::from_compact_target_bits(template.bits)));
+    }
+
+    #[test]
+    fn phase6_miner_auxpow_skips_expired_template() {
+        let stop = AtomicBool::new(true);
+        assert!(build_aux_pow(&template_header(), 1, &stop).is_none());
+    }
 }

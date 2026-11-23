@@ -662,3 +662,7 @@ The [native PoW report](docs/development/PHASE6_NATIVE_POW_RELAY_2026-11-22.md) 
 All eight jobs passed on implementation `bd4f65851c0267f70aced3602f61391c5fdfc578` in [run 45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178). Native job 137388968702 passed the dedicated two-node native-work test and reran it in the 36-case Phase 6 suite. It also passed 1,579 workspace tests (25 skips), and 32 no-asm tests. The test rejected above-target native PoW and confirmed valid work was accepted and relayed in both directions.
 
 The separately prepared [AuxPoW fixture](https://github.com/DeepFriedBlockchains/KascadeNetwork/commit/384d0bd221d05077f1afc66f03a552819a3fd798) is the next focused mining acceptance test. Its result is pending. This checkpoint changes documentation only.
+
+## November 22, 2026 — bundled AuxPoW miner interoperability
+
+Implemented cancellation during synthetic child nonce selection, preserved node rejection details, and added focused synthetic AuxPoW and RPC header tests. CI is pending. The [development report](docs/development/PHASE6_MINER_AUXPOW_2026-11-22.md) lists the real parent and pool acceptance cases. The independent node-to-node AuxPoW relay remains on PR #22.

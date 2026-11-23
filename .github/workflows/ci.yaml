@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run bundled AuxPoW miner regressions
+        if: github.head_ref == 'test/phase6-miner-auxpow-interop-20261122' || github.ref_name == 'test/phase6-miner-auxpow-interop-20261122'
+        run: cargo nextest run -p kaspa-miner --bin zkas-miner -E 'test(phase6_miner_auxpow_)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
