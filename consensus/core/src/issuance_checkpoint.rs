@@ -212,10 +212,7 @@ mod tests {
         assert_eq!(derive(&[a, IssuanceClaim { reward_source: source_a, ..b }]), Err(VerificationError::DuplicateRewardSource));
         assert_eq!(derive(&[a, IssuanceClaim { settlement_block: stale, ..b }]), Err(VerificationError::OffSelectedPath));
         assert_eq!(derive(&[a, IssuanceClaim { selected_index: 1, ..b }]), Err(VerificationError::OffSelectedPath));
-        assert_eq!(
-            IssuanceCheckpoint::derive_from_claims(genesis, stale, CAP, &path, &[a, b]),
-            Err(VerificationError::WrongContext)
-        );
+        assert_eq!(IssuanceCheckpoint::derive_from_claims(genesis, stale, CAP, &path, &[a, b]), Err(VerificationError::WrongContext));
         assert_eq!(derive(&[IssuanceClaim { minted: CAP, ..a }, b]), Err(VerificationError::AboveSupplyCap));
         assert_eq!(derive(&[IssuanceClaim { paid: 101, ..a }]), Err(VerificationError::UnbalancedSettlement));
         assert_eq!(derive(&[IssuanceClaim { paid: 101, ..a }, b]), Err(VerificationError::UnbalancedSettlement));
