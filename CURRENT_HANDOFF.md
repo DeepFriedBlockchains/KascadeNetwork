@@ -2,6 +2,25 @@
 
 Updated November 23, 2026.
 
+## Persisted checkpoint and selected ancestry — November 23, 2026
+
+| Draft | Exact head | Verified status |
+| --- | --- | --- |
+| [#41](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/41) | `724687069469e0ad18e9e97c32a8549513fe6442` | [45146341474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146341474), **8/8 passed**. Six focused checkpoint tests including selected-child verification; 36 authority, 1,591 native (25 skipped), and 32 no-asm passed. |
+| [#44](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/44) | `29d78741ff436ede003f69f3d1a558069d846890` | [45144884093](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144884093), **8/8 passed**. Six focused tests including process exit without RocksDB close; 36 authority, 1,591 native (26 skipped), and 32 no-asm passed. |
+| [#45](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/45) | `900ced8a25a2e704a93ee2f7c26b2d67147bd7ff` | [45153573720](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45153573720) active on validated #41. Focused selected-ancestry result pending. |
+| [#47](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/47) | `1e486d66f9d7657387cb09bf0182d5f57d2ed6fe` | Staged behind #45. Guarded fixture uses a test-only settlement row. |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` | [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224), 7/8. Focused CLI and resource checks passed. Native workspace tests running. [Metrics artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224/artifacts/14805407543) preserved. |
+| [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/48) | `3eb8661274319e6edb17d27d27bffe1bb4cb4ee6` | Staged until #43 full matrix passes. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `8b1a015b5de1d4a533a2e793bd67e17b977b9ca6` | [45151879030](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45151879030), 6/8. Native Simnet recovery prerequisites running before the corrected real-settlement step. |
+| [#49](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/49) | `a4e79bb486418f6ff96b192370aac4db0f67867e` | [45146860835](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146860835), 7/8. Focused verifier passed; no-asm running. |
+| [#50](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/50) | `e01899558e2e5746c8dd3650af42e997b9f282bc` | [45152422597](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45152422597), 4/8. Focused core issuance filter passed. It selects the canonical-claim regression with the other two verifier tests; download the native log on completion for the individual PASS line and count. |
+| [#51](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/51) | `629353e20d85eef0447b935408b61f12df64cea0` | [45153971670](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45153971670) queued. Branch `feat/phase6-issuance-checkpoint-store-20261123` stacked on #50. The exact focused storage selector precedes broader native tests. |
+
+#51 adds a single versioned issuance summary under the existing deferred authority batch. Stage and load require the same-database selected-chain guard and a separately supplied expected commitment. Stage rejects the entire batch on verification failure. The RocksDB regression covers abandoning the batch, rejecting an altered paid/deferred split, reopening the committed data, and rejecting and replacing a stale owner after reorg. The associated claim root and count commit unique claims from #50. Per-source acceptance still belongs to consensus. [Storage design](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/629353e20d85eef0447b935408b61f12df64cea0/docs/development/PHASE6_ISSUANCE_CHECKPOINT_STORE_2026-11-23.md)
+
+**Next:** Inspect #51's named storage test and #46's named payout test results. Start #48 when #43 is 8/8 and #47 when #45 is 8/8. Preserve full matrix and focused logs. The production integration still needs an authoritative reorg-aware claim/deferred view derived from real settlement, an independent digest from verified consensus evidence, and a guarded promotion test that proves the new row and readiness are atomic on actual subsidy, recycled fees, deferred obligation, restart and interrupted writes. #51 uses a batch probe and does not prove production readiness publication. The proposed 29B KCADE cap with 21B primary and 8B finite tail remains inactive.
+
 ## Validation and persistent reward accounting checkpoint — November 23, 2026
 
 - #41 at `724687069469e0ad18e9e97c32a8549513fe6442` passed all eight jobs, six focused checkpoint tests, 1,591 workspace tests and 32 no-asm tests. [45146341474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146341474)
