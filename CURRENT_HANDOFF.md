@@ -700,9 +700,9 @@ Documentation-only checkpoints preserve each exact tested source.
 
 | Draft | Branch | Implementation SHA | Actions |
 | --- | --- | --- | --- |
-| [#22 AuxPoW relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) | `test/phase6-auxpow-relay-20261122` | `3aae9a87e353b2a164fadc77528b0871500e34ee` | [45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439), 7/8. Native job `137401920040` running. Canceled duplicate push run `45085111236`. |
-| [#23 5-BPS loopback](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `d042358d92a8ab0ae99b549d18dad1c5254533a2` | [45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), 3/8. no-std, WASM check, and WASM tests passed. Native job `137406503498` running. |
-| [#24 bundled AuxPoW miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062), 2/8. no-std and WASM check passed. Native job `137407465112` is running the focused miner step. |
+| [#22 AuxPoW relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) | `test/phase6-auxpow-relay-20261122` | `3aae9a87e353b2a164fadc77528b0871500e34ee` | [45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439), 7/8. Native job `137401920040` reached the dedicated mining step. Canceled duplicate push run `45085111236`. |
+| [#23 5-BPS loopback](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `d042358d92a8ab0ae99b549d18dad1c5254533a2` | [45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), 5/8. Check, Lints, no-std, WASM check, and WASM tests passed. Native job `137406503498` running. |
+| [#24 bundled AuxPoW miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062), 3/8. no-std, WASM check, and WASM tests passed. The focused miner step passed in native job `137407465112`. |
 | [#25 combined acceptance](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) | `test/phase6-acceptance-convergence-20261122` | `b2bd46520caa96066376fc6c6bc4223bfbbc4d41` | Unvalidated staging of #17 and #19. CI deliberately deferred until the validated #22 source is added. |
 
 No job failures were reported on the active runs at this checkpoint.
@@ -713,3 +713,8 @@ for the acceptance candidate sequence and remaining gates. Draft
 [#18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) covers post-launch quantum research. Preserve
 the separate draft heads. Phase 6 remains default-off and Simnet-only,
 with shielded consensus activation disabled.
+
+The [Kaspa parent interface report](docs/development/PHASE6_KASPA_PARENT_INTERFACE_2026-11-22.md) narrows the next external
+interop fixture to upstream gRPC, including the coinbase payload budget,
+independent targets, and stale jobs. The remaining full CI runs still
+determine whether the new implementation commits are validated.
