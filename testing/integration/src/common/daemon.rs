@@ -11,7 +11,14 @@ use kaspa_wrpc_client::{KaspaRpcClient, WrpcEncoding};
 use kaspa_wrpc_server::address::WrpcNetAddress;
 use kaspad_lib::{args::Args, daemon::create_core_with_runtime};
 use parking_lot::RwLock;
-use std::{ops::Deref, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    fs::{File, OpenOptions},
+    net::{Ipv4Addr, TcpListener},
+    ops::Deref,
+    sync::{Arc, Mutex, OnceLock},
+    time::Duration,
+};
 use tempfile::TempDir;
 
 pub struct ClientManager {
@@ -114,13 +121,35 @@ pub struct Daemon {
 }
 
 fn free_port() -> u16 {
-    loop {
-        let port = rand::random::<u16>() % (u16::MAX - 1024) + 1024;
-        if let Ok(listener) = std::net::TcpListener::bind(format!("127.0.0.1:{}", port)) {
-            drop(listener);
+    // Test listeners use a separate range from typical OS-assigned client ports.
+    // Advisory locks protect the probe-to-bind gap across nextest processes
+    // and the crash-worker subprocess. Keep leases until the process exits.
+    const FIRST_PORT: u16 = 20_000;
+    const PORT_COUNT: u16 = 10_000;
+    static LEASES: OnceLock<Mutex<HashMap<u16, File>>> = OnceLock::new();
+
+    let directory = std::env::temp_dir().join("kascade-integration-listener-leases");
+    std::fs::create_dir_all(&directory).expect("create integration port lease directory");
+    let mut leases = LEASES.get_or_init(Mutex::default).lock().unwrap();
+    let start = rand::random::<u16>() % PORT_COUNT;
+    for offset in 0..PORT_COUNT {
+        let port = FIRST_PORT + (start + offset) % PORT_COUNT;
+        if leases.contains_key(&port) {
+            continue;
+        }
+        let path = directory.join(port.to_string());
+        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).expect("open integration port lease");
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => continue,
+            Err(std::fs::TryLockError::Error(error)) => panic!("lock integration port {port}: {error}"),
+        }
+        if TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok() {
+            leases.insert(port, file);
             return port;
         }
     }
+    panic!("no integration listener port available");
 }
 
 fn port_from_address(addr: Option<ContextualNetAddress>) -> u16 {

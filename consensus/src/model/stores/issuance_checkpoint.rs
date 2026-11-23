@@ -75,7 +75,8 @@ impl DbIssuanceCheckpoint {
             {
                 return Err(inconsistent("settlement checkpoint anchors are not consecutive under the same cap"));
             }
-            let previous = self.load(selected, previous_anchor)?.ok_or_else(|| inconsistent("missing persisted settlement predecessor"))?;
+            let previous =
+                self.load(selected, previous_anchor)?.ok_or_else(|| inconsistent("missing persisted settlement predecessor"))?;
             if !settlement.matches_checkpoint_transition(&previous, checkpoint) {
                 return Err(inconsistent("checkpoint changes disagree with reconciled coinbase settlement"));
             }
