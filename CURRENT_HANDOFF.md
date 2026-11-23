@@ -2,6 +2,13 @@
 
 Updated November 23, 2026.
 
+## Native-PoW and issuance integration checkpoint — November 23, 2026
+
+- #43 `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` passed 8/8 on [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224). #48 advanced on that exact base, head `8bb5b6799f85c0c3986612355c47ec11f5d19857`, [45155787562](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45155787562).
+- #49 `a4e79bb486418f6ff96b192370aac4db0f67867e` passed 8/8 on [45146860835](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146860835).
+- #46's named real Simnet settlement reopen step passed on `8b1a015b5de1d4a533a2e793bd67e17b977b9ca6` in [45151879030](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45151879030). Full matrix still active. #45, #50 and #51 remain active on the exact runs below. #47 awaits green #45.
+- Next implementation target is checked settlement amounts from the existing coinbase template, before any authenticated authority-batch publication. Production issuance remains disabled.
+
 ## Persisted checkpoint and selected ancestry — November 23, 2026
 
 | Draft | Exact head | Verified status |
