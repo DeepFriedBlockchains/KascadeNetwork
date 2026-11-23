@@ -1,6 +1,6 @@
 # Phase 6 P2P resource acceptance
 
-Source reviewed: `15f99ca97799b414e57fb20b8f53f1d85feb1f6c` (draft #25). Scope: loopback Simnet with the existing development-only Phase 6 preview. Current code has transport decoding limits and bounded count-based route queues. Neither control establishes a memory or CPU budget for a node with several peers.
+Source reviewed: `15f99ca97799b414e57fb20b8f53f1d85feb1f6c` (draft #25). Scope: a dedicated Simnet runner with the development-only Phase 6 preview and test listeners bound to loopback. Use the [validated loopback fixture changes from draft #27](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/27) when assembling the measurement source. The #25 baseline predates that fixture change. Current code has transport decoding limits and bounded count-based route queues. Neither control establishes a memory or CPU budget for a node with several peers.
 
 ## Baseline to measure
 
@@ -20,6 +20,14 @@ cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-p
 ```
 
 This command verifies fixture functionality. The measurements require resource instrumentation and an Actions artifact before this gate can be marked passed.
+
+## First instrumentation pass
+
+Use the existing loopback RPC counters before adding measurement hooks. Sample process memory from `GetMetrics` and active peer count from `GetConnections`. Take before/after deltas of the P2P transfer counters from `GetMetrics` for each fixture phase. Record per-node traffic separately. Several integration-test daemons can share one process, so sample that process's RSS once and never sum the same process across daemon endpoints. Measure after the test binaries have been built so compiler memory does not enter the runtime baseline.
+
+The transport counters cover bytes at the HTTP body boundary. Treat them as aggregate transfer observations. Decoded payload and retained queue bytes still need separate measurement. Label data with the measured boundary, and keep periodic sampling runs separate from the no-instrumentation control to quantify sampling overhead.
+
+[Draft #37](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/37) adds focused in-process count-capacity coverage for normal router traffic. Its results do not settle the byte- or memory-budget gate.
 
 ## Budgeted acceptance
 
