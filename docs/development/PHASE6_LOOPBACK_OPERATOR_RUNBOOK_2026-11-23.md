@@ -39,3 +39,7 @@ Use the corresponding loopback gRPC port for each node. Query `GetCurrentNetwork
 The [five-minute timing evidence](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45104425195/artifacts/14787499841) records 1,500 accepted transparent Simnet submissions at approximately 5 BPS with simulated PoW and matching final tips. Record CPU/RSS from the resource-sampling run separately. Require real native/AuxPoW relay evidence and representative load and disconnect testing before claiming mining or public readiness.
 
 Public testnet startup still needs owner-approved network identity, genesis, bootstrap endpoints, expected protocol and RPC exposure, observable peer and byte budgets, and authenticated production issuance and recovery. Keep this runbook's loopback configuration scoped to Simnet. The 29B issuance candidate remains inactive.
+
+## Automated command exercise (pending)
+
+The Linux Actions fixture starts the three documented commands with temporary paths and the same loopback ports. It checks RPC network identity, common fresh genesis, and the explicit peer topology. In a second pass, it restarts A with the additional test-only `--enable-unsynced-mining` flag. Default Simnet simulated PoW is used to advance two blocks, one while C is stopped. C reopens the same path and must catch up to the new tip and match A's pruning point and virtual DAA. All processes must exit successfully after SIGINT. CI uploads the exact commands, test driver observations, and per-process logs. No observed CLI results yet.
