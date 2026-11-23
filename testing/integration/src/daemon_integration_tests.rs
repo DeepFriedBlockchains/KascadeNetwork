@@ -1462,6 +1462,7 @@ impl IbdPayloadFixture {
 struct PruningRecoveryEvidence {
     selected_child: Hash,
     selected_tip: Hash,
+    finality_point: Hash,
     virtual_daa_score: u64,
     pruning_utxos: Vec<(TransactionOutpoint, UtxoEntry)>,
     virtual_utxos: Vec<(TransactionOutpoint, UtxoEntry)>,
@@ -1516,6 +1517,7 @@ impl PruningRecoveryEvidence {
             Self {
                 selected_child,
                 selected_tip,
+                finality_point: session.finality_point(),
                 virtual_daa_score: session.get_virtual_daa_score(),
                 pruning_utxos,
                 virtual_utxos,
@@ -1527,6 +1529,16 @@ impl PruningRecoveryEvidence {
         .await
         .unwrap()
     }
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+async fn mine_pruning_recovery_branch(client: &GrpcClient, miner: &Address, tag: u8, count: usize) -> Hash {
+    for _ in 0..count {
+        let template = client.get_block_template(miner.clone(), vec![tag]).await.unwrap();
+        let result = client.submit_block(template.block, false).await.unwrap();
+        assert!(result.report.is_success(), "{result:?}");
+    }
+    client.get_block_dag_info().await.unwrap().sink
 }
 
 async fn run_shielded_ibd(
@@ -1574,6 +1586,13 @@ async fn run_payload_ibd_at(
         utxoindex: true,
         override_params_file: Some(override_params_path.to_string_lossy().to_string()),
         ..Default::default()
+    };
+
+    #[cfg(feature = "phase6-staging-preview")]
+    let args = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
+        Args { outbound_target: 0, disable_dns_seeding: true, ..args }
+    } else {
+        args
     };
 
     let total_fd_limit = 10;
@@ -2070,6 +2089,13 @@ async fn run_payload_ibd_at(
         let reopened = PruningRecoveryEvidence::capture(&kaspad2, target_pruning_point, true).await;
         assert_eq!(reopened, expected, "reopened receiver differs from the exporter");
         let client = kaspad2.start().await;
+        assert!(client.get_connected_peer_info().await.unwrap().peer_info.is_empty());
+        let displaced = mine_pruning_recovery_branch(&client, &miner_address, 1, 3).await;
+        let replacement = mine_pruning_recovery_branch(&rpc_client1, &miner_address, 2, 20).await;
+        assert_ne!(displaced, expected.selected_tip);
+        assert_ne!(replacement, displaced);
+        assert_eq!(client.get_block_dag_info().await.unwrap().pruning_point_hash, target_pruning_point);
+        assert_eq!(rpc_client1.get_block_dag_info().await.unwrap().pruning_point_hash, target_pruning_point);
         client.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
         let reconnect = client.clone();
         wait_for(
@@ -2082,6 +2108,63 @@ async fn run_payload_ibd_at(
             "reopened receiver did not reconnect",
         )
         .await;
+
+        let announced = mine_pruning_recovery_branch(&rpc_client1, &miner_address, 2, 1).await;
+        let convergence = client.clone();
+        wait_for(
+            50,
+            1200,
+            move || {
+                let client = convergence.clone();
+                Box::pin(async move {
+                    let sink = client.get_block_dag_info().await.unwrap().sink;
+                    sink == replacement || sink == announced
+                })
+            },
+            "reopened receiver did not select the replacement branch",
+        )
+        .await;
+        let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        let prior_finality_point = expected.finality_point;
+        tokio::task::spawn_blocking(move || {
+            use kaspa_consensus_core::blockstatus::BlockStatus::StatusUTXOValid;
+
+            let active = manager.consensus();
+            let session = active.unguarded_session_blocking();
+            assert_eq!(session.get_block_status(replacement), Some(StatusUTXOValid));
+            let change = session.get_virtual_chain_from_block(displaced, None).unwrap();
+            assert_eq!(change.removed.len(), 3);
+            assert!(change.removed.contains(&displaced));
+            assert!(change.added.contains(&replacement));
+            assert!(session.is_chain_ancestor_of(prior_finality_point, replacement).unwrap());
+            assert_eq!(session.pruning_point(), target_pruning_point);
+        })
+        .await
+        .unwrap();
+
+        // Mine from the rejoined node to make both peers converge on one exact
+        // tip and compare the resulting committed view against the common point.
+        let converged = mine_pruning_recovery_branch(&client, &miner_address, 1, 2).await;
+        let convergence = rpc_client1.clone();
+        wait_for(
+            50,
+            1200,
+            move || {
+                let client = convergence.clone();
+                Box::pin(async move { client.get_block_dag_info().await.unwrap().sink == converged })
+            },
+            "exporter did not converge on the receiver's post-reorganization tip",
+        )
+        .await;
+        let imported = PruningRecoveryEvidence::capture(&kaspad2, target_pruning_point, true).await;
+        let exporter = PruningRecoveryEvidence::capture(&kaspad1, target_pruning_point, false).await;
+        assert_eq!(imported, exporter, "exporter and receiver disagree after the reorganization");
+        assert_eq!(imported.selected_child, expected.selected_child);
+        assert_eq!(imported.pruning_utxos, expected.pruning_utxos);
+        assert_eq!(imported.smt_commitments, expected.smt_commitments);
+        assert_eq!(imported.smt_lanes, expected.smt_lanes);
+        assert_eq!(imported.shielded_root, expected.shielded_root);
         client
     } else {
         rpc_client2
