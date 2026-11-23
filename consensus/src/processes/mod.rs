@@ -4,6 +4,8 @@ pub mod difficulty;
 #[cfg(any(test, feature = "phase6-staging-preview"))]
 pub mod emission_candidate;
 pub mod ghostdag;
+#[cfg(test)]
+mod issuance_checkpoint_model;
 pub mod parents_builder;
 pub mod past_median_time;
 pub mod pruning;

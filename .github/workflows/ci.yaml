@@ -137,6 +137,10 @@ jobs:
         if: github.head_ref == 'design/29b-emission-validation-20261122' || github.ref_name == 'design/29b-emission-validation-20261122'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(emission_candidate_)'
 
+      - name: Run authenticated issuance checkpoint model
+        if: github.head_ref == 'test/phase6-authenticated-issuance-model-20261122' || github.ref_name == 'test/phase6-authenticated-issuance-model-20261122'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(issuance_checkpoint_)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
