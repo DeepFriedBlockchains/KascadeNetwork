@@ -38,6 +38,10 @@ pub struct DbSelectedChainStore {
 }
 
 impl DbSelectedChainStore {
+    pub(super) fn is_for_database(&self, db: &Arc<DB>) -> bool {
+        Arc::ptr_eq(&self.db, db)
+    }
+
     pub fn new(db: Arc<DB>, cache_policy: CachePolicy) -> Self {
         Self {
             db: Arc::clone(&db),
