@@ -242,10 +242,14 @@ mod tests {
             let mismatched = Block::new(header, vec![changed]);
             assert!(authenticated_commitment(db, point, &mismatched, trusted_child).is_err());
 
-            Hash::from_bytes(anchor)
+            move |reopened_db| {
+                let reopened_anchor = authenticated_commitment(reopened_db, point, &child, trusted_child).unwrap();
+                assert_eq!(reopened_anchor, anchor);
+                assert!(authenticated_commitment(reopened_db, point, &mismatched, trusted_child).is_err());
+                Hash::from_bytes(reopened_anchor)
+            }
         });
     }
-
 
     #[test]
     fn issuance_checkpoint_rejects_stale_child_after_selected_branch_changes() {
@@ -276,6 +280,9 @@ mod tests {
             let first = make_child(1);
             let second = make_child(2);
             assert_ne!(first.hash(), second.hash());
+            let diffs = DbNullifierDiffStore::new(db.clone(), CachePolicy::Empty);
+            let first_nullifier = [17; 32];
+            let second_nullifier = [23; 32];
 
             let check_selected = |child: &Block, tip| -> StoreResult<Hash> {
                 let anchor = authenticated_commitment(db, point, child, child.hash())?;
@@ -285,6 +292,8 @@ mod tests {
 
             let mut batch = WriteBatch::default();
             chain.init_with_pruning_point(&mut batch, point).unwrap();
+            diffs.set_batch(&mut batch, first.hash(), vec![first_nullifier]).unwrap();
+            diffs.set_batch(&mut batch, second.hash(), vec![second_nullifier]).unwrap();
             db.write(batch).unwrap();
 
             let mut batch = WriteBatch::default();
@@ -302,8 +311,19 @@ mod tests {
             assert!(check_selected(&first, first.hash()).is_err());
             assert_eq!(check_selected(&second, second.hash()).unwrap(), fixture_commitment);
 
-            check_selected(&second, second.hash()).unwrap()
+            move |reopened_db| {
+                assert!(authenticated_commitment(reopened_db, point, &first, first.hash()).is_ok());
+                assert!(descendant_nullifiers(reopened_db, point, first.hash(), first.hash()).is_err());
+                assert!(descendant_nullifiers(reopened_db, point, first.hash(), second.hash()).is_err());
+                assert_eq!(
+                    descendant_nullifiers(reopened_db, point, second.hash(), second.hash()).unwrap(),
+                    HashSet::from([second_nullifier])
+                );
+                let anchor = authenticated_commitment(reopened_db, point, &second, second.hash()).unwrap();
+                let anchor = Hash::from_bytes(anchor);
+                assert_eq!(anchor, fixture_commitment);
+                anchor
+            }
         });
     }
-
 }
