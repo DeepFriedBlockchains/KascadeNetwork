@@ -40,3 +40,10 @@ See [the source audit](PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) for the inher
 | Fresh pruned receiver | Existing selected-child evidence proves header/body membership and the shielded root. The cumulative issuance digest is missing from consensus. | Require an independently verified versioned issuance commitment checked during block acceptance. Then verify the proof, checkpoint and readiness together without prior local history. |
 | Owner decisions | Production issuance and public testnet remain disabled. | Approve commitment placement, activation and migration, network identity/genesis, bootstrap configuration and the 29B KCADE schedule (21B primary and 8B finite tail) before activation. |
 
+## November 23 extended recovery checkpoint
+
+- Native-PoW three-node and peer-recovery acceptance remain validated on their recorded #43 and #48 heads.
+- Local replay verification passed the focused #54 step. Retained-anchor pruning passed the focused #55 step. Full matrices are pending.
+- Nonzero atomic pruning publication is in [draft #57](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/57) on the guarded #56 route. Verify both named tests in [45238200733](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45238200733), then require a process-exit test and a consensus-driven branch replacement. The selected-index replacement in #57 verifies stale checkpoint rejection.
+- A fresh pruned receiver needs a consensus-validated issuance digest independent of the checkpoint. The [carrier and recovery design](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) records the verification boundary and owner decisions. A complete recovery test must begin without a local history prefix and reject missing, substituted or stale evidence.
+- Production issuance stays disabled. Before configuring a private testnet, confirm full validation of the guarded publication chain and obtain owner approval for the isolated network profile, issuance activation and bootstrap/migration policy.

@@ -2,6 +2,23 @@
 
 Updated November 23, 2026.
 
+## Nonzero guarded publication and fresh-receiver design — November 23, 2026
+
+| PR | Exact implementation head | CI and outstanding evidence |
+| --- | --- | --- |
+| [#52](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/52) | `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` | [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690). 7/8. Named settlement + RocksDB step passed; serial native authority suite running, including port-reservation validation. |
+| [#53](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/53) | `844b9d8c2ad53733d314a33f74532dd216bebf5b` | [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761). 7/8. Combined release and coinbase step passed; individual PASS lines await completed native logs. |
+| [#54](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/54) | `c1442b2d6f81cb9e7b9a470dd023154ffd755ef5` | [45234460768](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234460768). 6/8. Replay-derived issuance step passed; native and Linux release running. |
+| [#55](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/55) | `4b6e14876e0d84eee86241c8e58db2843d63a87b` | [45235594152](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45235594152). 6/8. Retained replay across actual selected-index pruning step passed; native and Linux release running. |
+| [#56](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/56) | `ac9bacc0d60b2fc6c9e13f72aeb6626c1ead0b10` | [45236866011](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45236866011). 3/8. Focused production guarded-publication step running after formatting correction. |
+| [#57](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/57) | `23fb12e96e2451b253cae5335673269e319344c0` | [45238200733](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45238200733). Queued. Dedicated selector runs both nonzero and zero-settlement guarded regressions. |
+
+#57 branch `feat/phase6-nonzero-pruning-publication-20261123` stacks on #56 (`feat/phase6-atomic-local-issuance-readiness-20261123`). It runs two production coinbase-builder settlement transitions through the opt-in guarded publisher. The seeded selected-index fixture covers a fee-only red block in each transition, accrued and later released developer liability, wrong network and stale replay path, substituted root, duplicate sources/releases, insufficient liability, abandoned import, committed RocksDB reopen, and stale checkpoint rejection after selected-index replacement. It still requires a running CI result, and the seeded index replacement is narrower than a full consensus reorganization and atomic replacement. A process exit during nonzero publication remains to be exercised.
+
+Fresh receivers need a consensus-authenticated issuance digest. The [design](docs/development/PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) compares carriage choices, documents canonical digest fields and independent evidence, and recommends reviewing a versioned selected-parent digest carried by the selected child's coinbase. No placement was added to consensus. The owner must approve the carrier, activation and what bootstrap or migration trust a fresh receiver can use. Production issuance and network launch remain disabled.
+
+**Next executable gates.** Inspect completed #52 and #53 native logs for the authority/port outcome and individual named assertions. Confirm #54–#56 final matrices, then confirm both named #57 regressions. After #57 passes, exercise process exit before the nonzero readiness batch and actual consensus-driven stale owner replacement on the local route. Resolve the owner-controlled parameters, implement the approved commitment's full-validator path, then prove a fresh pruned receiver without a complete local replay prefix can verify and publish authenticated nonzero issuance atomically.
+
 ## Four-assignment validation and readiness publication — November 23, 2026
 
 | PR | Exact head | Actions evidence |
