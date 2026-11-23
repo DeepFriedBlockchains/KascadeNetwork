@@ -1,6 +1,8 @@
 pub mod block_depth;
 pub mod coinbase;
 pub mod difficulty;
+#[cfg(any(test, feature = "phase6-staging-preview"))]
+pub mod emission_candidate;
 pub mod ghostdag;
 pub mod parents_builder;
 pub mod past_median_time;
