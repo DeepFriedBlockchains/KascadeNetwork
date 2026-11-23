@@ -2771,8 +2771,7 @@ mod tests {
         assert!(release(&tc, &a1, 2, old_claims[0].minted - old_claims[0].paid).is_none());
         let old_releases = release(&tc, &a2, 3, 0).into_iter().collect::<Vec<_>>();
         assert_eq!(old_releases.len(), if developer { 1 } else { 0 });
-        let old =
-            IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &old_releases).unwrap();
+        let old = IssuanceCheckpoint::derive_from_settlements(genesis, a2.hash(), CAP, &old_path, &old_claims, &old_releases).unwrap();
         assert_eq!((old.paid, old.deferred), (old.minted, 0));
         {
             let selected = consensus.storage.selected_chain_store.read();
@@ -2796,8 +2795,7 @@ mod tests {
         insert(&tc, &b3).await;
         assert_eq!(consensus.get_sink(), b3.hash());
         let new_path = [genesis, split.hash(), b1.hash(), b2.hash(), b3.hash()];
-        let new_claims =
-            [claim(&split, &b1, 2, 1, developer), claim(&b1, &b2, 3, 3, developer), claim(&b2, &b3, 4, 5, developer)];
+        let new_claims = [claim(&split, &b1, 2, 1, developer), claim(&b1, &b2, 3, 3, developer), claim(&b2, &b3, 4, 5, developer)];
         let outstanding = new_claims[2].minted - new_claims[2].paid;
         assert!(release(&tc, &b1, 2, new_claims[0].minted - new_claims[0].paid).is_none());
         let new_releases = release(&tc, &b2, 3, 0).into_iter().collect::<Vec<_>>();
