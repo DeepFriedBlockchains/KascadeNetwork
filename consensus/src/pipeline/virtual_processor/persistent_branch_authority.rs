@@ -191,13 +191,35 @@ impl PersistentBranchAuthority {
         retention: ReadinessPoint,
         verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<()>,
     ) -> StoreResult<PersistentBranchLease> {
+        self.complete_import_with_staging(token, point, retention, |db, point| {
+            verify(db, point)?;
+            Ok(None)
+        })
+    }
+
+    /// Complete an import with optional verified rows in the first ready write.
+    pub(super) fn complete_import_with_staging<'guard>(
+        &self,
+        token: PersistentImportToken,
+        point: ReadinessPoint,
+        retention: ReadinessPoint,
+        verify: impl FnOnce(&Arc<DB>, ReadinessPoint) -> StoreResult<Option<DeferredDbBatch<'guard>>>,
+    ) -> StoreResult<PersistentBranchLease> {
         let mut state = self.inner.state.lock();
         self.check_import(&mut state, &token)?;
         let metadata = CommittedImportMetadata::verify(&self.db, point, retention)?;
-        verify(&self.db, point)?;
+        let batch = verify(&self.db, point)?;
         self.check_import(&mut state, &token)?;
         metadata.verify_current(&self.db)?;
-        let revision = self.readiness.complete_sync(point)?;
+        let revision = if let Some(mut batch) = batch {
+            batch.ensure_database(&self.db)?;
+            batch.ensure_key_prefix(DatabaseStorePrefixes::KascadeBranchAuthorityData as u8)?;
+            let revision = self.readiness.stage_ready(&mut batch, point)?;
+            batch.commit()?;
+            revision
+        } else {
+            self.readiness.complete_sync(point)?
+        };
         state.verified = Some(VerifiedReadiness { revision, metadata });
         state.generation = Arc::new(());
         state.import = Weak::new();

@@ -80,6 +80,18 @@ pub(super) fn verify_pruning_shielded_at_tip(
 }
 
 pub(super) fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block, trusted_child: Hash) -> StoreResult<[u8; 32]> {
+    let coinbase = authenticated_selected_child_coinbase(db, point, child, trusted_child)?;
+    extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))
+}
+
+/// Verify selected-child membership before interpreting any coinbase commitment.
+/// Callers still need consensus enforcement of the particular field they read.
+pub(super) fn authenticated_selected_child_coinbase<'a>(
+    db: &Arc<DB>,
+    point: Hash,
+    child: &'a Block,
+    trusted_child: Hash,
+) -> StoreResult<&'a kaspa_consensus_core::tx::Transaction> {
     let headers = DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty);
     let header = headers.get_header(trusted_child)?;
     if trusted_child == point
@@ -103,7 +115,7 @@ pub(super) fn authenticated_commitment(db: &Arc<DB>, point: Hash, child: &Block,
     if calc_hash_merkle_root(child.transactions.iter()) != header.hash_merkle_root {
         return Err(inconsistent("shielded commitment child body does not match the authenticated header"));
     }
-    extract_state_root(&coinbase.payload).ok_or_else(|| inconsistent("missing authenticated shielded commitment"))
+    Ok(coinbase)
 }
 
 fn verify_commitment(

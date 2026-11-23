@@ -2680,11 +2680,48 @@ impl VirtualStateProcessor {
         proof: &super::import_proof_readiness::ValidatedImportProof,
         child: &kaspa_consensus_core::block::Block,
     ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        self.finish_verified_ibd_import_with_issuance(token, proof, child, None)
+    }
+
+    /// With issuance required, missing replay cannot publish readiness.
+    pub(super) fn finish_verified_ibd_import_with_issuance(
+        &self,
+        token: super::persistent_branch_authority::PersistentImportToken,
+        proof: &super::import_proof_readiness::ValidatedImportProof,
+        child: &kaspa_consensus_core::block::Block,
+        issuance: Option<(
+            Option<crate::model::stores::issuance_checkpoint::LocalIssuanceReplay<'_>>,
+            &kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint,
+        )>,
+    ) -> kaspa_database::prelude::StoreResult<super::persistent_branch_authority::PersistentBranchLease> {
+        use crate::model::stores::issuance_checkpoint::DbIssuanceCheckpoint;
+        use kaspa_database::prelude::DeferredDbBatch;
+
         self.with_authority_point(|point| {
             let _virtual = self.try_read_staging_virtual()?;
-            self.finish_authority_import_at(token, point, point, |db, point| {
+            let verify_remaining = |db: &Arc<DB>, point| {
                 self.verify_authenticated_staging(db, point, proof, child, None)?;
                 super::import_readiness::verify_virtual_utxos(db, point)
+            };
+            let Some((replay, checkpoint)) = issuance else {
+                return self.finish_authority_import_at(token, point, point, verify_remaining);
+            };
+            let selected = self
+                .selected_chain_store
+                .try_read()
+                .ok_or_else(|| StoreError::DataInconsistency("selected chain is busy during issuance verification".into()))?;
+            self.branch_authority.complete_import_with_staging(token, point, point, |db, point| {
+                super::import_readiness::verify_pruning_utxos(db, point)?;
+                self.verify_authority_smt(db, point)?;
+                verify_remaining(db, point)?;
+                let replay =
+                    replay.ok_or_else(|| StoreError::DataInconsistency("missing independently verified issuance replay".into()))?;
+                if replay.network_genesis != self.genesis.hash || replay.selected_path.last() != Some(&point.hash) {
+                    return Err(StoreError::DataInconsistency("issuance replay does not match the current pruning context".into()));
+                }
+                let mut batch = DeferredDbBatch::new(db.clone());
+                DbIssuanceCheckpoint::new(db.clone()).stage_retained_replay_checkpoint(&mut batch, &selected, replay, checkpoint)?;
+                Ok(Some(batch))
             })
         })
     }
