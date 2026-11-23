@@ -148,6 +148,10 @@ jobs:
           github.head_ref == 'test/phase6-merge-payout-boundary-20261122' || github.ref_name == 'test/phase6-merge-payout-boundary-20261122'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(reward_claim_excludes_non_daa_red_subsidy_but_returns_its_fees)'
 
+      - name: Run real Simnet eligible red membership regression
+        if: github.head_ref == 'test/phase6-merge-payout-boundary-20261122' || github.ref_name == 'test/phase6-merge-payout-boundary-20261122'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(reward_claim_simnet_merge_aggregates_eligible_red_subsidy)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
