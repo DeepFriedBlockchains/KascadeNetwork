@@ -696,15 +696,19 @@ Documentation-only checkpoints preserve each exact tested source.
 | [#20 testnet profile audit](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/20) | `50b0d19290c54ffef5df3e0919d99645bb528e19` | [45078524217, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45078524217/attempts/3), 8/8. Native evidence from attempt 2 includes 35 Phase 6 cases, 1,579 workspace tests (25 skipped) and 32 no-asm. Attempt 2's WASM job stalled on txscript, then failed with an unavailable log. The single-job retry succeeded on the exact SHA. |
 | [#21 native proof-of-work relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/21) | `bd4f65851c0267f70aced3602f61391c5fdfc578` | [45081005178](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45081005178), 8/8. The dedicated native mining test, 36 Phase 6 cases, 1,579 workspace tests (25 skipped), and 32 no-asm passed. Docs checkpoint `8ac6725cc4fc69c1c688a8cf2398415b3ddfe5eb`. |
 
-[Draft #22](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) at `3aae9a87e353b2a164fadc77528b0871500e34ee`
-is next. [Run 45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439)
-will run focused native and auxiliary mining regressions before the
-broader matrix. The AuxPoW test uses a synthetic parent and the inherited
-commitment domain. Approved KASCADE domain parameters and actual mining
-pool interoperability remain separate.
+## Current Phase 6 work and CI
 
-The [5-BPS harness and evidence plan](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/KASCADE_5BPS_REPORT.md)
-are staged on a separate branch with no measured results yet. Execute the
-paced loopback baseline after the next focused acceptance run. The
-[post-quantum research](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) now also tracks
-shielded authorization, privacy, proving stack and migration work.
+| Draft | Branch | Implementation SHA | Actions |
+| --- | --- | --- | --- |
+| [#22 AuxPoW relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) | `test/phase6-auxpow-relay-20261122` | `3aae9a87e353b2a164fadc77528b0871500e34ee` | [45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439), 7/8. Native job `137401920040` running. Canceled duplicate push run `45085111236`. |
+| [#23 5-BPS loopback](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `d042358d92a8ab0ae99b549d18dad1c5254533a2` | [45086577123](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086577123), 2/8. no-std and WASM check passed. Native job `137406503498` running. |
+| [#24 bundled AuxPoW miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062), queued at checkpoint. |
+
+No job failures were reported on the active runs at this checkpoint.
+Review #22's dedicated relay test output first. Collect #23's checked
+configuration and per-block timing artifacts and review #24's bundled
+miner regressions in parallel. Use the [dated checkpoint report](docs/development/PHASE6_RELAY_EVIDENCE_CHECKPOINT_2026-11-22.md)
+for the acceptance candidate sequence and remaining gates. Draft
+[#18](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) covers post-launch quantum research. Preserve
+the separate draft heads. Phase 6 remains default-off and Simnet-only,
+with shielded consensus activation disabled.
