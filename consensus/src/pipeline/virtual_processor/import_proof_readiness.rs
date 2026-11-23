@@ -195,6 +195,8 @@ mod tests {
         };
         use crate::processes::ghostdag::ordering::SortableBlock;
         use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, config::params::ForkActivation};
+        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
+        use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
         use rocksdb::WriteBatch;
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
@@ -259,7 +261,61 @@ mod tests {
         db.write(batch).unwrap();
         assert!(processor.authority_lease().is_err());
         let recovered = processor.recover_authenticated_staging(point, &proof, &child, &child).unwrap();
-        processor.commit_staging_promotion_checked(recovered, &proof, &child, true).unwrap();
+        drop(recovered);
+        const CAP: u64 = 2_900_000_000_000_000_000;
+        let genesis = DEVNET_GENESIS.hash;
+        assert_eq!(point.hash, genesis);
+        let path = [genesis];
+        let replay =
+            || LocalIssuanceReplay { network_genesis: genesis, supply_cap: CAP, selected_path: &path, claims: &[], releases: &[] };
+        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CAP, &path, &[], &[]).unwrap();
+        {
+            let readiness = DbBranchReadiness::new(db.clone());
+            let store = DbIssuanceCheckpoint::new(db.clone());
+            let unavailable = || {
+                let selected = processor.selected_chain_store.read();
+                assert!(store.load_retained_replay_checkpoint(&selected, genesis, point.hash, CAP).is_err());
+                assert!(!readiness.is_ready(point).unwrap());
+                assert!(db.get(PROMOTION_KEY).unwrap().is_none());
+            };
+            let token = processor.begin_authority_import().unwrap();
+            drop(token);
+            unavailable();
+
+            let token = processor.begin_authority_import().unwrap();
+            assert!(processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((None, &checkpoint))).is_err());
+            unavailable();
+
+            let token = processor.begin_authority_import().unwrap();
+            let substituted = IssuanceCheckpoint { ordered_claims_root: child.hash(), ..checkpoint };
+            assert!(
+                processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay()), &substituted))).is_err()
+            );
+            unavailable();
+
+            let token = processor.begin_authority_import().unwrap();
+            let recovered = processor
+                .finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay()), &checkpoint)))
+                .unwrap();
+            assert!(readiness.is_ready(point).unwrap());
+            {
+                let selected = processor.selected_chain_store.read();
+                assert_eq!(store.load_retained_replay_checkpoint(&selected, genesis, point.hash, CAP).unwrap(), checkpoint);
+            }
+            processor.commit_staging_promotion_checked(recovered, &proof, &child, true).unwrap();
+            assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
+        }
+        drop(consensus);
+        drop(db);
+
+        let db = connect();
+        assert!(DbBranchReadiness::new(db.clone()).is_ready(point).unwrap());
+        let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+        let guard = selected.read();
+        assert_eq!(
+            DbIssuanceCheckpoint::new(db.clone()).load_retained_replay_checkpoint(&guard, genesis, point.hash, CAP).unwrap(),
+            checkpoint
+        );
         assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
     }
 

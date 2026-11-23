@@ -142,6 +142,12 @@ jobs:
         if: github.head_ref == 'feat/phase6-retained-issuance-anchor-20261123' || github.ref_name == 'feat/phase6-retained-issuance-anchor-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=model::stores::issuance_checkpoint::tests::retained_issuance_anchor_recovers_after_pruning_and_rejects_stale_selection)'
 
+      - name: Verify locally authenticated issuance and guarded pruning readiness
+        if: github.head_ref == 'feat/phase6-atomic-local-issuance-readiness-20261123' || github.ref_name == 'feat/phase6-atomic-local-issuance-readiness-20261123'
+        run: >-
+          cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview
+          -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_reopen_before_promotion_rejects_incomplete_evidence)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
