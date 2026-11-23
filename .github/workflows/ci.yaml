@@ -96,6 +96,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run 29B emission reference vectors
+        if: github.head_ref == 'design/29b-emission-validation-20261122' || github.ref_name == 'design/29b-emission-validation-20261122'
+        run: cargo nextest run -p kaspa-consensus --test phase6_monetary_policy_model
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 

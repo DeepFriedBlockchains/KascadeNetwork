@@ -43,19 +43,16 @@ upstream integer types and overflow safety.
 
 ## 4. Cascading Emission
 
-Primary issuance is exactly 21,000,000,000 KCADE. - Initial subsidy: 50
-KCADE - Standard Cascade interval: 16,470,000 rewarding units, subject
-to audit of the upstream reward clock - Reward sequence: 50, 49, 48 … 2,
-1 KCADE - 16,470,000 \* sum(1..50) = 20,999,250,000 KCADE - Extend the
-final 1-KCADE stage by 750,000 units - Total primary units:
-824,250,000 - Exact primary issuance: 21B KCADE
+The approved allocation is up to 21,000,000,000 KCADE for primary issuance
+and 8,000,000,000 KCADE reserved for a finite, long-term tail. Cumulative
+issuance cannot exceed 29,000,000,000 KCADE. Burns do not replenish either
+issuance budget.
 
-Finite tail: - 0.5 KCADE per rewarding unit - Exactly 16,000,000,000 tail
-units - Exact tail issuance: 8B KCADE - Subsidy becomes 0 permanently
-afterward - Exact scheduled maximum: 29B KCADE
-
-Add independent full-schedule tests and boundary vectors for every
-Cascade, primary-to-tail, and tail-to-zero.
+The exact curve, reward clock, phase boundaries and tail duration require
+owner approval. [Monetary design and reference vectors](docs/development/PHASE6_29B_EMISSION_DESIGN_2026-11-22.md)
+compare the earlier cascade and fixed-tail figures with alternative finite
+tails. Add independent full-schedule and boundary vectors, including the
+transition to zero, once the schedule is approved.
 
 ## 5. Reward distribution
 
@@ -311,7 +308,7 @@ separately.
 1.  Independent KASCADE chain
 2.  No premine
 3.  No founder/creator allocation
-4.  Exact scheduled maximum 29B KCADE
+4.  Cumulative issuance bounded by 29B KCADE
 5.  Integer KASMI monetary consensus
 6.  Native kHeavyHash remains valid
 7.  5-BPS target with engineered supporting parameters
