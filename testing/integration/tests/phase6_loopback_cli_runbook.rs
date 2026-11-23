@@ -193,7 +193,17 @@ async fn phase6_loopback_cli_runbook() {
 }
 
 async fn record_node_metrics(client: &GrpcClient, node: &str, stage: &str) {
-    let report = client.get_metrics(true, true, true, false, true, false).await.unwrap();
+    let report = timeout(Duration::from_secs(10), async {
+        loop {
+            let report = client.get_metrics(true, true, true, false, true, false).await.unwrap();
+            if report.process_metrics.as_ref().expect("node must return requested process metrics").resident_set_size > 0 {
+                return report;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("node {node} did not publish a process sample at {stage}"));
     let process = report.process_metrics.expect("node must return requested process metrics");
     let bandwidth = report.bandwidth_metrics.expect("node must return requested bandwidth metrics");
     let storage = report.storage_metrics.expect("node must return requested storage metrics");
