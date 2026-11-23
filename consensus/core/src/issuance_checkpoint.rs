@@ -106,15 +106,11 @@ mod tests {
     #[test]
     fn rejects_unbalanced_overflowing_and_over_cap_summaries() {
         let original = checkpoint();
-        let verify = |candidate: IssuanceCheckpoint| {
-            candidate.verify(original.network_id, original.pruning_point, CAP, candidate.commitment())
-        };
+        let verify =
+            |candidate: IssuanceCheckpoint| candidate.verify(original.network_id, original.pruning_point, CAP, candidate.commitment());
         let at_cap = IssuanceCheckpoint { minted: CAP, paid: CAP - 20, ..original };
         assert_eq!(verify(at_cap), Ok(()));
-        assert_eq!(
-            verify(IssuanceCheckpoint { minted: CAP + 1, paid: CAP - 19, ..original }),
-            Err(VerificationError::AboveSupplyCap)
-        );
+        assert_eq!(verify(IssuanceCheckpoint { minted: CAP + 1, paid: CAP - 19, ..original }), Err(VerificationError::AboveSupplyCap));
         assert_eq!(verify(IssuanceCheckpoint { paid: 181, ..original }), Err(VerificationError::UnbalancedSettlement));
         assert_eq!(verify(IssuanceCheckpoint { paid: u64::MAX, ..original }), Err(VerificationError::UnbalancedSettlement));
     }
