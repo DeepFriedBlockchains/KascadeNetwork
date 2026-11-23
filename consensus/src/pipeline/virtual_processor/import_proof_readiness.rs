@@ -497,7 +497,7 @@ mod tests {
         let directory = std::env::var_os(CRASH_DIRECTORY).unwrap();
         let db = ConnBuilder::default().with_files_limit(10).with_db_path(directory.into()).build().unwrap();
         let before = stage == "before";
-        assert!(before || stage == "after");
+        assert!(before || stage == "after" || stage == "retry");
         let (consensus, point, proof, child) = guarded_issuance_fixture(&db, true, before);
         let processor = consensus.virtual_processor();
         let genesis = DEVNET_GENESIS.hash;
@@ -531,9 +531,13 @@ mod tests {
             releases: &releases,
         };
         let token = processor.begin_authority_import().unwrap();
-        GUARDED_PUBLICATION_EXIT.set(if before { 71 } else { 72 });
-        processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay), &checkpoint))).unwrap();
-        panic!("guarded publisher returned without exiting");
+        if stage != "retry" {
+            GUARDED_PUBLICATION_EXIT.set(if before { 71 } else { 72 });
+        }
+        let lease =
+            processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay), &checkpoint))).unwrap();
+        assert_eq!(stage, "retry", "guarded publisher returned without exiting");
+        drop(lease);
     }
 
     #[test]
@@ -583,14 +587,23 @@ mod tests {
             point
         };
 
+        let read_committed = || {
+            let db = connect();
+            let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+            let store = DbIssuanceCheckpoint::new(db.clone());
+            let result = store.load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP).unwrap();
+            assert!(DbBranchReadiness::new(db).is_ready(point).unwrap());
+            result
+        };
+
         run("after", 72);
-        let db = connect();
-        let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
-        let result = DbIssuanceCheckpoint::new(db.clone())
-            .load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP)
-            .unwrap();
+        let result = read_committed();
         assert_eq!((result.claim_count, result.minted, result.paid, result.deferred), (4, 6_000, 6_000, 0));
-        assert!(DbBranchReadiness::new(db).is_ready(point).unwrap());
+
+        // The caller lost the acknowledgement. A fresh worker retries the
+        // same evidence and must publish identical accounting.
+        run("retry", 0);
+        assert_eq!(read_committed(), result);
     }
 
     #[test]
