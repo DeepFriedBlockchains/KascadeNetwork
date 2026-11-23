@@ -2,6 +2,25 @@
 
 Updated November 23, 2026.
 
+## Authenticated issuance and live-peer checkpoint — November 23, 2026
+
+| Draft | Branch | Exact head | Actions evidence |
+| --- | --- | --- | --- |
+| [#39](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/39) | `test/phase6-issuance-checkpoint-persistence-20261122` | `db7d221116af81a2b7cbba9f9646d760052a56f2` | [45136232500](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45136232500), **8/8 passed**. Five focused checkpoint tests, 36 authority regressions, 1,590 native tests (25 skipped), and 32 no-asm tests passed. |
+| [#41](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/41) | `test/phase6-selected-child-issuance-binding-20261123` | `e7767be32084943bf648f6b1f70bc426444a7b4a` | [45144878404](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144878404) triggered against validated #39. Tested sources inherited from `b997d82bc6e72384a5ba747485812698cce425dd`; result pending. |
+| [#44](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/44) | `test/phase6-issuance-checkpoint-process-exit-20261123` | `29d78741ff436ede003f69f3d1a558069d846890` | [45144884093](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144884093) triggered against validated #39. Tested sources inherited from `e87401b6bca55a5684f513beb0fa893fed862d24`; result pending. |
+| [#45](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/45) | `test/phase6-issuance-current-selected-path-20261123` | `7fe95e5d3e6cf5e1cb994dbba0835f8c74069c5b` | Staged. Launch after #41 is green. |
+| [#47](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/47) | `test/phase6-guarded-issuance-publication-20261123` | `1e486d66f9d7657387cb09bf0182d5f57d2ed6fe` | Code pushed and staged behind #45. Dedicated focused test configured. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `test/phase6-persisted-red-settlement-20261123` | `7119ef849289553e0e1b72e818f8e6ba003260bb` | [45143838285](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143838285), 4/8 so far. Native 137588250219 was compiling/running the shielded persistent reopen prerequisite. Focused settlement pending. |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `test/phase6-cli-real-pow-recovery-20261123` | `13dc263c9883b858ca30173d5087f954bc46b58d` | [45143950379](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379), 3/8 so far. Native 137588618046 executing the focused CLI step. Artifact not yet available. |
+| [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/48) | `test/phase6-native-pow-live-peer-reconnect-20261123` | `eaf773602583c3223cd65c23dfdcf3b99cbe5f80` | Code pushed and staged behind #43. Dedicated CLI regression and artifact configured. |
+
+#47 factors the existing guarded publisher and exercises it with a test-only settlement row in the same deferred RocksDB batch as the promotion marker and ready revision. The test rejects malformed selected-child body input without publishing the row or marker, then reopens after a valid promotion and checks an equal-total paid/deferred alteration against an independent fixture digest. The production path continues to use existing proof, shielded, SMT, UTXO and lease checks. Production still needs a consensus-authenticated issuance digest and a bounded persisted claim/deferred-balance view. #46 supplies the separate real legacy payout reconciliation. The proposed 29B KCADE finite policy remains 21B primary and 8B tail, inactive in production.
+
+#48 adds a one-session loopback TCP forwarder for C's sole upstream link. It cuts the live connection with C still running, checks three-block native-PoW catch-up and agreement across A/B/C, then reopens C while it is still isolated and checks its persisted state. Per-node observations and daemon logs are staged. #43's operator runbook remains authoritative for the original three-node test. [Runbook](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/13dc263c9883b858ca30173d5087f954bc46b58d/docs/development/PHASE6_LOOPBACK_OPERATOR_RUNBOOK_2026-11-23.md)
+
+**Next:** Read #43's focused CLI and metrics steps and inspect its artifact when available. Start #48 on validated #43, resolving any required parent fixes on the stacked branch first. Observe #46's focused real-payout result and matrix. On #41 green start #45, then #47 after #45 green. Record #44's exact process-exit result separately. Remaining production gates include authenticated mixed subsidy/fee/deferred settlement, real-PoW competing-tip and representative resource tests, and owner-approved network configuration.
+
 ## Two-task checkpoint — November 23, 2026
 
 | Draft | Exact source SHA | Actions and result |
