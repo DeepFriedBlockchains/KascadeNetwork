@@ -310,9 +310,7 @@ mod tests {
         db.write(batch).unwrap();
         let mut batch = WriteBatch::default();
         if nonzero {
-            selected
-                .apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![intermediate, point.hash] })
-                .unwrap();
+            selected.apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![intermediate, point.hash] }).unwrap();
         }
         stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
         db.write(batch).unwrap();
@@ -361,8 +359,13 @@ mod tests {
         } else {
             (vec![genesis], vec![], vec![])
         };
-        let replay =
-            || LocalIssuanceReplay { network_genesis: genesis, supply_cap: CAP, selected_path: &path, claims: &claims, releases: &releases };
+        let replay = || LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
         let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CAP, &path, &claims, &releases).unwrap();
         if nonzero {
             assert_eq!((checkpoint.claim_count, checkpoint.minted, checkpoint.paid, checkpoint.deferred), (4, 6_000, 6_000, 0));
