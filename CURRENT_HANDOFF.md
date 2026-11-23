@@ -2,6 +2,24 @@
 
 Updated November 23, 2026.
 
+## Settlement reconciliation and validation — November 23, 2026
+
+| Draft | Exact head | GitHub Actions evidence |
+| --- | --- | --- |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` | [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224), **8/8 passed**. Both focused CLI cases, usable per-node resource samples, 39 authority, 1,579 native and 32 no-asm passed. [Metrics artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224/artifacts/14805407543). |
+| [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/48) | `9132237fd4d2db68b3b4ed56cfa9d767c8990af6` | [45156258308](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156258308) queued. Launched after #43 validated. Original [45155787562](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45155787562) failed signature formatting, fixed without changing tests. |
+| [#45](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/45) | `900ced8a25a2e704a93ee2f7c26b2d67147bd7ff` | [45153573720](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45153573720), 6/8. Native prerequisites running. |
+| [#47](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/47) | `1e486d66f9d7657387cb09bf0182d5f57d2ed6fe` | Staged behind #45. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `8b1a015b5de1d4a533a2e793bd67e17b977b9ca6` | [45151879030](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45151879030), 7/8. The named real Simnet red-block payout reopen regression passed. Native authority suite running. |
+| [#49](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/49) | `a4e79bb486418f6ff96b192370aac4db0f67867e` | [45146860835](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146860835), **8/8 passed**. Two focused verifier cases and 36 authority, 1,592 native and 32 no-asm passed. |
+| [#50](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/50) | `e01899558e2e5746c8dd3650af42e997b9f282bc` | [45152422597](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45152422597), 7/8. Focused issuance step passed; individual canonical-case line awaits completed native log. |
+| [#51](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/51) | `ed32a290dff167b4c6e67397fe9080e5523833c0` | [45154174813](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45154174813), 5/8. Named RocksDB checkpoint test passed. |
+| [#52](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/52) | `44da60377d7ef13557264f25e41f908797cacee0` | [45156348643](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156348643) pending. Initial [45156178173](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156178173) failed rustfmt on an assertion initializer; formatting-only correction pushed. Branch `feat/phase6-coinbase-settlement-checkpoint-20261123`. |
+
+#52 reconciles existing expected coinbase outputs and merged reward inputs into new subsidy, net paid subsidy, recycled fees, and developer deferred amounts. It checks the resulting cumulative checkpoint transition, rejects duplicates and overflow, and covers eligible red rewards, non-DAA red fees, deferred accrual/release and altered totals. It is an opt-in reconciliation component, with no change to active reward construction. [Design](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/44da60377d7ef13557264f25e41f908797cacee0/docs/development/PHASE6_COINBASE_SETTLEMENT_CHECKPOINT_2026-11-23.md)
+
+Next run the #52 named test to confirm the adapter; inspect #48's reconnect artifact and #50's completed native log for the individual canonical-claim result. Advance #47 only when #45 validates. Production still needs ordered claim attribution bound to independently authenticated selected-chain evidence. The guarded publisher must retain the selected and virtual guards, then stage verified settlement alongside readiness in one #51 authority batch. Exercise the actual publication path across interruption, RocksDB reopen, and branch replacement before activation. The proposed 29B KCADE finite cap and 21B/8B allocations remain inactive.
+
 ## Native-PoW and issuance integration checkpoint — November 23, 2026
 
 - #43 `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` passed 8/8 on [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224). #48 advanced on that exact base, head `8bb5b6799f85c0c3986612355c47ec11f5d19857`, [45155787562](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45155787562).
