@@ -3,7 +3,7 @@ use kaspa_consensus_core::{
     coinbase::*,
     config::params::{ForkActivation, ForkedParam},
     errors::coinbase::{CoinbaseError, CoinbaseResult},
-    issuance_checkpoint::{IssuanceCheckpoint, IssuanceClaim},
+    issuance_checkpoint::{DeveloperPayoutRelease, IssuanceCheckpoint, IssuanceClaim},
     subnets,
     tx::{ScriptPublicKey, ScriptVec, Transaction, TransactionOutput},
 };
@@ -36,7 +36,7 @@ pub struct CoinbaseClaimBatch {
     pub settlement: CoinbaseSettlement,
     pub claims: Vec<IssuanceClaim>,
     /// Developer balance paid in this block, kept separate from source claims.
-    pub deferred_payout: u64,
+    pub deferred_payout: Option<DeveloperPayoutRelease>,
 }
 
 impl CoinbaseSettlement {
@@ -415,6 +415,11 @@ impl CoinbaseManager {
         if !accrual_active && deferred_payout != 0 {
             return None;
         }
+        let deferred_payout = (deferred_payout > 0).then_some(DeveloperPayoutRelease {
+            settlement_block: context.settlement_block,
+            selected_index: context.selected_index,
+            amount: deferred_payout,
+        });
         Some(CoinbaseClaimBatch { settlement, claims, deferred_payout })
     }
 
@@ -1075,7 +1080,7 @@ mod tests {
         let context = CoinbaseClaimContext { settlement_block: current, selected_index: 2, daa_score: 101, deferred_before: 30 };
         let attributed = manager.attribute_settlement_claims(&template, &ghostdag, &rewards, &non_daa, context).unwrap();
         assert_eq!(attributed.settlement, settlement);
-        assert_eq!(attributed.deferred_payout, 0);
+        assert!(attributed.deferred_payout.is_none());
         assert_eq!(attributed.claims.iter().map(|claim| claim.reward_source).collect::<Vec<_>>(), [blue, red]);
         let prior_claim =
             IssuanceClaim { reward_source: Hash::from_u64_word(7), settlement_block: parent, selected_index: 1, minted: 30, paid: 0 };
@@ -1169,8 +1174,25 @@ mod tests {
         let payout_context = CoinbaseClaimContext { daa_score: 110, deferred_before: 180, ..context };
         let attributed_payout = manager.attribute_settlement_claims(&payout, &ghostdag, &rewards, &non_daa, payout_context).unwrap();
         assert_eq!(attributed_payout.settlement, paid);
-        assert_eq!(attributed_payout.deferred_payout, 330);
+        let release = attributed_payout.deferred_payout.unwrap();
+        assert_eq!(release, DeveloperPayoutRelease { settlement_block: current, selected_index: 2, amount: 330 });
         assert_eq!(attributed_payout.claims.iter().map(|claim| claim.paid).sum::<u64>(), 2_850);
+        let prior_liability = IssuanceClaim { minted: 180, ..prior_claim };
+        let prior_payout_checkpoint =
+            IssuanceCheckpoint::derive_from_claims(network, parent, CAP, &[network, parent], &[prior_liability]).unwrap();
+        let mut payout_claims = attributed_payout.claims;
+        payout_claims.push(prior_liability);
+        let payout_checkpoint = IssuanceCheckpoint::derive_from_settlements(
+            network,
+            current,
+            CAP,
+            &[network, parent, current],
+            &payout_claims,
+            &[release],
+        )
+        .unwrap();
+        assert_eq!((payout_checkpoint.minted, payout_checkpoint.paid, payout_checkpoint.deferred), (3_180, 3_180, 0));
+        assert!(paid.matches_checkpoint_transition(&prior_payout_checkpoint, &payout_checkpoint));
 
         template.tx.outputs[0].value = u64::MAX;
         assert!(CoinbaseManager::reconcile_settlement(&template, &ghostdag, &rewards, &non_daa, 30).is_none());
