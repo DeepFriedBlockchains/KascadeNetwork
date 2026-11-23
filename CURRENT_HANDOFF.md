@@ -797,3 +797,17 @@ Next: verify #30's pending replay CI, then extend real fixture coverage to quali
 [Draft #31](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/31) isolates the real coinbase builder's treatment of qualified red and non-DAA red sources. Exact source `5228e73e9b8a3981f611a5cee512fbe24b50f5f3`, branch `test/phase6-merge-fee-accounting-20261122`, [run 45103888993](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45103888993). It checks output scripts and amounts and distinguishes 3,004 Kazmi of new subsidy from 67 Kazmi of recycled fees. It supplies merge membership explicitly. A real DAG forcing qualified and non-DAA red membership remains a follow-up to the green transparent join baseline.
 
 The Simnet genesis transaction starts with zero outputs, but its coinbase payload declares 100,000,000 Kazmi and carries an OP-FALSE reward script. Trace the first accepted payment independently before treating genesis as excluded from the budget. The shielded verification path already checks net coinbase growth minus fees against eligible source subsidy, with a non-DAA blue fee adjustment and a deferred developer entitlement adjustment. That check is per transition. An authenticated ordinal with an activation point is still required for global issuance accounting.
+
+## Reward-conservation continuation
+
+The tested baselines above remain valid on their exact sources. Current runs and follow-ups:
+
+| Draft | Branch | Exact head | Validation |
+| --- | --- | --- | --- |
+| [#30 Persistence and replay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/30) | `test/phase6-reward-claim-accounting-20261122` | `29707a918033aa62a0d763509f8629ee0e6562c4` | [45103683081](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45103683081) running, 1/8 at check. Native job 137461585802. |
+| [#31 Red subsidy and fees](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/31) | `test/phase6-merge-fee-accounting-20261122` | `5228e73e9b8a3981f611a5cee512fbe24b50f5f3` | [45103888993](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45103888993) running, 2/8 at check. Native job 137460666926. |
+| [#32 Genesis and total issuance](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/32) | `test/phase6-genesis-issuance-conservation-20261122` | `5ef10a79dcde735e2540e1e5309b498bac3765b8` | Staged; CI deferred until the replay parent validates. |
+
+Draft #32 preserves #30's reorg, RocksDB reopen and arrival-order assertions, then adds checks for zero output at genesis and at its first child's settlement. It requires all seven eligible source claims to account for every UTXO and every atomic unit in the fee-free transparent fixture. A nominal genesis payload value alone does not constitute issuance. The [fixture notes](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/5ef10a79dcde735e2540e1e5309b498bac3765b8/docs/development/PHASE6_GENESIS_ISSUANCE_CONSERVATION_2026-11-22.md) identify the paths outside this proof.
+
+Next: check the focused native jobs before reporting #30 or #31 validated. Resolve any failures from their logs. Once #30 is green, run the dedicated #32 test by enabling its branch in the existing focused step, then run its matrix. Bound and authenticate any future issuance counter before using it across pruning or IBD. Full cap enforcement remains blocked on that and on payout settlement proof. Schedule and public activation remain approval gates.
