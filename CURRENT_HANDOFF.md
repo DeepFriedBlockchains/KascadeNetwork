@@ -2,6 +2,26 @@
 
 Updated November 23, 2026.
 
+## Issuance commitment and native-PoW evidence — November 23, 2026
+
+| Draft | Exact head | GitHub Actions evidence |
+| --- | --- | --- |
+| [#39](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/39) | `db7d221116af81a2b7cbba9f9646d760052a56f2` | [45136232500](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45136232500), 8/8 passed. |
+| [#41](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/41) | `724687069469e0ad18e9e97c32a8549513fe6442` | [45146341474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146341474), 3/8 passed, native pending. Original [45144878404](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144878404) failed rustfmt on a trailing blank line. Only formatting changed. |
+| [#44](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/44) | `29d78741ff436ede003f69f3d1a558069d846890` | [45144884093](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45144884093), 6/8 passed. Native prerequisite descendant recovery running. |
+| [#45](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/45) | `7fe95e5d3e6cf5e1cb994dbba0835f8c74069c5b` | Staged. Run after #41 validates. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `7119ef849289553e0e1b72e818f8e6ba003260bb` | [45143838285](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143838285), 7/8 passed. Native prerequisite Simnet recovery/archive/partition running before the settlement regression. |
+| [#47](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/47) | `1e486d66f9d7657387cb09bf0182d5f57d2ed6fe` | Staged. Run after #45 validates. |
+| [#49](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/49) | `a4e79bb486418f6ff96b192370aac4db0f67867e` | [45146860835](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146860835), running; focused issuance primitive result pending. Initial [45146560495](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146560495) failed rustfmt. |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `0b89ddcd462fe5dcd526ee42ef5cc25d296293d4` | Replacement [45146978224](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45146978224) queued. On source `13dc263c9883b858ca30173d5087f954bc46b58d`, [45143950379](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379) was 7/8, with both CLI regressions passing and the metrics parser failing. |
+| [#48](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/48) | `3eb8661274319e6edb17d27d27bffe1bb4cb4ee6` | Staged behind corrected #43. Includes structured reconnect timing, offline reopen timing, last-observed timeout diagnostics, and an artifact validator. |
+
+**Observed native-PoW evidence:** #43's exact earlier source passed the three-process focused test in 4.878 s. It accepted 12 blocks, rejected the invalid nonce, accepted duplicate submission without a DAG accounting change, and recovered C's six missed blocks. RPC was ready in 310 ms and DAG convergence took 312 ms from process reopen. Final selected tip was `36c95c5e7007df91052b7ac8f4c817a2299cc52ab42a2c6dbcc257ec78dd893d`. The regression passed all process shutdown assertions. Preserve the [raw CLI artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379/artifacts/14803614244). Metrics parsing failed on a Nextest ANSI reset appended to the final JSON row. A and B showed final RSS of 128,520,192 and 127,254,528 bytes. C's sample still reported zero before the sampler updated. The replacement normalizes terminal output and requires usable per-node samples. Full native-PoW acceptance awaits that run.
+
+**Issuance foundation:** #49 on `feat/phase6-issuance-commitment-20261123` branches from validated #39. It commits network and pruning-point identity, the ordered-claim root and count, and minted, paid and deferred amounts. The verifier requires an independently supplied expected digest, applies checked arithmetic, and checks the supply cap. The candidate is not wired into block, pruning proof, persistence or payout rules. The next production gate is to derive the root from unique ordered reward claims, bind the digest to independently verified selected-chain evidence, and atomically publish verified deferred settlement with readiness. Keep #46's live legacy settlement and #47's test-only guarded publisher evidence distinct. The proposed 29B finite maximum with 21B primary and 8B tail remains inactive.
+
+**Next:** Inspect #43's replacement metrics and focused results before launching #48. On green #41, carry any required parent fixes into #45 and start its regression. On green #45 start #47. Review #44's process-exit test, #46's real payout reopen, and #49's core verifier as their focused steps complete. Preserve the draft stack and keep production issuance and public launch disabled.
+
 ## Authenticated issuance and live-peer checkpoint — November 23, 2026
 
 | Draft | Branch | Exact head | Actions evidence |
