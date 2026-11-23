@@ -2,6 +2,21 @@
 
 Updated November 23, 2026.
 
+## Retained issuance anchor after selected-index pruning — November 23, 2026
+
+| PR | Exact head | GitHub Actions evidence |
+| --- | --- | --- |
+| [#52](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/52) | `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` | [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690), 7/8. Exact named settlement+RocksDB step succeeded. Native 137892269956 running descendant recovery before the serial authority suite. Port reservation remains pending full authority evidence. |
+| [#53](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/53) | `844b9d8c2ad53733d314a33f74532dd216bebf5b` | [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761), 5/8. Combined selected-release and coinbase focused step succeeded. Native 137895693585 advanced into descendant recovery. Confirm both individual PASS lines from the completed job log. |
+| [#54](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/54) | `c1442b2d6f81cb9e7b9a470dd023154ffd755ef5` | [45234460768](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234460768), running. Replaced initial [45233347194](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45233347194), which failed rustfmt on a replay fixture initializer. Only formatting changed. |
+| [#55](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/55) | `878a8a32bc5c687688ddbe99471f0c03d01580bc` | [45234797231](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234797231) pending. Branch `feat/phase6-retained-issuance-anchor-20261123`, stacked on exact corrected #54. Dedicated retained-anchor pruning and reorg test configured. |
+
+#55 stages the separately derived local replay anchor and its verified checkpoint in one authority batch. It reads them at one RocksDB sequence after pruning and verifies trusted genesis, point, cap and current selected ownership. Its regression rejects a checkpoint without an anchor, digest substitution, abandoned writes, wrong configuration, and stale selection after a committed reorg. It calls the actual selected-chain index pruning method before reopening RocksDB. There is no production readiness or reward activation in this change.
+
+**Exact boundary:** Header transaction Merkle proofs bind a body, the accepted-ID root binds transaction identity, and the UTXO commitment binds the UTXO set. The current selected-child coinbase verifier reads the shielded state root. These fields do not supply a validated cumulative issuance digest. #55 helps a node that replayed locally before pruning. A fresh pruned receiver still needs an independently authenticated issuance commitment that consensus checked against actual payout/claim history. Pass that typed evidence to the existing guarded publisher and verify real issuance and pruning readiness publish atomically under rejection, interruption, reopen and reorganization. Proposed 29B KCADE cap (21B primary and 8B finite tail) and production issuance remain inactive.
+
+**Next:** Read completed #52 and #53 native logs for the named test count and authority result. Check the exact focused tests on #54 and #55. If any bind error recurs, inspect the port/worker from the failed log before changing the fixture. No healthy workflow was restarted.
+
 ## Pruned receiver authentication checkpoint — November 23, 2026
 
 - #52 and #53 remain active on [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690) and [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761). No reruns requested. Exact focused and authority conclusions are pending.
