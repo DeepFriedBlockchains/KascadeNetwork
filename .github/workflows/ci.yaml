@@ -154,7 +154,7 @@ jobs:
 
       - name: Reconcile real Simnet settlement after reopening RocksDB
         if: github.head_ref == 'test/phase6-persisted-red-settlement-20261123' || github.ref_name == 'test/phase6-persisted-red-settlement-20261123'
-        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=reward_claim_simnet_merge_aggregates_eligible_red_subsidy)'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=pipeline::virtual_processor::tests::reward_claim_simnet_merge_aggregates_eligible_red_subsidy)'
 
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
