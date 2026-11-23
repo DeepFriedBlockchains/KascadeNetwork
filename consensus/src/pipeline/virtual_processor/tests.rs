@@ -1726,3 +1726,67 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
     insert(&ctx, &next).await;
     assert_eq!(ctx.consensus.get_sink(), next.header.hash);
 }
+
+#[tokio::test]
+async fn reward_claim_simnet_merge_aggregates_eligible_red_subsidy() {
+    use crate::model::stores::ghostdag::GhostdagStoreReader;
+    use kaspa_consensus_core::config::params::SIMNET_PARAMS;
+
+    fn script(tag: u8) -> ScriptPublicKey {
+        ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x01, tag]))
+    }
+
+    fn build(ctx: &TestContext, parents: Vec<Hash>, tag: u8) -> Block {
+        let miner = MinerData::new(script(tag), vec![]);
+        let mut block = ctx.consensus.build_utxo_valid_block_with_parents(blockhash::NONE, parents, miner, vec![]);
+        let params = ctx.consensus.params();
+        block.header.timestamp = params.genesis.timestamp + u64::from(tag) * params.target_time_per_block();
+        block.header.nonce = u64::from(tag);
+        block.header.finalize();
+        block.to_immutable()
+    }
+
+    let config = ConfigBuilder::new(SIMNET_PARAMS.clone())
+        .edit_consensus_params(|params| {
+            params.blockrate.ghostdag_k = 1;
+            params.shielded_coinbase = false;
+            params.dev_fee_recipient = None;
+            params.skip_proof_of_work = true;
+        })
+        .build();
+    let ctx = TestContext::new(TestConsensus::new(&config));
+    let split = build(&ctx, vec![config.genesis.hash], 1);
+    ctx.consensus.validate_and_insert_block(split.clone()).virtual_state_task.await.unwrap();
+
+    // Three siblings exceed the two-block k=1 blue cluster.
+    let siblings = [2, 3, 4].map(|tag| build(&ctx, vec![split.header.hash], tag));
+    for block in &siblings {
+        ctx.consensus.validate_and_insert_block(block.clone()).virtual_state_task.await.unwrap();
+    }
+    let merged = build(&ctx, siblings.iter().map(|block| block.header.hash).collect(), 5);
+    ctx.consensus.validate_and_insert_block(merged.clone()).virtual_state_task.await.unwrap();
+    assert_eq!(ctx.consensus.get_sink(), merged.header.hash);
+    assert_eq!(ctx.consensus.block_status(merged.header.hash), BlockStatus::StatusUTXOValid);
+
+    let ghostdag = ctx.consensus.ghostdag_store().get_data(merged.header.hash).unwrap();
+    assert_eq!(ghostdag.mergeset_blues.len(), 2);
+    assert_eq!(ghostdag.mergeset_reds.len(), 1);
+    let source = |hash: Hash| siblings.iter().find(|block| block.header.hash == hash).expect("merge includes only the siblings");
+    let subsidy = |hash| {
+        let value = u64::from_le_bytes(source(hash).transactions[0].payload[8..16].try_into().unwrap());
+        assert!(value > 0);
+        value
+    };
+    assert_eq!(merged.header.daa_score - source(ghostdag.selected_parent).header.daa_score, 3);
+
+    let coinbase = &merged.transactions[0];
+    assert_eq!(coinbase.outputs.len(), 3);
+    for (output, hash) in coinbase.outputs.iter().zip(ghostdag.mergeset_blues.iter()) {
+        let (_, tag) = siblings.iter().zip([2, 3, 4]).find(|(block, _)| block.header.hash == *hash).unwrap();
+        assert_eq!(output.script_public_key, script(tag));
+        assert_eq!(output.value, subsidy(*hash));
+    }
+    let red_output = &coinbase.outputs[2];
+    assert_eq!(red_output.script_public_key, script(5));
+    assert_eq!(red_output.value, subsidy(ghostdag.mergeset_reds[0]));
+}
