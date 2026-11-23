@@ -591,8 +591,7 @@ mod tests {
             let db = connect();
             let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
             let store = DbIssuanceCheckpoint::new(db.clone());
-            let result =
-                store.load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP).unwrap();
+            let result = store.load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP).unwrap();
             assert!(DbBranchReadiness::new(db).is_ready(point).unwrap());
             result
         };
