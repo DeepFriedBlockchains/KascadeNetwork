@@ -92,6 +92,7 @@ mod tests {
         block::Block,
         config::{ConfigBuilder, genesis::DEVNET_GENESIS, params::DEVNET_PARAMS},
         header::Header,
+        issuance_checkpoint::{DeveloperPayoutRelease, IssuanceClaim},
     };
     use kaspa_database::{create_temp_db, prelude::ConnBuilder};
     use kaspa_hashes::Hash;
@@ -179,8 +180,73 @@ mod tests {
         Block::new(header, vec![coinbase])
     }
 
+    // Keep fees out of subsidy accounting. Each builder invocation settles
+    // two eligible sources and recycles the third source's fees.
+    fn nonzero_settlements(
+        manager: &crate::processes::coinbase::CoinbaseManager,
+        intermediate: Hash,
+        point: Hash,
+    ) -> (Vec<IssuanceClaim>, Vec<DeveloperPayoutRelease>) {
+        use crate::{model::stores::ghostdag::GhostdagData, processes::coinbase::CoinbaseClaimContext};
+        use kaspa_consensus_core::{
+            BlockHashMap,
+            coinbase::{BlockRewardData, MinerData},
+            tx::ScriptPublicKey,
+        };
+        let script = ScriptPublicKey::from_vec(0, vec![0x51]);
+        let settle = |block, index, daa, deferred_before, first_source| {
+            let [blue, red, fee_only] = [first_source, first_source + 1, first_source + 2].map(Hash::from_u64_word);
+            let ghostdag = GhostdagData {
+                mergeset_blues: Arc::new(vec![blue]),
+                mergeset_reds: Arc::new(vec![red, fee_only]),
+                ..Default::default()
+            };
+            let mut rewards = BlockHashMap::default();
+            for (source, subsidy, fees) in [(blue, 1_000, 9), (red, 2_000, 11), (fee_only, 5_000, 13)] {
+                rewards.insert(source, BlockRewardData::new(subsidy, fees, script.clone()));
+            }
+            let mut non_daa = BlockHashSet::default();
+            non_daa.insert(fee_only);
+            let template = manager
+                .expected_coinbase_transaction(
+                    daa,
+                    MinerData::new(script.clone(), vec![]),
+                    &ghostdag,
+                    &rewards,
+                    &non_daa,
+                    [0; 32],
+                    daa - 1,
+                    deferred_before,
+                )
+                .unwrap();
+            let context = CoinbaseClaimContext { settlement_block: block, selected_index: index, daa_score: daa, deferred_before };
+            let result = manager.attribute_settlement_claims(&template, &ghostdag, &rewards, &non_daa, context).unwrap();
+            assert_eq!(result.settlement.recycled_fees, 33);
+            assert_eq!(result.claims.iter().map(|claim| claim.reward_source).collect::<Vec<_>>(), [blue, red]);
+            result
+        };
+
+        let first = settle(intermediate, 1, 101, 0, 21);
+        assert_eq!((first.settlement.paid_subsidy, first.settlement.deferred_after), (2_850, 150));
+        assert!(first.deferred_payout.is_none());
+        let second = settle(point, 2, 110, first.settlement.deferred_after, 31);
+        assert_eq!((second.settlement.paid_subsidy, second.settlement.deferred_after), (3_150, 0));
+        let release = second.deferred_payout.unwrap();
+        assert_eq!(release.amount, 300);
+        (first.claims.into_iter().chain(second.claims).collect(), vec![release])
+    }
+
     #[test]
     fn authority_integration_reopen_before_promotion_rejects_incomplete_evidence() {
+        exercise_guarded_issuance_publication(false);
+    }
+
+    #[test]
+    fn authority_integration_publishes_nonzero_settlement_and_readiness() {
+        exercise_guarded_issuance_publication(true);
+    }
+
+    fn exercise_guarded_issuance_publication(nonzero: bool) {
         use super::super::{
             branch_readiness::DbBranchReadiness,
             import_readiness::tests::{install_point, stage_explicit_evidence},
@@ -195,15 +261,25 @@ mod tests {
             virtual_state::{VirtualState, VirtualStateStore},
         };
         use crate::processes::ghostdag::ordering::SortableBlock;
-        use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
-        use kaspa_consensus_core::{blockstatus::BlockStatus::StatusUTXOValid, config::params::ForkActivation};
+        use kaspa_consensus_core::{
+            ChainPath,
+            blockstatus::BlockStatus::StatusUTXOValid,
+            config::params::{ForkActivation, ZKAS_DEV_FEE_RECIPIENT},
+            issuance_checkpoint::IssuanceCheckpoint,
+        };
         use rocksdb::WriteBatch;
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
         let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
         let db = connect();
         let config = ConfigBuilder::new(DEVNET_PARAMS)
-            .edit_consensus_params(|params| params.toccata_activation = ForkActivation::never())
+            .edit_consensus_params(|params| {
+                params.toccata_activation = ForkActivation::never();
+                params.dev_fee_accrual_activation = ForkActivation::new(100);
+                params.dev_fee_payout_interval = 10;
+                params.dev_fee_permille = 50;
+                params.dev_fee_recipient = Some(ZKAS_DEV_FEE_RECIPIENT);
+            })
             .skip_adding_genesis()
             .build();
         let (sender, _receiver) = async_channel::unbounded();
@@ -211,6 +287,12 @@ mod tests {
         let processor = consensus.virtual_processor();
         let mut header = Header::from(&DEVNET_GENESIS);
         header.finalize();
+        let genesis = header.hash;
+        let intermediate = Hash::from_u64_word(700);
+        if nonzero {
+            header.nonce += 1;
+            header.finalize();
+        }
         let point = ReadinessPoint { hash: header.hash, index: 3 };
         let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header.clone())]]).unwrap();
         DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(header), 0).unwrap();
@@ -223,10 +305,17 @@ mod tests {
         let mut pruning = DbPruningStore::new(db.clone());
         pruning.set_retention_checkpoint(&mut batch, point.hash).unwrap();
         pruning.set_retention_period_root(&mut batch, point.hash).unwrap();
-        DbSelectedChainStore::new(db.clone(), CachePolicy::Empty).init_with_pruning_point(&mut batch, point.hash).unwrap();
+        let mut selected = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+        selected.init_with_pruning_point(&mut batch, genesis).unwrap();
+        db.write(batch).unwrap();
+        let mut batch = WriteBatch::default();
+        if nonzero {
+            selected.apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![intermediate, point.hash] }).unwrap();
+        }
         stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
         db.write(batch).unwrap();
         drop(pruning);
+        drop(selected);
         processor
             .virtual_stores
             .write()
@@ -263,12 +352,25 @@ mod tests {
         let recovered = processor.recover_authenticated_staging(point, &proof, &child, &child).unwrap();
         drop(recovered);
         const CAP: u64 = 2_900_000_000_000_000_000;
-        let genesis = DEVNET_GENESIS.hash;
-        assert_eq!(point.hash, genesis);
-        let path = [genesis];
-        let replay =
-            || LocalIssuanceReplay { network_genesis: genesis, supply_cap: CAP, selected_path: &path, claims: &[], releases: &[] };
-        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CAP, &path, &[], &[]).unwrap();
+        assert_eq!(genesis, DEVNET_GENESIS.hash);
+        let (path, claims, releases) = if nonzero {
+            let path = vec![genesis, intermediate, point.hash];
+            let (claims, releases) = nonzero_settlements(&processor.coinbase_manager, intermediate, point.hash);
+            (path, claims, releases)
+        } else {
+            (vec![genesis], vec![], vec![])
+        };
+        let replay = || LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
+        let checkpoint = IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CAP, &path, &claims, &releases).unwrap();
+        if nonzero {
+            assert_eq!((checkpoint.claim_count, checkpoint.minted, checkpoint.paid, checkpoint.deferred), (4, 6_000, 6_000, 0));
+        }
         {
             let readiness = DbBranchReadiness::new(db.clone());
             let store = DbIssuanceCheckpoint::new(db.clone());
@@ -295,6 +397,30 @@ mod tests {
             );
             unavailable();
 
+            if nonzero {
+                let mut repeated_claims = claims.clone();
+                repeated_claims.push(claims[0]);
+                let mut repeated_releases = releases.clone();
+                repeated_releases.push(releases[0]);
+                let excessive_release = [DeveloperPayoutRelease { amount: releases[0].amount + 1, ..releases[0] }];
+                let stale_path = [genesis, child.hash(), point.hash];
+                for invalid in [
+                    LocalIssuanceReplay { claims: &repeated_claims, ..replay() },
+                    LocalIssuanceReplay { releases: &repeated_releases, ..replay() },
+                    LocalIssuanceReplay { releases: &excessive_release, ..replay() },
+                    LocalIssuanceReplay { selected_path: &stale_path, ..replay() },
+                    LocalIssuanceReplay { network_genesis: child.hash(), ..replay() },
+                ] {
+                    let token = processor.begin_authority_import().unwrap();
+                    assert!(
+                        processor
+                            .finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(invalid), &checkpoint)))
+                            .is_err()
+                    );
+                    unavailable();
+                }
+            }
+
             let token = processor.begin_authority_import().unwrap();
             let recovered = processor
                 .finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay()), &checkpoint)))
@@ -319,6 +445,18 @@ mod tests {
             checkpoint
         );
         assert_eq!(db.get(PROMOTION_KEY).unwrap().unwrap().as_slice(), b"promotion-ready");
+        drop(guard);
+        if nonzero {
+            let mut batch = WriteBatch::default();
+            selected
+                .write()
+                .apply_changes(&mut batch, &ChainPath { removed: vec![point.hash], added: vec![Hash::from_u64_word(701)] })
+                .unwrap();
+            db.write(batch).unwrap();
+            assert!(
+                DbIssuanceCheckpoint::new(db).load_retained_replay_checkpoint(&selected.read(), genesis, point.hash, CAP).is_err()
+            );
+        }
     }
 
     #[test]
