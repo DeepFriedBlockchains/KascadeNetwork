@@ -1,0 +1,5 @@
+# Phase 6 test-only issuance checkpoint persistence
+
+This extension of #38 writes a checkpoint and its readiness commitment to one RocksDB batch in an isolated temporary database. It checks a clean close/reopen before and after committing a replacement checkpoint. The old anchor remains valid after an unsubmitted batch. After replacement, the new anchor selects the complete committed checkpoint. A logically balanced modification of the paid/deferred split and a missing readiness record both fail to restore against the independently supplied anchor.
+
+The fixture also checks canonical record length and bounded claim-count decoding. It is staged behind #38's focused tests and does not alter production storage, the wire format, consensus activation, or the emission schedule. Dropping an unsubmitted batch models the pre-commit case. Crash injection during a database write and authenticated pruning proof/child binding remain separate production gates. CI is deferred until the parent model completes.

@@ -158,3 +158,118 @@ fn issuance_checkpoint_binds_order_and_caps_terminal_issuance() {
     assert!(terminal.settle(u64::MAX, 0, 0, 0).is_none());
     assert!(terminal.settle(0, u64::MAX, 0, 0).is_none());
 }
+
+// Fixture keys in a dedicated temporary database.
+const CHECKPOINT_ROW: &[u8] = b"issuance-fixture/checkpoint/v1";
+const READY_ROW: &[u8] = b"issuance-fixture/ready/v1";
+
+fn checkpoint_bytes(checkpoint: &Checkpoint) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&checkpoint.network.as_bytes());
+    bytes.extend_from_slice(&checkpoint.point.as_bytes());
+    bytes.extend_from_slice(&checkpoint.balance.slots.to_le_bytes());
+    bytes.extend_from_slice(&checkpoint.balance.paid.to_le_bytes());
+    bytes.extend_from_slice(&checkpoint.balance.deferred.to_le_bytes());
+    bytes.extend_from_slice(&u64::try_from(checkpoint.ordered_claims.len()).unwrap().to_le_bytes());
+    for source in &checkpoint.ordered_claims {
+        bytes.extend_from_slice(&source.as_bytes());
+    }
+    bytes
+}
+
+fn decode_checkpoint(bytes: &[u8]) -> Option<Checkpoint> {
+    const HEADER: usize = 96;
+
+    let network = Hash::from_bytes(bytes.get(..32)?.try_into().ok()?);
+    let point = Hash::from_bytes(bytes.get(32..64)?.try_into().ok()?);
+    let slots = u64::from_le_bytes(bytes.get(64..72)?.try_into().ok()?);
+    let paid = u64::from_le_bytes(bytes.get(72..80)?.try_into().ok()?);
+    let deferred = u64::from_le_bytes(bytes.get(80..88)?.try_into().ok()?);
+    let count = u64::from_le_bytes(bytes.get(88..HEADER)?.try_into().ok()?);
+    let count = usize::try_from(count).ok()?;
+    if count > Checkpoint::MAX_FIXTURE_CLAIMS || bytes.len() != HEADER + count * 32 {
+        return None;
+    }
+
+    let ordered_claims = bytes[HEADER..]
+        .chunks_exact(32)
+        .map(|source| Hash::from_bytes(source.try_into().unwrap()))
+        .collect();
+    Some(Checkpoint { network, point, balance: Balance { slots, paid, deferred }, ordered_claims })
+}
+
+fn checkpoint_batch(checkpoint: &Checkpoint) -> rocksdb::WriteBatch {
+    let mut batch = rocksdb::WriteBatch::default();
+    batch.put(CHECKPOINT_ROW, checkpoint_bytes(checkpoint));
+    batch.put(READY_ROW, checkpoint.commitment().as_bytes());
+    batch
+}
+
+fn read_ready_checkpoint(db: &kaspa_database::prelude::DB, network: Hash, point: Hash, expected: Hash) -> Option<Checkpoint> {
+    let ready = db.get(READY_ROW).unwrap()?;
+    if ready.as_slice() != expected.as_bytes().as_slice() {
+        return None;
+    }
+    let row = db.get(CHECKPOINT_ROW).unwrap()?;
+    decode_checkpoint(&row)?.restore(network, point, expected)
+}
+
+#[test]
+fn issuance_checkpoint_reopens_atomic_batch_against_independent_anchor() {
+    use kaspa_database::prelude::ConnBuilder;
+
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let network = id(1);
+    let first = cumulative_kazmi(1);
+    let second = cumulative_kazmi(2) - first;
+    let parent = Checkpoint::genesis(network).advance(id(3), &[id(2)], first - 5, 0, 5).unwrap();
+    let child = parent.advance(id(5), &[id(4)], second + 5 + 10, 10, 0).unwrap();
+    let parent_anchor = parent.commitment();
+    let child_anchor = child.commitment();
+    {
+        let db = connect();
+        db.write(checkpoint_batch(&parent)).unwrap();
+        // Simulate interruption before the new checkpoint batch is submitted.
+        drop(checkpoint_batch(&child));
+    }
+    {
+        let db = connect();
+        assert_eq!(read_ready_checkpoint(&db, network, parent.point, parent_anchor), Some(parent.clone()));
+        assert!(read_ready_checkpoint(&db, network, child.point, child_anchor).is_none());
+        db.write(checkpoint_batch(&child)).unwrap();
+    }
+    {
+        let db = connect();
+        assert!(read_ready_checkpoint(&db, network, parent.point, parent_anchor).is_none());
+        assert_eq!(read_ready_checkpoint(&db, network, child.point, child_anchor), Some(child.clone()));
+
+        let mut altered = child.clone();
+        altered.balance.paid -= 1;
+        altered.balance.deferred += 1;
+        assert!(altered.balance.valid(), "this alteration conserves total issuance but changes settlement");
+        db.put(CHECKPOINT_ROW, checkpoint_bytes(&altered)).unwrap();
+        assert!(read_ready_checkpoint(&db, network, child.point, child_anchor).is_none());
+
+        db.write(checkpoint_batch(&child)).unwrap();
+        db.delete(READY_ROW).unwrap();
+    }
+    let db = connect();
+    assert!(read_ready_checkpoint(&db, network, child.point, child_anchor).is_none());
+}
+
+#[test]
+fn issuance_checkpoint_decoder_rejects_short_oversized_and_trailing_records() {
+    let checkpoint = Checkpoint::genesis(id(1));
+    let valid = checkpoint_bytes(&checkpoint);
+    assert_eq!(decode_checkpoint(&valid), Some(checkpoint));
+    for len in 0..valid.len() {
+        assert!(decode_checkpoint(&valid[..len]).is_none());
+    }
+    let mut altered = valid.clone();
+    altered[88..96].copy_from_slice(&u64::MAX.to_le_bytes());
+    assert!(decode_checkpoint(&altered).is_none());
+    let mut extended = valid;
+    extended.push(0);
+    assert!(decode_checkpoint(&extended).is_none());
+}
