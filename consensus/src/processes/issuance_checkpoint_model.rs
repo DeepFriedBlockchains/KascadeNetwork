@@ -65,15 +65,7 @@ impl Checkpoint {
     fn commitment(&self) -> Hash {
         let mut hasher = TransactionHash::new();
         hasher.update(b"KASCADE/issuance-checkpoint-fixture/v1");
-        hasher.update(self.network.as_bytes());
-        hasher.update(self.point.as_bytes());
-        hasher.update(self.balance.slots.to_le_bytes());
-        hasher.update(self.balance.paid.to_le_bytes());
-        hasher.update(self.balance.deferred.to_le_bytes());
-        hasher.update(u64::try_from(self.ordered_claims.len()).unwrap().to_le_bytes());
-        for source in &self.ordered_claims {
-            hasher.update(source.as_bytes());
-        }
+        hasher.update(checkpoint_bytes(self));
         hasher.finalize()
     }
 
