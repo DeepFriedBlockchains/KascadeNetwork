@@ -138,7 +138,8 @@ fn free_port() -> u16 {
             continue;
         }
         let path = directory.join(port.to_string());
-        let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).expect("open integration port lease");
+        let file =
+            OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).expect("open integration port lease");
         match file.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => continue,
