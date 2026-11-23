@@ -315,6 +315,7 @@ mod tests {
         stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
         db.write(batch).unwrap();
         drop(pruning);
+        drop(selected);
         processor
             .virtual_stores
             .write()
