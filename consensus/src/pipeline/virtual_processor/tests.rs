@@ -1643,3 +1643,137 @@ async fn shielded_chain_range_is_fully_servable_from_the_retained_archive() {
     }
     assert!(minting >= 3, "expected several minting blocks in the range, got {minting}");
 }
+
+#[tokio::test]
+async fn reward_claim_join_credits_distinct_sources_after_reorg() {
+    use kaspa_consensus_core::{config::params::SIMNET_PARAMS, tx::TransactionOutpoint};
+    use kaspa_database::prelude::ConnBuilder;
+
+    fn build(ctx: &TestContext, parents: Vec<Hash>, tag: u8) -> Block {
+        let miner = MinerData::new(ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x51, tag])), vec![]);
+        let mut block = ctx.consensus.build_utxo_valid_block_with_parents(blockhash::NONE, parents, miner, vec![]);
+        let params = ctx.consensus.params();
+        block.header.timestamp = params.genesis.timestamp + u64::from(tag) * params.target_time_per_block();
+        block.header.nonce = u64::from(tag);
+        block.header.finalize();
+        block.to_immutable()
+    }
+
+    async fn insert(ctx: &TestContext, block: &Block) {
+        ctx.consensus.validate_and_insert_block(block.clone()).virtual_state_task.await.unwrap();
+    }
+
+    fn expected_source_reward(source: &Block, tag: u8) -> (u8, u64) {
+        let subsidy = u64::from_le_bytes(source.transactions[0].payload[8..16].try_into().unwrap());
+        assert!(subsidy > 0, "the source must be eligible for nonzero issuance");
+        (tag, subsidy)
+    }
+
+    fn coinbase_claims(block: &Block) -> Vec<(u8, u64)> {
+        let mut claims = block.transactions[0]
+            .outputs
+            .iter()
+            .map(|output| {
+                let script = output.script_public_key.script();
+                assert_eq!(script.len(), 2);
+                assert_eq!(script[0], 0x51);
+                (script[1], output.value)
+            })
+            .collect::<Vec<_>>();
+        claims.sort_unstable();
+        claims
+    }
+
+    let config = ConfigBuilder::new(SIMNET_PARAMS.clone())
+        .edit_consensus_params(|params| {
+            params.shielded_coinbase = false;
+            params.dev_fee_recipient = None;
+            params.skip_proof_of_work = true;
+        })
+        .build();
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let (sender, _receiver) = async_channel::unbounded();
+    let ctx = TestContext::new(TestConsensus::with_db(connect(), &config, sender));
+    let split = build(&ctx, vec![config.genesis.hash], 1);
+    insert(&ctx, &split).await;
+    let a1 = build(&ctx, vec![split.header.hash], 2);
+    let b1 = build(&ctx, vec![split.header.hash], 3);
+    assert_eq!(a1.header.daa_score, b1.header.daa_score);
+    assert_ne!(a1.header.hash, b1.header.hash);
+    assert_eq!(coinbase_claims(&a1), vec![expected_source_reward(&split, 1)]);
+    assert_eq!(coinbase_claims(&b1), vec![expected_source_reward(&split, 1)]);
+
+    insert(&ctx, &a1).await;
+    let a2 = build(&ctx, vec![a1.header.hash], 4);
+    assert_eq!(coinbase_claims(&a2), vec![expected_source_reward(&a1, 2)]);
+    insert(&ctx, &a2).await;
+    assert_eq!(ctx.consensus.get_sink(), a2.header.hash);
+
+    insert(&ctx, &b1).await;
+    let b2 = build(&ctx, vec![b1.header.hash], 5);
+    assert_eq!(coinbase_claims(&b2), vec![expected_source_reward(&b1, 3)]);
+    insert(&ctx, &b2).await;
+    let b3 = build(&ctx, vec![b2.header.hash], 6);
+    insert(&ctx, &b3).await;
+    assert_eq!(ctx.consensus.get_sink(), b3.header.hash);
+    assert!(!ctx.consensus.reachability_service().is_chain_ancestor_of(a2.header.hash, b3.header.hash));
+
+    let joined = build(&ctx, vec![b3.header.hash, a2.header.hash], 7);
+    assert_eq!(
+        coinbase_claims(&joined),
+        vec![expected_source_reward(&a1, 2), expected_source_reward(&a2, 4), expected_source_reward(&b3, 6)]
+    );
+    insert(&ctx, &joined).await;
+    let next = build(&ctx, vec![joined.header.hash], 8);
+    assert_eq!(coinbase_claims(&next), vec![expected_source_reward(&joined, 7)]);
+    insert(&ctx, &next).await;
+    assert_eq!(ctx.consensus.get_sink(), next.header.hash);
+
+    let snapshot = ctx.consensus.get_virtual_utxos(None, 64, false);
+    assert!(snapshot.len() < 64, "fixture must compare the entire UTXO set");
+    let joined_id = joined.transactions[0].id();
+    let abandoned_id = a2.transactions[0].id();
+    assert!(!snapshot.iter().any(|(outpoint, _)| outpoint.transaction_id == abandoned_id));
+    for (i, output) in joined.transactions[0].outputs.iter().enumerate() {
+        let outpoint = TransactionOutpoint::new(joined_id, i.try_into().unwrap());
+        let (_, entry) = snapshot.iter().find(|(key, _)| *key == outpoint).expect("missing accepted join payout");
+        assert_eq!(entry.amount, output.value);
+        assert_eq!(entry.script_public_key, output.script_public_key);
+        assert!(entry.is_coinbase);
+    }
+
+    fn accepted_coinbases(ctx: &TestContext, block: Hash) -> Vec<(Hash, Hash)> {
+        ctx.consensus
+            .get_block_acceptance_data(block)
+            .unwrap()
+            .iter()
+            .flat_map(|source| {
+                source
+                    .accepted_transactions
+                    .iter()
+                    .filter(|entry| entry.index_within_block == 0)
+                    .map(move |entry| (source.block_hash, entry.transaction_id))
+            })
+            .collect()
+    }
+
+    let accepted = vec![(joined.header.hash, joined_id)];
+    assert_eq!(accepted_coinbases(&ctx, next.header.hash), accepted);
+    drop(ctx);
+
+    let reopen_config = config.to_builder().skip_adding_genesis().build();
+    let (sender, _receiver) = async_channel::unbounded();
+    let reopened = TestContext::new(TestConsensus::with_db(connect(), &reopen_config, sender));
+    assert_eq!(reopened.consensus.get_sink(), next.header.hash);
+    assert_eq!(accepted_coinbases(&reopened, next.header.hash), accepted);
+    assert_eq!(reopened.consensus.get_virtual_utxos(None, 64, false), snapshot);
+
+    let replay = TestContext::new(TestConsensus::new(&config));
+    for block in [&split, &b1, &b2, &b3, &a1, &a2, &joined, &next] {
+        insert(&replay, block).await;
+    }
+    assert_eq!(replay.consensus.get_sink(), next.header.hash);
+    assert_eq!(accepted_coinbases(&replay, next.header.hash), accepted);
+    assert_eq!(replay.consensus.get_virtual_utxos(None, 64, false), snapshot);
+}

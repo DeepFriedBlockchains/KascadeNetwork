@@ -138,6 +138,10 @@ jobs:
       - name: Run isolated Simnet native and AuxPoW relay regressions
         run: cargo nextest run -p kaspa-testing-integration --test phase6_native_pow_relay --features phase6-staging-preview
 
+      - name: Run competing-tip reward claim regression
+        if: github.head_ref == 'test/phase6-reward-claim-accounting-20261122' || github.ref_name == 'test/phase6-reward-claim-accounting-20261122'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(reward_claim_join_credits_distinct_sources_after_reorg)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
