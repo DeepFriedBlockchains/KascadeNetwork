@@ -2,6 +2,12 @@
 
 Updated November 23, 2026.
 
+## Local selected-chain replay checkpoint — November 23, 2026
+
+- #52 `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` remains active on [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690). Four jobs passed; focused settlement, Clippy and the authority/port regression were still pending.
+- #53 `844b9d8c2ad53733d314a33f74532dd216bebf5b` remains active on [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761). One job passed at the initial read; native setup was in progress.
+- Investigation confirmed the current selected-child commitment extractor verifies the stored header, selected parent and coinbase Merkle membership, then extracts the shielded state root. The existing format supplies no independently verified issuance digest. The next increment will verify local replay against the committed selected index and compute the expected issuance digest separately from the restore candidate. Production issuance stays disabled.
+
 ## Selected developer payout commitments — November 23, 2026
 
 | PR | Exact head | Actions evidence |
