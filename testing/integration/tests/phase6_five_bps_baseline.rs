@@ -57,6 +57,27 @@ async fn phase6_five_bps_loopback_five_minutes() {
     run_five_bps_loopback(SUSTAINED_SAMPLE_BLOCKS).await;
 }
 
+#[cfg(target_os = "linux")]
+fn process_resources() -> serde_json::Value {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+    // The command field can contain spaces and parentheses. Fields after
+    // the final parenthesis start with field 3 (state).
+    let fields = stat.rsplit_once(')').unwrap().1.split_whitespace().collect::<Vec<_>>();
+    let user_ticks = fields[11].parse::<u64>().unwrap();
+    let system_ticks = fields[12].parse::<u64>().unwrap();
+    let status = std::fs::read_to_string("/proc/self/status").unwrap();
+    let memory = |key: &str| {
+        let field = status.lines().find_map(|line| line.strip_prefix(key)).unwrap();
+        field.split_whitespace().next().unwrap().parse::<u64>().unwrap()
+    };
+    serde_json::json!({
+        "user_ticks": user_ticks,
+        "system_ticks": system_ticks,
+        "rss_kib": memory("VmRSS:"),
+        "process_peak_rss_kib": memory("VmHWM:"),
+    })
+}
+
 async fn run_five_bps_loopback(sample_blocks: usize) {
     kaspa_alloc::init_allocator_with_default_settings();
     let profile = BlockrateParams::new::<5>();
@@ -89,6 +110,8 @@ async fn run_five_bps_loopback(sample_blocks: usize) {
     let miner = Address::new(sender.network.into(), Version::PubKey, &[0; 32]);
     let mut clock = interval(block_period);
     clock.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    #[cfg(target_os = "linux")]
+    let before = process_resources();
     let start = Instant::now();
     let mut samples = Vec::with_capacity(sample_blocks);
     let mut final_tip = None;
@@ -128,6 +151,15 @@ async fn run_five_bps_loopback(sample_blocks: usize) {
         })
         .await
         .expect("sample node did not select the final tip");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let elapsed_us = start.elapsed().as_micros();
+        let after = process_resources();
+        let resources = serde_json::json!({"elapsed_us": elapsed_us, "before": before, "after": after});
+        println!("phase6_resources,{resources}");
+    }
+    for client in [&submit, &first_client, &second_client] {
         client.disconnect().await.unwrap();
     }
     println!("phase6_tip,{tip}");
