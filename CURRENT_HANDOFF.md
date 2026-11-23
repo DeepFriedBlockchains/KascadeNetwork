@@ -2,6 +2,14 @@
 
 Updated November 23, 2026.
 
+## Settlement and recovery checkpoint — November 23, 2026
+
+- All eight jobs passed on #45 [45153573720](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45153573720), #46 [45151879030](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45151879030), #48 [45156258308](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156258308), #50 [45152422597](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45152422597), and #51 [45154174813](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45154174813) at the exact heads in the table below.
+- #47 advanced onto validated #45 at `232dca6e685cc7081537a8ed5e588f891bb05966`, [45216092833](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45216092833) active.
+- #48's focused native peer test reconnected in 105 ms, caught up three blocks in 106 ms, and reopened offline in 315 ms. Reconnected A/B/C RSS was 127,377,408 / 121,192,448 / 121,081,856 bytes. [Resource and daemon artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156258308/artifacts/14809571770)
+- #50 ran and passed the named canonical-claim regression, with three focused tests and 1,593 native tests. #46's real payout reopen and #51's authenticated RocksDB reopen/reorganization regressions both ran and passed.
+- #52's named settlement case passed on `44da60377d7ef13557264f25e41f908797cacee0` in [45156348643](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45156348643). The native authority step failed because its P2P listener hit AddrInUse during descendant recovery; its failed connectivity assertion followed that bind failure. The next increment checks the reconciled transition against the prior persisted checkpoint before staging a replacement. Production issuance remains disabled.
+
 ## Settlement reconciliation and validation — November 23, 2026
 
 | Draft | Exact head | GitHub Actions evidence |
