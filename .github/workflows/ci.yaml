@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Run focused P2P router capacity regressions
+        if: github.head_ref == 'test/phase6-p2p-router-resources-20261122' || github.ref_name == 'test/phase6-p2p-router-resources-20261122'
+        run: cargo nextest run -p kaspa-p2p-lib --lib -E 'test(p2p_resource_)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
