@@ -76,3 +76,13 @@ See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUAN
 | Live reorganization | Confirm #59 actual branch replacement and #61 developer payout/liability persistence. Still need a live pruning-point fixture with proof and UTXO/SMT evidence for guarded readiness and crash/reopen under a real reorg. |
 | Fresh pruned receiver | #60 codec is inactive. After owner approval require full-validator replay/migration, authenticated child proof and fresh bootstrap validation. |
 | Production activation | Disabled. Owner approval of carrier, fork/activation, bootstrap trust, migration and isolated network profile is required. |
+
+
+## Live pruning and receiver gate update
+
+- #56 is 8/8 with named guarded-readiness proof. #57's named two-test step passed after the database reopen fix; its full matrix is pending.
+- #58 passed the two-exit process test and produced artifact 14853226458. Verify raw exit lines and #62's separate fresh retry in completed native logs.
+- #63 exercises real selected-child authentication and eligible pruning depth, with a fixed pruning candidate and live competing descendants. This is a prerequisite for a verified receiver import.
+- Before completing the live readiness gate, exercise the real exporter proof and receiver UTXO, SMT and virtual import, then confirm compatible fixed-point recovery and rejection of the stale child after the fork.
+- #60 and #64 remain inactive. No network selects the codec or replay verifier.
+
