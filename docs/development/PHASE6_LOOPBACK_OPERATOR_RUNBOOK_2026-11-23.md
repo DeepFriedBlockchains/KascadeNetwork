@@ -89,3 +89,18 @@ On source `13dc263c9883b858ca30173d5087f954bc46b58d`, the focused native-PoW tes
 - Nonzero atomic pruning publication is in [draft #57](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/57) on the guarded #56 route. Verify both named tests in [45238570956](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45238570956), then require a process-exit test and a consensus-driven branch replacement. The selected-index replacement in #57 verifies stale checkpoint rejection.
 - A fresh pruned receiver needs a consensus-validated issuance digest independent of the checkpoint. The [carrier and recovery design](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) records the verification boundary and owner decisions. A complete recovery test must begin without a local history prefix and reject missing, substituted or stale evidence.
 - Production issuance stays disabled. Before configuring a private testnet, confirm full validation of the guarded publication chain and obtain owner approval for the isolated network profile, issuance activation and bootstrap/migration policy.
+
+## Live recovery validation gates
+
+| Gate | Evidence |
+| --- | --- |
+| Native-PoW networking | Three-node and peer recovery passed on the recorded #43 and #48 heads. |
+| Actual settlement | #52's focused RocksDB settlement step passed. Both release/coinbase tests passed on #53, which is 8/8. |
+| Local issuance authentication | #54 replay and #55 selected-index pruning passed their named steps. |
+| Atomic pruning publication | #56's zero-issuance guarded test passed. #57's nonzero fixture had a held database handle on reopen and requires successful replacement CI. |
+| Process exit | #58 tests subprocess exit before and after the actual nonzero batch. Pending acceptance. Verify the two exit codes and the captured log. |
+| Consensus-driven reorganization | #59 tests checkpoint replacement after a branch becomes selected through Simnet consensus. Pending acceptance. Developer accrual and guarded readiness under a live reorganization remain unproven. |
+| Fresh pruned receiver | Requires an independently authenticated issuance commitment, validated settlement transitions and approved bootstrap trust. |
+| Production activation | Disabled. The owner must approve the network profile, commitment layout, genesis/migration accounting, activation and trust policy. |
+
+See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md). Complete local validation and verify the nonzero recovery log before proceeding to the first approved private deployment configuration.
