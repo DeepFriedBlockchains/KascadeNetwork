@@ -31,7 +31,15 @@ struct NodeOptions<'a> {
 struct Node(Child);
 
 impl Node {
-    fn start(binary: &Path, data_root: &Path, logs: &Path, index: u16, label: &str, test_mining: bool, options: NodeOptions<'_>) -> Self {
+    fn start(
+        binary: &Path,
+        data_root: &Path,
+        logs: &Path,
+        index: u16,
+        label: &str,
+        test_mining: bool,
+        options: NodeOptions<'_>,
+    ) -> Self {
         let name = ["a", "b", "c"][usize::from(index - 1)];
         let base_port = 19_000 + index * 100;
         let mut command = Command::new(binary);
