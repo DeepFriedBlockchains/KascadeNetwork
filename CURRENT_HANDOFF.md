@@ -735,3 +735,30 @@ The public [policy documentation branch](https://github.com/DeepFriedBlockchains
 Cleanup, persistent reopen, descendant reconciliation and authenticated export are already validated on #13–#16. Preserve those sources. The [checkpoint report](docs/development/PHASE6_29B_AND_ACCEPTANCE_CHECKPOINT_2026-11-22.md) lists their exact runs, public safety review evidence, and remaining tests. Phase 6 remains default-off and Simnet-only. Shielded consensus activation is disabled.
 
 A separate integer calculation confirmed the legacy proposed cascade sums to 21B and all four finite-tail examples sum to 8B with zero post-tail issuance. This checks the proposed arithmetic only. GitHub Actions still needs to run the reference vectors, and production supply enforcement remains open. The audit baseline was reviewed privately. The continuation archive is pending a readable review. See [#26's design](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/51b747ae11b11b636612245b756135a564dde4e4/docs/development/PHASE6_29B_EMISSION_DESIGN_2026-11-22.md).
+
+## Recovered 35-year work and current validation
+
+| Draft | Branch | Exact head | Verified result |
+| --- | --- | --- | --- |
+| [#22 AuxPoW relay](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/22) | `test/phase6-auxpow-relay-20261122` | `3aae9a87e353b2a164fadc77528b0871500e34ee` | [45085126439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45085126439) 8/8. Two relay, 37 Phase 6, 1,579 workspace, 32 no-asm. |
+| [#23 5-BPS evidence](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/23) | `docs/phase6-five-bps-evidence-20261122` | `999f3e1342d82c1feebfeb47d55023807be17276` | [45089622439](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439) 7/8. Focused test and artifact upload passed, artifact 14781544000. Native workspace running. |
+| [#24 Bundled miner](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/24) | `test/phase6-miner-auxpow-interop-20261122` | `436a2ba92f619212576dcae41ca3d73b0a908edc` | [45086888062](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45086888062) 8/8. Two focused miner, 36 authority, 1,581 workspace, 32 no-asm. |
+| [#25 Combined acceptance](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) | `test/phase6-acceptance-convergence-20261122` | `c542833e385f1f222538f42bc72a9843a1cd2ca4` | [45093748286](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45093748286) active. Implementation is `25cfeed643d40b35f906332e4b024dce23632ae0`; current report-only head triggered the unchanged combined source. Native job 137428872019. |
+| [#26 35-year emission](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/26) | `design/29b-emission-validation-20261122` | `82f4eac3ae5e6ddfaabdd499e19f44373718f43e` | [45094494258](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45094494258) queued. Earlier [45089866749](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089866749) failed compilation because the old tests omitted duration arguments, plus a rustfmt difference. Exact integer candidate replaced that test reference and adds six focused tests. |
+| [#27 RPC safety](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/27) | `test/phase6-rpc-safe-mode-20261122` | `9b7c2f07dac1172355979ff3adb4918c7505aaa5` | [45093817955](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45093817955) active. Native job 137429089738 is running the focused regression. |
+| [#28 KRN economics](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/28) | `docs/phase6-krn-35-year-economics-20261122` | `be39e21123143e72d10fc26fbe868daa551d56a4` | Docs-only. Includes participation, variance, operating break-even and terminal-cutoff analysis. |
+| [#18 Post-quantum research](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/18) | `docs/post-quantum-wallet-research-20261122` | `29d34d425a22ae23379cc602065aa5aa0fd7a619` | Docs-only. Versioned witness paths, ML-DSA byte/mass estimates and native/WASM acceptance criteria. |
+
+The [35-year candidate](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/82f4eac3ae5e6ddfaabdd499e19f44373718f43e/docs/development/PHASE6_35_YEAR_EMISSION_CANDIDATE.md) assumes 5 uniquely rewarded slots per second. Exact schedule counts are 1,577,880,000 primary and 3,944,700,000 tail. The independently reproduced schedules pay exactly 21B and 8B, and no subsidy afterward. The test/preview module has no runtime consumer. Historical 23B guidance is superseded. Production hard-cap enforcement remains open.
+
+The DAG integration needs a production-path trace of credited source block hashes and coinbase outputs along competing selected-parent chains. Persist and authenticate the credited ordinal with accepted state before considering any schedule wiring. The preferred clock remains a hypothesis until duplicate prevention, reorg/reopen/IBD and genesis accounting are demonstrated. Modelled five-slot throughput must be measured.
+
+The private continuation archive was opened and private triage is in progress. Current public-facing security work is #27. Preserve the validated #13–#17 and #19–#24 checkpoints and keep all Phase 6 branches draft, default-off and Simnet-only.
+
+## Next execution order
+
+1. Review any completed #25, #26 and #27 runs. For #26, check the six dedicated integer tests and inspect formatting, strict Clippy and all eight jobs.
+2. Continue the reward claim fixture using native coinbase/mergeset observation and compare accepted outputs after a reorg. Report independently verifiable proof before any activation discussion.
+3. Retrieve #23 artifact evidence and record the sustained-rate and external Kaspa/pool interoperability gaps. Preserve #24's validated source when expanding mining docs.
+
+[Dated recovery report](docs/development/PHASE6_35_YEAR_RECOVERY_2026-11-22.md).
