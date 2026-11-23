@@ -1695,8 +1695,13 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
     let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
     let (sender, _receiver) = async_channel::unbounded();
     let ctx = TestContext::new(TestConsensus::with_db(connect(), &config, sender));
+    let genesis = config.genesis.build_genesis_transactions();
+    assert!(genesis.iter().all(|tx| tx.outputs.is_empty()));
+    assert!(ctx.consensus.get_virtual_utxos(None, 1, false).is_empty());
     let split = build(&ctx, vec![config.genesis.hash], 1);
+    assert!(split.transactions[0].outputs.is_empty(), "the first block cannot settle a nominal genesis subsidy");
     insert(&ctx, &split).await;
+    assert!(ctx.consensus.get_virtual_utxos(None, 1, false).is_empty());
     let a1 = build(&ctx, vec![split.header.hash], 2);
     let b1 = build(&ctx, vec![split.header.hash], 3);
     assert_eq!(a1.header.daa_score, b1.header.daa_score);
@@ -1732,6 +1737,31 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
 
     let snapshot = ctx.consensus.get_virtual_utxos(None, 64, false);
     assert!(snapshot.len() < 64, "fixture must compare the entire UTXO set");
+    let expected_claims = [
+        expected_source_reward(&split, 1),
+        expected_source_reward(&a1, 2),
+        expected_source_reward(&b1, 3),
+        expected_source_reward(&a2, 4),
+        expected_source_reward(&b2, 5),
+        expected_source_reward(&b3, 6),
+        expected_source_reward(&joined, 7),
+    ];
+    let mut observed_claims = snapshot
+        .iter()
+        .map(|(_, entry)| {
+            assert!(entry.is_coinbase);
+            let script = entry.script_public_key.script();
+            assert_eq!(script.len(), 2);
+            assert_eq!(script[0], 0x51);
+            (script[1], entry.amount)
+        })
+        .collect::<Vec<_>>();
+    observed_claims.sort_unstable();
+    assert_eq!(observed_claims, expected_claims);
+    let issued = snapshot.iter().map(|(_, entry)| u128::from(entry.amount)).sum::<u128>();
+    let entitled = expected_claims.into_iter().map(|(_, value)| u128::from(value)).sum::<u128>();
+    assert_eq!(issued, entitled);
+
     let joined_id = joined.transactions[0].id();
     let abandoned_id = a2.transactions[0].id();
     assert!(!snapshot.iter().any(|(outpoint, _)| outpoint.transaction_id == abandoned_id));
