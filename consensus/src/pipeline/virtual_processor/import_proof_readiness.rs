@@ -147,14 +147,8 @@ mod tests {
         assert!(validated.verify_committed(&db, point).is_err());
     }
 
-    fn install_shielded_child(db: &Arc<DB>, parent: Hash, nonce: u64) -> Block {
-        use crate::{
-            model::stores::{
-                ghostdag::{DbGhostdagStore, GhostdagData, GhostdagStore},
-                reachability::{DbReachabilityStore, ReachabilityStore},
-            },
-            processes::{reachability::interval::Interval, shielded::PruningPointShieldedMetadata},
-        };
+    fn shielded_child(nonce: u64) -> Block {
+        use crate::processes::shielded::PruningPointShieldedMetadata;
         use kaspa_consensus_core::{
             merkle::calc_hash_merkle_root, subnets::SUBNETWORK_ID_COINBASE, tx::Transaction,
             zkas_state_binding::SHIELDED_COMMITMENT_OFFSET,
@@ -168,16 +162,26 @@ mod tests {
         header.nonce = nonce;
         header.hash_merkle_root = calc_hash_merkle_root(std::iter::once(&coinbase));
         header.finalize();
-        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
-            .insert(header.hash, Arc::new(header.clone()), 0)
-            .unwrap();
+        Block::new(header, vec![coinbase])
+    }
+
+    fn install_shielded_child(db: &Arc<DB>, parent: Hash, nonce: u64) -> Block {
+        use crate::{
+            model::stores::{
+                ghostdag::{DbGhostdagStore, GhostdagData, GhostdagStore},
+                reachability::{DbReachabilityStore, ReachabilityStore},
+            },
+            processes::reachability::interval::Interval,
+        };
+        let child = shielded_child(nonce);
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(child.hash(), child.header.clone(), 0).unwrap();
         DbGhostdagStore::new(db.clone(), 0, CachePolicy::Empty, CachePolicy::Empty)
-            .insert(header.hash, Arc::new(GhostdagData::new_with_selected_parent(parent, 5)))
+            .insert(child.hash(), Arc::new(GhostdagData::new_with_selected_parent(parent, 5)))
             .unwrap();
         DbReachabilityStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty)
-            .insert(header.hash, parent, Interval::new(1, 10), nonce)
+            .insert(child.hash(), parent, Interval::new(1, 10), nonce)
             .unwrap();
-        Block::new(header, vec![coinbase])
+        child
     }
 
     // Keep fees out of subsidy accounting. Each builder invocation settles
@@ -247,85 +251,21 @@ mod tests {
     }
 
     fn exercise_guarded_issuance_publication(nonzero: bool) {
-        use super::super::{
-            branch_readiness::DbBranchReadiness,
-            import_readiness::tests::{install_point, stage_explicit_evidence},
-            staging_import::PROMOTION_KEY,
-        };
-        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
+        use super::super::{branch_readiness::DbBranchReadiness, staging_import::PROMOTION_KEY};
         use crate::model::stores::{
-            ghostdag::GhostdagData,
-            headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
+            issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay},
             selected_chain::{DbSelectedChainStore, SelectedChainStore},
-            statuses::{DbStatusesStore, StatusesStore},
-            virtual_state::{VirtualState, VirtualStateStore},
         };
-        use crate::processes::ghostdag::ordering::SortableBlock;
-        use kaspa_consensus_core::{
-            ChainPath,
-            blockstatus::BlockStatus::StatusUTXOValid,
-            config::params::{ForkActivation, ZKAS_DEV_FEE_RECIPIENT},
-            issuance_checkpoint::IssuanceCheckpoint,
-        };
+        use kaspa_consensus_core::{ChainPath, issuance_checkpoint::IssuanceCheckpoint};
         use rocksdb::WriteBatch;
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
         let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
         let db = connect();
-        let config = ConfigBuilder::new(DEVNET_PARAMS)
-            .edit_consensus_params(|params| {
-                params.toccata_activation = ForkActivation::never();
-                params.dev_fee_accrual_activation = ForkActivation::new(100);
-                params.dev_fee_payout_interval = 10;
-                params.dev_fee_permille = 50;
-                params.dev_fee_recipient = Some(ZKAS_DEV_FEE_RECIPIENT);
-            })
-            .skip_adding_genesis()
-            .build();
-        let (sender, _receiver) = async_channel::unbounded();
-        let consensus = TestConsensus::with_db(db.clone(), &config, sender.clone());
+        let (consensus, point, proof, child) = guarded_issuance_fixture(&db, nonzero, true);
         let processor = consensus.virtual_processor();
-        let mut header = Header::from(&DEVNET_GENESIS);
-        header.finalize();
-        let genesis = header.hash;
-        let intermediate = Hash::from_u64_word(700);
-        if nonzero {
-            header.nonce += 1;
-            header.finalize();
-        }
-        let point = ReadinessPoint { hash: header.hash, index: 3 };
-        let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header.clone())]]).unwrap();
-        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(header), 0).unwrap();
-        install_point(&db, point, ReadinessPoint { hash: 7.into(), index: 1 });
-        DbPruningStore::new(db.clone()).set_pruning_proof_descriptor(proof.descriptor.clone()).unwrap();
-        let child = install_shielded_child(&db, point.hash, 201);
-        DbHeadersSelectedTipStore::new(db.clone()).set(SortableBlock::new(child.hash(), child.header.blue_work)).unwrap();
-        DbStatusesStore::new(db.clone(), CachePolicy::Empty).set(point.hash, StatusUTXOValid).unwrap();
-        let mut batch = WriteBatch::default();
-        let mut pruning = DbPruningStore::new(db.clone());
-        pruning.set_retention_checkpoint(&mut batch, point.hash).unwrap();
-        pruning.set_retention_period_root(&mut batch, point.hash).unwrap();
-        let mut selected = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
-        selected.init_with_pruning_point(&mut batch, genesis).unwrap();
-        db.write(batch).unwrap();
-        let mut batch = WriteBatch::default();
-        if nonzero {
-            selected.apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![intermediate, point.hash] }).unwrap();
-        }
-        stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
-        db.write(batch).unwrap();
-        drop(pruning);
-        drop(selected);
-        processor
-            .virtual_stores
-            .write()
-            .state
-            .set(Arc::new(VirtualState {
-                parents: vec![point.hash],
-                ghostdag_data: GhostdagData::new_with_selected_parent(point.hash, 5),
-                ..Default::default()
-            }))
-            .unwrap();
+        let genesis = DEVNET_GENESIS.hash;
+        let intermediate = Hash::from_u64_word(CRASH_INTERMEDIATE);
 
         let token = processor.begin_authority_import().unwrap();
         let unspent = processor.finish_verified_ibd_import(token, &proof, &child).unwrap();
@@ -338,7 +278,7 @@ mod tests {
         drop(db);
 
         let db = connect();
-        let consensus = TestConsensus::with_db(db.clone(), &config, sender);
+        let (consensus, _, _, _) = guarded_issuance_fixture(&db, nonzero, false);
         let processor = consensus.virtual_processor();
         assert!(processor.authority_lease().is_err());
         assert!(db.get(PROMOTION_KEY).unwrap().is_none());
@@ -352,7 +292,6 @@ mod tests {
         let recovered = processor.recover_authenticated_staging(point, &proof, &child, &child).unwrap();
         drop(recovered);
         const CAP: u64 = 2_900_000_000_000_000_000;
-        assert_eq!(genesis, DEVNET_GENESIS.hash);
         let (path, claims, releases) = if nonzero {
             let path = vec![genesis, intermediate, point.hash];
             let (claims, releases) = nonzero_settlements(&processor.coinbase_manager, intermediate, point.hash);
@@ -457,6 +396,201 @@ mod tests {
                 DbIssuanceCheckpoint::new(db).load_retained_replay_checkpoint(&selected.read(), genesis, point.hash, CAP).is_err()
             );
         }
+    }
+
+    const CRASH_DIRECTORY: &str = "KASCADE_NONZERO_PRUNING_CRASH_DIRECTORY";
+    const CRASH_STAGE: &str = "KASCADE_NONZERO_PRUNING_CRASH_STAGE";
+    const CRASH_CAP: u64 = 2_900_000_000_000_000_000;
+    const CRASH_INTERMEDIATE: u64 = 700;
+
+    fn guarded_issuance_fixture(
+        db: &Arc<DB>,
+        nonzero: bool,
+        initialize: bool,
+    ) -> (TestConsensus, ReadinessPoint, ValidatedImportProof, Block) {
+        use super::super::import_readiness::tests::{install_point, stage_explicit_evidence};
+        use crate::model::stores::{
+            ghostdag::GhostdagData,
+            headers_selected_tip::{DbHeadersSelectedTipStore, HeadersSelectedTipStore},
+            selected_chain::{DbSelectedChainStore, SelectedChainStore},
+            statuses::{DbStatusesStore, StatusesStore},
+            virtual_state::{VirtualState, VirtualStateStore},
+        };
+        use crate::processes::ghostdag::ordering::SortableBlock;
+        use kaspa_consensus_core::{
+            ChainPath,
+            blockstatus::BlockStatus::StatusUTXOValid,
+            config::params::{ForkActivation, ZKAS_DEV_FEE_RECIPIENT},
+        };
+        use rocksdb::WriteBatch;
+
+        let config = ConfigBuilder::new(DEVNET_PARAMS)
+            .edit_consensus_params(|params| {
+                params.toccata_activation = ForkActivation::never();
+                params.dev_fee_accrual_activation = ForkActivation::new(100);
+                params.dev_fee_payout_interval = 10;
+                params.dev_fee_permille = 50;
+                params.dev_fee_recipient = Some(ZKAS_DEV_FEE_RECIPIENT);
+            })
+            .skip_adding_genesis()
+            .build();
+        let (sender, _receiver) = async_channel::unbounded();
+        let consensus = TestConsensus::with_db(db.clone(), &config, sender);
+        let processor = consensus.virtual_processor();
+        let mut header = Header::from(&DEVNET_GENESIS);
+        header.finalize();
+        let genesis = header.hash;
+        assert_eq!(genesis, DEVNET_GENESIS.hash);
+        let intermediate = Hash::from_u64_word(CRASH_INTERMEDIATE);
+        if nonzero {
+            header.nonce += 1;
+            header.finalize();
+        }
+        let point = ReadinessPoint { hash: header.hash, index: 3 };
+        let proof = ValidatedImportProof::capture_validated(&vec![vec![Arc::new(header.clone())]]).unwrap();
+        let child = if initialize { install_shielded_child(db, point.hash, 201) } else { shielded_child(201) };
+        if !initialize {
+            return (consensus, point, proof, child);
+        }
+        DbHeadersStore::new(db.clone(), CachePolicy::Empty, CachePolicy::Empty).insert(point.hash, Arc::new(header), 0).unwrap();
+        install_point(db, point, ReadinessPoint { hash: 7.into(), index: 1 });
+        DbPruningStore::new(db.clone()).set_pruning_proof_descriptor(proof.descriptor.clone()).unwrap();
+        DbHeadersSelectedTipStore::new(db.clone()).set(SortableBlock::new(child.hash(), child.header.blue_work)).unwrap();
+        DbStatusesStore::new(db.clone(), CachePolicy::Empty).set(point.hash, StatusUTXOValid).unwrap();
+        let mut batch = WriteBatch::default();
+        let mut pruning = DbPruningStore::new(db.clone());
+        pruning.set_retention_checkpoint(&mut batch, point.hash).unwrap();
+        pruning.set_retention_period_root(&mut batch, point.hash).unwrap();
+        let mut selected = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+        selected.init_with_pruning_point(&mut batch, genesis).unwrap();
+        db.write(batch).unwrap();
+        let mut batch = WriteBatch::default();
+        if nonzero {
+            selected.apply_changes(&mut batch, &ChainPath { removed: vec![], added: vec![intermediate, point.hash] }).unwrap();
+        }
+        stage_explicit_evidence(&mut processor.pruning_meta_stores.write(), &mut batch, point);
+        db.write(batch).unwrap();
+        drop(pruning);
+        processor
+            .virtual_stores
+            .write()
+            .state
+            .set(Arc::new(VirtualState {
+                parents: vec![point.hash],
+                ghostdag_data: GhostdagData::new_with_selected_parent(point.hash, 5),
+                ..Default::default()
+            }))
+            .unwrap();
+
+        (consensus, point, proof, child)
+    }
+
+    #[test]
+    #[ignore = "subprocess helper for the guarded nonzero publication test"]
+    fn nonzero_publication_exit_worker() {
+        use super::super::persistent_branch_authority::GUARDED_PUBLICATION_EXIT;
+        use crate::model::stores::issuance_checkpoint::{DbIssuanceCheckpoint, LocalIssuanceReplay};
+        use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
+        use kaspa_database::prelude::DeferredDbBatch;
+
+        let stage = std::env::var(CRASH_STAGE).unwrap();
+        let directory = std::env::var_os(CRASH_DIRECTORY).unwrap();
+        let db = ConnBuilder::default().with_files_limit(10).with_db_path(directory.into()).build().unwrap();
+        let before = stage == "before";
+        assert!(before || stage == "after");
+        let (consensus, point, proof, child) = guarded_issuance_fixture(&db, true, before);
+        let processor = consensus.virtual_processor();
+        let genesis = DEVNET_GENESIS.hash;
+        let intermediate = Hash::from_u64_word(CRASH_INTERMEDIATE);
+        let path = [genesis, intermediate, point.hash];
+        let (claims, releases) = nonzero_settlements(&processor.coinbase_manager, intermediate, point.hash);
+        if before {
+            let prior =
+                IssuanceCheckpoint::derive_from_settlements(genesis, intermediate, CRASH_CAP, &path[..2], &claims[..2], &[]).unwrap();
+            assert_eq!((prior.minted, prior.paid, prior.deferred), (3_000, 2_850, 150));
+            let selected = processor.selected_chain_store.read();
+            let mut batch = DeferredDbBatch::new(db.clone());
+            let replay = LocalIssuanceReplay {
+                network_genesis: genesis,
+                supply_cap: CRASH_CAP,
+                selected_path: &path[..2],
+                claims: &claims[..2],
+                releases: &[],
+            };
+            DbIssuanceCheckpoint::new(db.clone()).stage_retained_replay_checkpoint(&mut batch, &selected, replay, &prior).unwrap();
+            batch.commit().unwrap();
+        }
+
+        let checkpoint =
+            IssuanceCheckpoint::derive_from_settlements(genesis, point.hash, CRASH_CAP, &path, &claims, &releases).unwrap();
+        let replay = LocalIssuanceReplay {
+            network_genesis: genesis,
+            supply_cap: CRASH_CAP,
+            selected_path: &path,
+            claims: &claims,
+            releases: &releases,
+        };
+        let token = processor.begin_authority_import().unwrap();
+        GUARDED_PUBLICATION_EXIT.set(if before { 71 } else { 72 });
+        processor.finish_verified_ibd_import_with_issuance(token, &proof, &child, Some((Some(replay), &checkpoint))).unwrap();
+        panic!("guarded publisher returned without exiting");
+    }
+
+    #[test]
+    fn authority_integration_nonzero_publication_recovers_after_process_exit() {
+        use super::super::branch_readiness::DbBranchReadiness;
+        use crate::model::stores::{issuance_checkpoint::DbIssuanceCheckpoint, selected_chain::DbSelectedChainStore};
+
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let run = |stage, code| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "pipeline::virtual_processor::import_proof_readiness::tests::nonzero_publication_exit_worker",
+                ])
+                .env(CRASH_DIRECTORY, temp.path())
+                .env(CRASH_STAGE, stage)
+                .output()
+                .unwrap();
+            eprintln!(
+                "guarded publication {stage}: {} {} {}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(output.status.code(), Some(code));
+        };
+
+        run("before", 71);
+        let point = {
+            let db = connect();
+            let (_consensus, point, _, _) = guarded_issuance_fixture(&db, true, false);
+            let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+            let store = DbIssuanceCheckpoint::new(db.clone());
+            let prior = store
+                .load_retained_replay_checkpoint(
+                    &selected.read(),
+                    DEVNET_GENESIS.hash,
+                    Hash::from_u64_word(CRASH_INTERMEDIATE),
+                    CRASH_CAP,
+                )
+                .unwrap();
+            assert_eq!((prior.claim_count, prior.minted, prior.paid, prior.deferred), (2, 3_000, 2_850, 150));
+            assert!(store.load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP).is_err());
+            assert!(!DbBranchReadiness::new(db).is_ready(point).unwrap());
+            point
+        };
+
+        run("after", 72);
+        let db = connect();
+        let selected = parking_lot::RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+        let result = DbIssuanceCheckpoint::new(db.clone())
+            .load_retained_replay_checkpoint(&selected.read(), DEVNET_GENESIS.hash, point.hash, CRASH_CAP)
+            .unwrap();
+        assert_eq!((result.claim_count, result.minted, result.paid, result.deferred), (4, 6_000, 6_000, 0));
+        assert!(DbBranchReadiness::new(db).is_ready(point).unwrap());
     }
 
     #[test]
