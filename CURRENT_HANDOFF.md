@@ -666,3 +666,7 @@ Next, apply the reviewed archive checkpoint to the staged branch only after pres
 All eight jobs passed on implementation `11ab68a3be26fc9616a91d3d06ac5d99bc23679b` in [run 45069228114, attempt 3](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45069228114/attempts/3). Native job 137388298498 passed both focused two-node scenarios, 36 combined Phase 6 regressions, 1,579 workspace tests (25 skips), and 32 no-asm tests. The recipient verified archive history through genesis and retained the authenticated anchor index when it rejected an out-of-range claim.
 
 The [resumed-work handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/90d5672c106a6158f366e080df8f789bded4e961/CURRENT_HANDOFF.md) tracks the separate partition/rejoin, native PoW, and profile work. This checkpoint adds only documentation to the validated implementation.
+
+## November 22, 2026 — acceptance convergence staging
+
+Archive backfill (#17) and three-node partition/rejoin/restart (#19) are present together for eventual combined validation. Check the [convergence report](docs/development/PHASE6_ACCEPTANCE_CONVERGENCE_2026-11-22.md) for exact sources, prior runs, and the next change after #22 validates. This combined source has no CI result yet. [Current cross-branch handoff](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/cfe5ba6c4383bd8d38e63f06c766db685556632a/CURRENT_HANDOFF.md).
