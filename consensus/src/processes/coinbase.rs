@@ -823,6 +823,42 @@ mod tests {
     }
 
     #[test]
+    fn reward_claim_excludes_non_daa_red_subsidy_but_returns_its_fees() {
+        use kaspa_hashes::Hash;
+        use std::sync::Arc;
+
+        let mut params = SIMNET_PARAMS.clone();
+        params.dev_fee_recipient = None;
+        let cbm = create_manager(&params);
+        let blue = Hash::from_bytes([1; 32]);
+        let eligible_red = Hash::from_bytes([2; 32]);
+        let fee_only_red = Hash::from_bytes([3; 32]);
+        let blue_script = ScriptPublicKey::new(0, scriptvec![0x51]);
+        let red_script = ScriptPublicKey::new(0, scriptvec![0x52]);
+        let merge_script = ScriptPublicKey::new(0, scriptvec![0x53]);
+        let miner_data = MinerData::new(merge_script.clone(), vec![]);
+        let ghostdag = GhostdagData {
+            mergeset_blues: Arc::new(vec![blue]),
+            mergeset_reds: Arc::new(vec![eligible_red, fee_only_red]),
+            ..Default::default()
+        };
+        let mut rewards: BlockHashMap<BlockRewardData> = Default::default();
+        rewards.insert(blue, BlockRewardData::new(1_001, 17, blue_script.clone()));
+        rewards.insert(eligible_red, BlockRewardData::new(2_003, 19, red_script.clone()));
+        rewards.insert(fee_only_red, BlockRewardData::new(9_001, 31, red_script));
+        let non_daa: BlockHashSet = [fee_only_red].into_iter().collect();
+
+        let coinbase = cbm.expected_coinbase_transaction(0, miner_data, &ghostdag, &rewards, &non_daa, [0; 32], 0, 0).unwrap();
+        assert!(coinbase.has_red_reward);
+        assert_eq!(
+            coinbase.tx.outputs,
+            vec![TransactionOutput::new(1_001 + 17, blue_script), TransactionOutput::new(2_003 + 19 + 31, merge_script)]
+        );
+        let gross = coinbase.tx.outputs.iter().map(|output| output.value).sum::<u64>();
+        assert_eq!(gross - (17 + 19 + 31), 1_001 + 2_003);
+    }
+
+    #[test]
     fn dev_fee_skims_subsidy_to_dev_recipient() {
         use kaspa_consensus_core::config::params::ZKAS_DEV_FEE_RECIPIENT;
         use kaspa_hashes::Hash;
