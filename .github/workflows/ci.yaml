@@ -166,6 +166,10 @@ jobs:
           github.ref_name == 'test/phase6-issuance-checkpoint-persistence-20261122'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(issuance_checkpoint_)'
 
+      - name: Verify inactive issuance field codec and authenticated context
+        if: github.head_ref == 'feat/phase6-inactive-issuance-field-20261123' || github.ref_name == 'feat/phase6-inactive-issuance-field-20261123'
+        run: cargo nextest run -p kaspa-consensus-core --lib -E 'test(=issuance_checkpoint::tests::inactive_issuance_field_has_canonical_encoding) | test(=issuance_checkpoint::tests::inactive_issuance_field_rejects_context_and_equal_total_substitution)'
+
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches
 
