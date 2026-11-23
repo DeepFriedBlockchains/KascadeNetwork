@@ -2,6 +2,12 @@
 
 Updated November 23, 2026.
 
+## Pruned receiver authentication checkpoint — November 23, 2026
+
+- #52 and #53 remain active on [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690) and [45232526761](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45232526761). No reruns requested. Exact focused and authority conclusions are pending.
+- #54 initial [45233347194](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45233347194) failed rustfmt on the replay fixture initializer. The formatting-only correction is `c1442b2d6f81cb9e7b9a470dd023154ffd755ef5`. Replacement [45234460768](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45234460768) active.
+- The committed header binds the transaction Merkle root, accepted transaction IDs and UTXO commitment. The selected child verifier authenticates the shielded coinbase root. None currently authenticates a cumulative issuance checkpoint including claims and developer releases. The next safe increment will retain a local replay-derived anchor before pruning, scope it to the verified network, cap and selected pruning point, and recover the pair after the historical index prefix is removed. Production issuance remains inactive.
+
 ## Selected replay anchor and pending issuance validation — November 23, 2026
 
 | PR | Exact head | GitHub Actions evidence |
