@@ -47,7 +47,7 @@ impl Node {
         }
 
         if let Some(params) = params {
-            command.arg("--override-params-file").arg(params);
+            command.arg(format!("--override-params-file={}", params.display()));
             command.args(["--perf-metrics", "--perf-metrics-interval-sec=1"]);
         }
         let log = File::create(logs.join(format!("{label}.log"))).unwrap();
