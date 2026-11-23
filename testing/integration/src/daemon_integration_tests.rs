@@ -1287,6 +1287,12 @@ async fn authority_integration_production_preview_promotes_shielded_ibd() {
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_reopens_imported_pruning_evidence() {
+    run_payload_ibd(true, None, false, IbdPayloadFixture::PruningEvidenceReopen).await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_recovers_descendants_after_header_sync() {
     run_payload_ibd(true, None, false, IbdPayloadFixture::DescendantRecovery).await;
 }
@@ -1436,6 +1442,91 @@ enum IbdPayloadFixture {
     Transparent,
     #[cfg(feature = "phase6-staging-preview")]
     DescendantRecovery,
+    #[cfg(feature = "phase6-staging-preview")]
+    PruningEvidenceReopen,
+}
+
+impl IbdPayloadFixture {
+    fn uses_transparent_coinbase(self) -> bool {
+        match self {
+            Self::Transparent => true,
+            #[cfg(feature = "phase6-staging-preview")]
+            Self::PruningEvidenceReopen => true,
+            _ => false,
+        }
+    }
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[derive(Debug, PartialEq, Eq)]
+struct PruningRecoveryEvidence {
+    selected_child: Hash,
+    selected_tip: Hash,
+    virtual_daa_score: u64,
+    pruning_utxos: Vec<(TransactionOutpoint, UtxoEntry)>,
+    virtual_utxos: Vec<(TransactionOutpoint, UtxoEntry)>,
+    smt_commitments: [Hash; 3],
+    smt_lanes: u64,
+    shielded_root: [u8; 32],
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+impl PruningRecoveryEvidence {
+    async fn capture(daemon: &Daemon, point: Hash, require_promotion: bool) -> Self {
+        use kaspa_consensus_core::{
+            blockstatus::BlockStatus::StatusUTXOValid, merkle::calc_hash_merkle_root, zkas_state_binding::extract_state_root,
+        };
+
+        let service = daemon.core.find(ConsensusManager::IDENT).unwrap();
+        let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
+        tokio::task::spawn_blocking(move || {
+            let active = manager.consensus();
+            let session = active.unguarded_session_blocking();
+            assert_eq!(session.pruning_point(), point);
+            assert!(session.is_pruning_utxoset_stable());
+            assert!(session.is_pruning_smt_stable());
+            assert!(session.is_pruning_shielded_stable());
+            if require_promotion {
+                assert!(session.has_verified_staging_promotion().unwrap());
+                assert!(!session.supports_verified_staging_import());
+            }
+
+            let path = session.get_virtual_chain_from_block(point, None).unwrap();
+            assert!(path.removed.is_empty());
+            let selected_child = *path.added.first().expect("pruning point must have a selected child");
+            let selected_tip = session.get_sink();
+            assert_eq!(path.added.last(), Some(&selected_tip));
+            assert_eq!(session.get_headers_selected_tip(), selected_tip);
+            assert_eq!(session.get_block_status(point), Some(StatusUTXOValid));
+            assert_eq!(session.get_block_status(selected_child), Some(StatusUTXOValid));
+            let child_header = session.get_header(selected_child).unwrap();
+            let child = session.get_block(selected_child).unwrap();
+            assert_eq!(child_header.direct_parents(), &[point]);
+            assert_eq!(calc_hash_merkle_root(child.transactions.iter()), child_header.hash_merkle_root);
+            let shielded_root = session.get_shielded_state_root(point).unwrap();
+            assert_eq!(extract_state_root(&child.transactions[0].payload), Some(shielded_root));
+
+            let smt = session.get_pruning_point_smt_metadata(point).unwrap();
+            assert!(smt.active_lanes_count >= 10);
+            let pruning_utxos = session.get_pruning_point_utxos(point, None, 4096, false).unwrap();
+            let virtual_utxos = session.get_virtual_utxos(None, 4096, false);
+            // This fixture must compare complete sets within the bounded read.
+            assert!(!pruning_utxos.is_empty() && pruning_utxos.len() < 4096);
+            assert!(!virtual_utxos.is_empty() && virtual_utxos.len() < 4096);
+            Self {
+                selected_child,
+                selected_tip,
+                virtual_daa_score: session.get_virtual_daa_score(),
+                pruning_utxos,
+                virtual_utxos,
+                smt_commitments: [smt.lanes_root, smt.payload_and_ctx_digest, smt.parent_seq_commit],
+                smt_lanes: smt.active_lanes_count,
+                shielded_root,
+            }
+        })
+        .await
+        .unwrap()
+    }
 }
 
 async fn run_shielded_ibd(
@@ -1465,14 +1556,15 @@ async fn run_payload_ibd_at(
     init_allocator_with_default_settings();
     kaspa_core::log::try_init_logger("INFO,kaspa_testing_integration=trace,kaspa_rpc_core=debug");
 
-    let params_file = if fixture == IbdPayloadFixture::Transparent {
+    let transparent = fixture.uses_transparent_coinbase();
+    let params_file = if transparent {
         "testdata/params/transparent_payload_ibd_test_params.json"
     } else {
         "testdata/params/shielded_ibd_sync_test_params.json"
     };
     let override_params_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(params_file);
     let params = load_override_params(&override_params_path);
-    assert_eq!(params.shielded_coinbase, fixture != IbdPayloadFixture::Transparent);
+    assert_eq!(params.shielded_coinbase, !transparent);
 
     let args = Args {
         simnet: true,
@@ -1502,7 +1594,7 @@ async fn run_payload_ibd_at(
     // address here would fail the shielded mint (build_coinbase_mint parses
     // script[..43] as a canonical Orchard address).
     let miner_recipient = kaspa_shielded_core::wallet::address_bytes_from_seed([7u8; 32]).expect("valid orchard address");
-    let miner_address = if fixture == IbdPayloadFixture::Transparent {
+    let miner_address = if transparent {
         let key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[9u8; 32]).unwrap();
         Address::new(kaspad1.network.into(), kaspa_addresses::Version::PubKey, &key.x_only_public_key().0.serialize())
     } else {
@@ -1526,7 +1618,7 @@ async fn run_payload_ibd_at(
             submit_ibd_fixture_spend(&kaspad1, &rpc_client1, &params).await;
         }
         #[cfg(feature = "phase6-staging-preview")]
-        if fixture == IbdPayloadFixture::Transparent && mined >= 80 && (mined - 80).is_multiple_of(50) {
+        if transparent && mined >= 80 && (mined - 80).is_multiple_of(50) {
             submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
         }
         #[cfg(not(feature = "phase6-staging-preview"))]
@@ -1543,7 +1635,7 @@ async fn run_payload_ibd_at(
         && extra_blocks < extra_blocks_limit
     {
         #[cfg(feature = "phase6-staging-preview")]
-        if fixture == IbdPayloadFixture::Transparent && extra_blocks.is_multiple_of(50) {
+        if transparent && extra_blocks.is_multiple_of(50) {
             submit_ibd_fixture_lanes(&rpc_client1, &miner_address, coinbase_maturity).await;
         }
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
@@ -1590,7 +1682,7 @@ async fn run_payload_ibd_at(
     } else {
         None
     };
-    if fixture == IbdPayloadFixture::Transparent {
+    if transparent {
         let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
         let active = manager.consensus();
@@ -1602,6 +1694,13 @@ async fn run_payload_ibd_at(
             "transparent fixture has no pruning-point UTXOs"
         );
     }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    let exporter_evidence = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
+        Some(PruningRecoveryEvidence::capture(&kaspad1, target_pruning_point, false).await)
+    } else {
+        None
+    };
 
     // Phase 2: bring up the syncee and connect it to the syncer.
     #[cfg(feature = "phase6-staging-preview")]
@@ -1633,7 +1732,13 @@ async fn run_payload_ibd_at(
         let (proof, metadata) = tokio::task::spawn_blocking(move || {
             let session = source.unguarded_session_blocking();
             let tip = session.get_header(session.get_headers_selected_tip()).unwrap();
-            let proof = session.get_staging_pruning_point_proof();
+            let proof = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
+                let proof = session.get_pruning_point_proof();
+                assert_eq!(proof[0].last().unwrap().hash, target_pruning_point);
+                proof
+            } else {
+                session.get_staging_pruning_point_proof()
+            };
             ((*proof).clone(), kaspa_consensus_core::pruning::PruningProofMetadata::new(tip.blue_work))
         })
         .await
@@ -1678,7 +1783,8 @@ async fn run_payload_ibd_at(
 
     let permanent_peer = interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers;
     #[cfg(feature = "phase6-staging-preview")]
-    let permanent_peer = permanent_peer && fixture != IbdPayloadFixture::DescendantRecovery;
+    let permanent_peer =
+        permanent_peer && !matches!(fixture, IbdPayloadFixture::DescendantRecovery | IbdPayloadFixture::PruningEvidenceReopen);
     rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), permanent_peer).await.unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
@@ -1951,6 +2057,35 @@ async fn run_payload_ibd_at(
         assert!(session.has_verified_staging_promotion().unwrap());
         assert!(!session.supports_verified_staging_import());
     }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    let rpc_client2 = if let Some(expected) = exporter_evidence {
+        let imported = PruningRecoveryEvidence::capture(&kaspad2, target_pruning_point, true).await;
+        assert_eq!(imported, expected, "verified import did not reproduce the exporter's evidence");
+        rpc_client2.disconnect().await.unwrap();
+        drop(rpc_client2);
+        kaspad2 = kaspad2.restart(total_fd_limit);
+
+        // Compare reopened RocksDB state before starting networking.
+        let reopened = PruningRecoveryEvidence::capture(&kaspad2, target_pruning_point, true).await;
+        assert_eq!(reopened, expected, "reopened receiver differs from the exporter");
+        let client = kaspad2.start().await;
+        client.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), true).await.unwrap();
+        let reconnect = client.clone();
+        wait_for(
+            50,
+            100,
+            move || {
+                let client = reconnect.clone();
+                Box::pin(async move { client.get_connected_peer_info().await.unwrap().peer_info.len() == 1 })
+            },
+            "reopened receiver did not reconnect",
+        )
+        .await;
+        client
+    } else {
+        rpc_client2
+    };
 
     // Phase 4 / assertion 3: mine finality_depth + buffer blocks on the syncer and
     // assert the syncee accepts them. Each carries a #24 coinbase commitment to its

@@ -2744,7 +2744,8 @@ mod tests {
                 params.dev_fee_recipient = developer.then_some(ZKAS_DEV_FEE_RECIPIENT);
                 params.dev_fee_permille = 50;
                 params.dev_fee_accrual_activation = ForkActivation::always();
-                params.dev_fee_payout_interval = 3;
+                // Simnet genesis is excluded from the DAA window, so the third block has DAA score 2.
+                params.dev_fee_payout_interval = 2;
                 params.skip_proof_of_work = true;
             })
             .build();
@@ -2764,6 +2765,7 @@ mod tests {
         let a2 = build(&tc, a1.hash(), 4);
         insert(&tc, &a2).await;
         assert_eq!(consensus.get_sink(), a2.hash());
+        assert_eq!([split.header.daa_score, a1.header.daa_score, a2.header.daa_score], [0, 1, 2]);
 
         let store = DbIssuanceCheckpoint::new(db.clone());
         let old_path = [genesis, split.hash(), a1.hash(), a2.hash()];
@@ -2794,6 +2796,7 @@ mod tests {
         let b3 = build(&tc, b2.hash(), 6);
         insert(&tc, &b3).await;
         assert_eq!(consensus.get_sink(), b3.hash());
+        assert_eq!([b1.header.daa_score, b2.header.daa_score, b3.header.daa_score], [1, 2, 3]);
         let new_path = [genesis, split.hash(), b1.hash(), b2.hash(), b3.hash()];
         let new_claims = [claim(&split, &b1, 2, 1, developer), claim(&b1, &b2, 3, 3, developer), claim(&b2, &b3, 4, 5, developer)];
         let outstanding = new_claims[2].minted - new_claims[2].paid;
