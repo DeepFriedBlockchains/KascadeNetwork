@@ -19,7 +19,7 @@ use tokio::{
     io::copy_bidirectional,
     net::{TcpListener, TcpStream},
     task::JoinSet,
-    time::{sleep, timeout},
+    time::{Instant, sleep, timeout},
 };
 
 #[derive(Clone, Copy, Default)]
@@ -111,30 +111,35 @@ async fn connect(rpc_port: u16) -> GrpcClient {
 }
 
 async fn expect_peers(client: &GrpcClient, count: usize) {
+    let mut last_count = None;
     timeout(Duration::from_secs(60), async {
         loop {
-            if client.get_connected_peer_info().await.unwrap().peer_info.len() == count {
+            let connected = client.get_connected_peer_info().await.unwrap().peer_info.len();
+            if connected == count {
                 return;
             }
+            last_count = Some(connected);
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
-    .expect("loopback peer topology did not converge");
+    .unwrap_or_else(|_| panic!("loopback peer topology did not converge: expected {count}, last observed {last_count:?}"));
 }
 
 async fn expect_tip(client: &GrpcClient, tip: Hash) -> GetBlockDagInfoResponse {
+    let mut last_seen = None;
     timeout(Duration::from_secs(60), async {
         loop {
             let info = client.get_block_dag_info().await.unwrap();
             if info.sink == tip {
                 return info;
             }
+            last_seen = Some((info.sink, info.block_count));
             sleep(Duration::from_millis(100)).await;
         }
     })
     .await
-    .expect("selected DAG tip did not converge")
+    .unwrap_or_else(|_| panic!("selected DAG tip did not converge: expected {tip}, last observed (tip, block count) {last_seen:?}"))
 }
 
 async fn submit_block(client: &GrpcClient) -> Hash {
@@ -399,6 +404,7 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     let before = expect_tip(&c_rpc, first).await;
     record_node_metrics(&c_rpc, "c", "before_partition").await;
 
+    let partition_started = Instant::now();
     bridge.shutdown().await;
     expect_peers(&a_rpc, 1).await;
     expect_peers(&c_rpc, 0).await;
@@ -413,10 +419,14 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     assert_eq!(isolated.block_count, before.block_count);
     assert!(c.0.try_wait().unwrap().is_none(), "follower must stay alive during link interruption");
 
+    let forwarding_resumed = Instant::now();
     bridge.spawn(forward_peer(listener.clone()));
     expect_peers(&a_rpc, 2).await;
     expect_peers(&c_rpc, 1).await;
+    let connected_after = forwarding_resumed.elapsed();
     let caught_up = expect_tip(&c_rpc, tip).await;
+    let caught_up_after = forwarding_resumed.elapsed();
+    assert!(caught_up_after >= connected_after);
     assert_eq!(caught_up.block_count, before.block_count + 3);
     for peer in [&a_rpc, &b_rpc] {
         let dag = expect_tip(peer, tip).await;
@@ -432,6 +442,7 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     c.stop().await;
     bridge.shutdown().await;
     expect_peers(&a_rpc, 1).await;
+    let reopen_started = Instant::now();
     let mut c = Node::start(binary, data.path(), logs, 3, "c-reconnect-reopen", false, follower_options);
     let c_rpc = connect(19310).await;
     expect_peers(&c_rpc, 0).await;
@@ -440,7 +451,15 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     assert_eq!(reopened.block_count, caught_up.block_count);
     assert_eq!(reopened.pruning_point_hash, caught_up.pruning_point_hash);
     assert_eq!(reopened.virtual_daa_score, caught_up.virtual_daa_score);
-    eprintln!("follower persisted {tip} after catching up three blocks with no process restart during the partition");
+    let recovery = serde_json::json!({
+        "interruption_ms": forwarding_resumed.duration_since(partition_started).as_millis(),
+        "reconnect_ms": connected_after.as_millis(),
+        "catch_up_ms": caught_up_after.as_millis(),
+        "offline_reopen_ms": reopen_started.elapsed().as_millis(),
+        "synced_blocks": caught_up.block_count - before.block_count,
+        "final_tip": tip.to_string(),
+    });
+    eprintln!("phase6_peer_recovery,{recovery}");
 
     for client in [&a_rpc, &b_rpc, &c_rpc] {
         client.disconnect().await.unwrap();
