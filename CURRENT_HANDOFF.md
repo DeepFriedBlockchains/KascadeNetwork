@@ -2,7 +2,27 @@
 
 Updated November 23, 2026.
 
-## Latest checkpoint — November 23, 2026
+## Two-task checkpoint — November 23, 2026
+
+| Draft | Exact source SHA | Actions and result |
+| --- | --- | --- |
+| #32 | `f4d1d4f80c39b2e1c269f97473c53a8762b8bd5b` | [45135385319](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45135385319), 8/8 passed. |
+| #34 | `0c8cb06e2cc00dd2d1d4d3633a0e2604e9a53fdc` | [45135392390](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45135392390), **8/8 passed**. Both focused payout regressions passed. |
+| #39 | `db7d221116af81a2b7cbba9f9646d760052a56f2` | [45136232500](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45136232500), 7/8. Focused checkpoint, regular workspace and no-asm passed. Native 137563153013 running documentation. |
+| #40 | `45ce4935738cd30721544e6b37ae99a8cbf52804` | [45135241666](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45135241666), **8/8 passed**. Five-minute simulated-PoW resource [artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45135241666/artifacts/14801585581). |
+| #42 | `bba19b05e8659eb2b58bc0921c816070598be67e` | [45137198320](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45137198320), **8/8 passed**. Three process simulated-PoW startup and restart with [artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45137198320/artifacts/14800768777). |
+| [#43](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/43) | `13dc263c9883b858ca30173d5087f954bc46b58d` | [45143950379](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379), replacement matrix queued. Initial [45143642718](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143642718) failed rustfmt on the node launcher signature. Corrected on the replacement commit. |
+| [#46](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/46) | `7119ef849289553e0e1b72e818f8e6ba003260bb` | [45143838285](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143838285), running. Focused legacy Simnet payout reconciliation scheduled before broad native build. |
+
+#43 branch is `test/phase6-cli-real-pow-recovery-20261123`, based on the exact green #42 commit. It tests exact duplicate submission against unchanged DAG counters and adds native-PoW commands, diagnostics and acceptance criteria to the [operator runbook](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/13dc263c9883b858ca30173d5087f954bc46b58d/docs/development/PHASE6_LOOPBACK_OPERATOR_RUNBOOK_2026-11-23.md). Validate the dedicated CLI steps and the per-node artifact before claiming native-PoW acceptance.
+
+#46 branch is `test/phase6-persisted-red-settlement-20261123`, based on the exact green #34 commit. The focused regression uses the real accepted red payout through the consensus persistence path. It reconciles all payouts against independently read source subsidies, checks exactly-once coinbase acceptance and verifies body commitment and selected ancestry before and after RocksDB reopen. The complete fixture UTXO set must be preserved. [Regression scope](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/7119ef849289553e0e1b72e818f8e6ba003260bb/docs/development/PHASE6_PERSISTED_RED_SETTLEMENT_2026-11-23.md).
+
+Production import lacks a consensus-authenticated issuance commitment, a versioned checkpoint codec, and a bounded persisted claim and deferred-balance view. Next integrate a mixed subsidy/fee/deferred settlement fixture at the guarded promotion boundary after #46 validates. Production issuance stays disabled under the proposed 29B KCADE maximum with 21B primary and 8B finite tail.
+
+On #39 full green, trigger #41 at `b997d82bc6e72384a5ba747485812698cce425dd` and #44 at `e87401b6bca55a5684f513beb0fa893fed862d24` using their focused tests and full matrices. After #41 passes, trigger #45 at `7fe95e5d3e6cf5e1cb994dbba0835f8c74069c5b`. No duplicate workflow was manually started. The CI workflow supersedes obsolete attempts on new commits.
+
+## Previous checkpoint — November 23, 2026
 
 | Draft | Branch | Exact commit | Actions evidence |
 | --- | --- | --- | --- |
