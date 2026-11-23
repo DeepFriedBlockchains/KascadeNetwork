@@ -62,3 +62,17 @@ See [the source audit](PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) for the inher
 | Production activation | Disabled. The owner must approve the network profile, commitment layout, genesis/migration accounting, activation and trust policy. |
 
 See the [fresh-receiver design and decision record](PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md). Complete local validation and verify the nonzero recovery log before proceeding to the first approved private deployment configuration.
+
+
+## Extended validation checkpoint
+
+| Gate | Evidence and next check |
+| --- | --- |
+| Native-PoW networking | Three nodes and peer recovery passed on the recorded #43/#48 runs. |
+| Actual nonzero settlement | #52 and #53 are 8/8 with named native passes. |
+| Local replay and retained state | #54 is 8/8. #55 focused retained-anchor pruning passed; full matrix pending. |
+| Guarded atomic publication | #56 focused zero-issuance publication passed. Check both #57 named regressions on [45241439865](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241439865). |
+| Real process exit and retry | Inspect #58 exit 71 and 72 and #62 retry exit 0. Confirm persisted complete readiness and accounting in their log artifacts. |
+| Live reorganization | Confirm #59 actual branch replacement and #61 developer payout/liability persistence. Still need a live pruning-point fixture with proof and UTXO/SMT evidence for guarded readiness and crash/reopen under a real reorg. |
+| Fresh pruned receiver | #60 codec is inactive. After owner approval require full-validator replay/migration, authenticated child proof and fresh bootstrap validation. |
+| Production activation | Disabled. Owner approval of carrier, fork/activation, bootstrap trust, migration and isolated network profile is required. |
