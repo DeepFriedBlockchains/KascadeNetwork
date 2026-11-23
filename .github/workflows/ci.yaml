@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Verify issuance commitment and settlement invariants
+        if: github.head_ref == 'feat/phase6-issuance-commitment-20261123' || github.ref_name == 'feat/phase6-issuance-commitment-20261123'
+        run: cargo nextest run -p kaspa-consensus-core --lib -E 'test(issuance_checkpoint::)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

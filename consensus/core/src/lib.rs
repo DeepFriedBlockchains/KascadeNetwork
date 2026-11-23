@@ -26,6 +26,7 @@ pub mod daa_score_timestamp;
 pub mod errors;
 pub mod hashing;
 pub mod header;
+pub mod issuance_checkpoint;
 pub mod mass;
 pub mod merkle;
 pub mod mining_rules;

@@ -1,0 +1,5 @@
+# Phase 6 candidate issuance checkpoint commitment
+
+The consensus-core primitive binds the network, pruning point, ordered-claim root and count, and minted/paid/deferred atomic-unit totals. Verification requires a separately authenticated expected digest, checks context and the caller's configured cap, and uses checked addition for settlement conservation. It reuses the repository's existing transaction hasher with a distinct versioned domain.
+
+The digest layout is a candidate internal primitive. No header, wire, database or reward rule is activated. The production caller still needs to derive the ordered root from unique consensus reward claims, bind the digest in independently verified selected-chain evidence, reconcile mixed subsidy/fees/deferred state with the checkpoint, and publish it through the guarded RocksDB path. #46 covers real legacy payout persistence and #47 covers the guarded publication boundary separately. The 29B KCADE proposal and its 21B primary and 8B finite tail allocations remain inactive.
