@@ -2,6 +2,11 @@
 
 Updated November 23, 2026.
 
+## Developer release integration checkpoint — November 23, 2026
+
+- #52 at `2f8536199feeca31c3e5514dc11e6bc9f165fbfa` remains under [45231556690](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45231556690). Formatting and initial check passed at the first read; native setup and strict Clippy were still running. No reruns requested.
+- The next increment binds developer release events to their selected block and settles them against existing deferred balances. It will stay on a separate stacked draft while #52 runs. Production issuance and public activation remain disabled.
+
 ## Eligible source attribution and integration port isolation — November 23, 2026
 
 | PR | Exact head | Verified evidence |
