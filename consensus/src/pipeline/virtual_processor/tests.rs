@@ -1646,7 +1646,8 @@ async fn shielded_chain_range_is_fully_servable_from_the_retained_archive() {
 
 #[tokio::test]
 async fn reward_claim_join_credits_distinct_sources_after_reorg() {
-    use kaspa_consensus_core::config::params::SIMNET_PARAMS;
+    use kaspa_consensus_core::{config::params::SIMNET_PARAMS, tx::TransactionOutpoint};
+    use kaspa_database::prelude::ConnBuilder;
 
     fn build(ctx: &TestContext, parents: Vec<Hash>, tag: u8) -> Block {
         let miner = MinerData::new(ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x51, tag])), vec![]);
@@ -1690,7 +1691,10 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
             params.skip_proof_of_work = true;
         })
         .build();
-    let ctx = TestContext::new(TestConsensus::new(&config));
+    let temp = kaspa_database::utils::get_kaspa_tempdir();
+    let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+    let (sender, _receiver) = async_channel::unbounded();
+    let ctx = TestContext::new(TestConsensus::with_db(connect(), &config, sender));
     let split = build(&ctx, vec![config.genesis.hash], 1);
     insert(&ctx, &split).await;
     let a1 = build(&ctx, vec![split.header.hash], 2);
@@ -1725,4 +1729,51 @@ async fn reward_claim_join_credits_distinct_sources_after_reorg() {
     assert_eq!(coinbase_claims(&next), vec![expected_source_reward(&joined, 7)]);
     insert(&ctx, &next).await;
     assert_eq!(ctx.consensus.get_sink(), next.header.hash);
+
+    let snapshot = ctx.consensus.get_virtual_utxos(None, 64, false);
+    assert!(snapshot.len() < 64, "fixture must compare the entire UTXO set");
+    let joined_id = joined.transactions[0].id();
+    let abandoned_id = a2.transactions[0].id();
+    assert!(!snapshot.iter().any(|(outpoint, _)| outpoint.transaction_id == abandoned_id));
+    for (i, output) in joined.transactions[0].outputs.iter().enumerate() {
+        let outpoint = TransactionOutpoint::new(joined_id, i.try_into().unwrap());
+        let (_, entry) = snapshot.iter().find(|(key, _)| *key == outpoint).expect("missing accepted join payout");
+        assert_eq!(entry.amount, output.value);
+        assert_eq!(entry.script_public_key, output.script_public_key);
+        assert!(entry.is_coinbase);
+    }
+
+    fn accepted_coinbases(ctx: &TestContext, block: Hash) -> Vec<(Hash, Hash)> {
+        ctx.consensus
+            .get_block_acceptance_data(block)
+            .unwrap()
+            .iter()
+            .flat_map(|source| {
+                source
+                    .accepted_transactions
+                    .iter()
+                    .filter(|entry| entry.index_within_block == 0)
+                    .map(move |entry| (source.block_hash, entry.transaction_id))
+            })
+            .collect()
+    }
+
+    let accepted = vec![(joined.header.hash, joined_id)];
+    assert_eq!(accepted_coinbases(&ctx, next.header.hash), accepted);
+    drop(ctx);
+
+    let reopen_config = config.to_builder().skip_adding_genesis().build();
+    let (sender, _receiver) = async_channel::unbounded();
+    let reopened = TestContext::new(TestConsensus::with_db(connect(), &reopen_config, sender));
+    assert_eq!(reopened.consensus.get_sink(), next.header.hash);
+    assert_eq!(accepted_coinbases(&reopened, next.header.hash), accepted);
+    assert_eq!(reopened.consensus.get_virtual_utxos(None, 64, false), snapshot);
+
+    let replay = TestContext::new(TestConsensus::new(&config));
+    for block in [&split, &b1, &b2, &b3, &a1, &a2, &joined, &next] {
+        insert(&replay, block).await;
+    }
+    assert_eq!(replay.consensus.get_sink(), next.header.hash);
+    assert_eq!(accepted_coinbases(&replay, next.header.hash), accepted);
+    assert_eq!(replay.consensus.get_virtual_utxos(None, 64, false), snapshot);
 }
