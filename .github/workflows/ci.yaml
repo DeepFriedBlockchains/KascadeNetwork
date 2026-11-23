@@ -135,7 +135,7 @@ jobs:
         timeout-minutes: 25
         shell: bash
         run: |
-          cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate 2>&1 | tee "$RUNNER_TEMP/five-bps.log"
+          cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate -E 'test(=phase6_five_bps_loopback_baseline)' 2>&1 | tee "$RUNNER_TEMP/five-bps.log"
           sed -n 's/^[[:blank:]]*phase6_config,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-profile.json"
           sed -E 's/^[[:blank:]]+//' "$RUNNER_TEMP/five-bps.log" | grep -E '^(index,block_hash,|[0-9]+,[0-9a-f]{64},[0-9]+,[0-9]+,[0-9]+$)' > "$RUNNER_TEMP/five-bps.csv"
           test "$(wc -l < "$RUNNER_TEMP/five-bps.csv")" -eq 51
@@ -149,6 +149,67 @@ jobs:
           path: |
             ${{ runner.temp }}/five-bps.csv
             ${{ runner.temp }}/five-bps-profile.json
+          if-no-files-found: error
+
+      - name: Measure five minutes of isolated 5-BPS loopback
+        if: github.head_ref == 'test/phase6-five-bps-sustained-20261122' || github.ref_name == 'test/phase6-five-bps-sustained-20261122'
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate -E 'test(=phase6_five_bps_loopback_five_minutes)' 2>&1 | tee "$RUNNER_TEMP/five-bps.log"
+          sed -n 's/^[[:blank:]]*phase6_config,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-profile.json"
+          sed -n 's/^[[:blank:]]*phase6_tip,//p' "$RUNNER_TEMP/five-bps.log" > "$RUNNER_TEMP/five-bps-tip.txt"
+          sed -E 's/^[[:blank:]]+//' "$RUNNER_TEMP/five-bps.log" | grep -E '^(index,block_hash,|[0-9]+,[0-9a-f]{64},[0-9]+,[0-9]+,[0-9]+$)' > "$RUNNER_TEMP/five-bps.csv"
+          python3 - <<'PY'
+          import csv
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          output = Path(os.environ["RUNNER_TEMP"])
+          config = json.loads((output / "five-bps-profile.json").read_text())
+          with (output / "five-bps.csv").open(newline="") as samples:
+              rows = list(csv.DictReader(samples))
+          hashes = [row["block_hash"] for row in rows]
+          offsets = [int(row["submit_offset_us"]) for row in rows]
+          tip = (output / "five-bps-tip.txt").read_text().strip()
+          assert config["blockrate"]["target_time_per_block"] == 200
+          assert config["skip_proof_of_work"] and not config["shielded_coinbase"]
+          assert [int(row["index"]) for row in rows] == list(range(1_500)), "incomplete or unordered sample"
+          assert len(set(hashes)) == 1_500 and hashes[-1] == tip, "missing or inconsistent final tip"
+          assert all(left < right for left, right in zip(offsets, offsets[1:])), "submit offsets must increase"
+
+          span_s = (offsets[-1] - offsets[0]) / 1_000_000
+          offered_bps = (len(rows) - 1) / span_s
+          summary = {
+              "samples": len(rows),
+              "span_seconds": span_s,
+              "offered_and_accepted_bps": offered_bps,
+              "final_tip": tip,
+          }
+          for peer in ("first", "second"):
+              times = sorted(int(row[f"{peer}_valid_us"]) for row in rows)
+              summary[f"{peer}_valid_us"] = {
+                  f"p{p}": times[math.ceil(p * len(times) / 100) - 1]
+                  for p in (50, 95, 99, 100)
+              }
+          rendered = json.dumps(summary, indent=2)
+          print(rendered)
+          (output / "five-bps-summary.json").write_text(rendered + "\n")
+          assert 4.95 <= offered_bps <= 5.05, "five-minute submission rate exceeded the loopback tolerance"
+          PY
+
+      - name: Upload five-minute 5-BPS measurement
+        if: github.head_ref == 'test/phase6-five-bps-sustained-20261122' || github.ref_name == 'test/phase6-five-bps-sustained-20261122'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-five-bps-sustained
+          path: |
+            ${{ runner.temp }}/five-bps.csv
+            ${{ runner.temp }}/five-bps-profile.json
+            ${{ runner.temp }}/five-bps-tip.txt
+            ${{ runner.temp }}/five-bps-summary.json
           if-no-files-found: error
 
       - name: Run cargo build with devnet-prealloc feature

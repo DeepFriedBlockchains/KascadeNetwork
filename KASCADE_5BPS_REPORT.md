@@ -63,3 +63,11 @@ The first-to-last submit window was 9.800571 seconds across 49 intervals, or **4
 | Second | 6.598 ms | 12.325 ms | 12.656 ms |
 
 The workflow verified a 51-row CSV with one header and all 50 samples, and a single profile record. [Evidence artifact 14781544000](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439/artifacts/14781544000) has archive SHA-256 `0ad608775c671c450f83286c88630c64c826bcb3bdd017a456ecdd2c7f980216`. The [full CI run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45089622439) validates this short sample and its collector. Sustained 5-BPS operation and live mining remain acceptance experiments.
+
+## Five-minute loopback acceptance candidate
+
+Drafted November 22, 2026. The branch-scoped native job measures 1,500 transparent blocks under the existing 200 ms, simulated-PoW, three-node Simnet fixture. It requires each submit RPC to accept and both peers to reach UTXO-valid for every block. All three nodes must select the final tip. CI checks contiguous indexes, unique hashes, increasing submit offsets, the requested profile and matching final tip. It requires 4.95–5.05 accepted blocks per second over 1,499 measured intervals. That tolerance applies to this controlled runner fixture.
+
+The artifact includes the exact JSON profile override, CSV timings, final tip and measured span and nearest-rank latency quantiles. The native job produces raw evidence for an approximately five-minute run. Real PoW, loaded blocks, long-window finality and pruning, and a multi-host simulation remain separate testnet checks.
+
+Run the same fixture in isolated GitHub Actions with `cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate -E 'test(=phase6_five_bps_loopback_five_minutes)'`. The 50-block case has an exact-name filter as well and retains its existing raw-evidence checks.
