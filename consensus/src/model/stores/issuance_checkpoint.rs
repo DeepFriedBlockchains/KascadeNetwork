@@ -1,6 +1,7 @@
 //! Uncached storage for a verified issuance checkpoint in the authority batch.
 
 use super::selected_chain::{DbSelectedChainStore, SelectedChainStoreReader};
+use crate::processes::coinbase::CoinbaseSettlement;
 use bincode::Options;
 use kaspa_consensus_core::issuance_checkpoint::IssuanceCheckpoint;
 use kaspa_database::{
@@ -49,6 +50,36 @@ impl DbIssuanceCheckpoint {
             let bytes = codec().serialize(checkpoint).map_err(|error| inconsistent(error.to_string()))?;
             batch.reserve_unique_key(CHECKPOINT_KEY)?;
             batch.put_raw(&self.db, CHECKPOINT_KEY, bytes)
+        })();
+        if result.is_err() {
+            batch.reject();
+        }
+        result
+    }
+
+    /// Stage a reconciled successor of the currently persisted checkpoint.
+    /// The caller serializes authority writes and supplies an independently
+    /// authenticated commitment for each point in the same selected view.
+    pub fn stage_reconciled_transition<'guard>(
+        &self,
+        batch: &mut DeferredDbBatch<'guard>,
+        selected: &'guard RwLockReadGuard<'_, DbSelectedChainStore>,
+        previous_anchor: IssuanceCheckpointAnchor,
+        next_anchor: IssuanceCheckpointAnchor,
+        checkpoint: &IssuanceCheckpoint,
+        settlement: &CoinbaseSettlement,
+    ) -> StoreResult<()> {
+        let result = (|| {
+            if previous_anchor.selected_index.checked_add(1) != Some(next_anchor.selected_index)
+                || previous_anchor.supply_cap != next_anchor.supply_cap
+            {
+                return Err(inconsistent("settlement checkpoint anchors are not consecutive under the same cap"));
+            }
+            let previous = self.load(selected, previous_anchor)?.ok_or_else(|| inconsistent("missing persisted settlement predecessor"))?;
+            if !settlement.matches_checkpoint_transition(&previous, checkpoint) {
+                return Err(inconsistent("checkpoint changes disagree with reconciled coinbase settlement"));
+            }
+            self.stage(batch, selected, next_anchor, checkpoint)
         })();
         if result.is_err() {
             batch.reject();

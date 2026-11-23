@@ -956,8 +956,15 @@ mod tests {
 
     #[test]
     fn reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout() {
-        use kaspa_consensus_core::config::params::MAINNET_PARAMS;
+        use crate::model::stores::{
+            issuance_checkpoint::{DbIssuanceCheckpoint, IssuanceCheckpointAnchor},
+            selected_chain::{DbSelectedChainStore, SelectedChainStore},
+        };
+        use kaspa_consensus_core::{ChainPath, config::params::MAINNET_PARAMS};
+        use kaspa_database::prelude::{CachePolicy, ConnBuilder, DeferredDbBatch};
         use kaspa_hashes::Hash;
+        use parking_lot::RwLock;
+        use rocksdb::WriteBatch;
         use std::sync::Arc;
 
         let mut params = MAINNET_PARAMS.clone();
@@ -1012,6 +1019,69 @@ mod tests {
         let next = IssuanceCheckpoint { pruning_point: current, minted: 3_030, paid: 2_850, deferred: 180, ..previous };
         assert!(settlement.matches_checkpoint_transition(&previous, &next));
         assert!(!settlement.matches_checkpoint_transition(&previous, &IssuanceCheckpoint { paid: 2_849, deferred: 181, ..next }));
+
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(10).with_db_path(temp.path().to_owned()).build().unwrap();
+        let make_anchor = |checkpoint: IssuanceCheckpoint, selected_index| IssuanceCheckpointAnchor {
+            network_id: network,
+            pruning_point: checkpoint.pruning_point,
+            selected_index,
+            supply_cap: 2_900_000_000_000_000_000,
+            expected_commitment: checkpoint.commitment(),
+        };
+        let previous_anchor = make_anchor(previous, 1);
+        let next_anchor = make_anchor(next, 2);
+        {
+            let db = connect();
+            let mut selected = DbSelectedChainStore::new(db.clone(), CachePolicy::Empty);
+            let mut init = WriteBatch::default();
+            selected.init_with_pruning_point(&mut init, network).unwrap();
+            db.write(init).unwrap();
+            let mut add = WriteBatch::default();
+            selected.apply_changes(&mut add, &ChainPath { removed: vec![], added: vec![parent, current] }).unwrap();
+            db.write(add).unwrap();
+            let selected = RwLock::new(selected);
+            let guard = selected.read();
+            let store = DbIssuanceCheckpoint::new(db.clone());
+
+            let mut missing = DeferredDbBatch::new(db.clone());
+            assert!(store.stage_reconciled_transition(&mut missing, &guard, previous_anchor, next_anchor, &next, &settlement).is_err());
+            assert!(missing.commit().is_err());
+            let mut batch = DeferredDbBatch::new(db.clone());
+            store.stage(&mut batch, &guard, previous_anchor, &previous).unwrap();
+            batch.commit().unwrap();
+
+            let mutated = IssuanceCheckpoint { paid: 2_849, deferred: 181, ..next };
+            let mut rejected = DeferredDbBatch::new(db.clone());
+            assert!(
+                store
+                    .stage_reconciled_transition(&mut rejected, &guard, previous_anchor, make_anchor(mutated, 2), &mutated, &settlement)
+                    .is_err()
+            );
+            assert!(rejected.commit().is_err());
+
+            let mut unsubmitted = DeferredDbBatch::new(db);
+            store.stage_reconciled_transition(&mut unsubmitted, &guard, previous_anchor, next_anchor, &next, &settlement).unwrap();
+            drop(unsubmitted);
+        }
+        {
+            let db = connect();
+            let selected = RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+            let guard = selected.read();
+            let store = DbIssuanceCheckpoint::new(db.clone());
+            assert_eq!(store.load(&guard, previous_anchor).unwrap(), Some(previous));
+            let mut batch = DeferredDbBatch::new(db);
+            store.stage_reconciled_transition(&mut batch, &guard, previous_anchor, next_anchor, &next, &settlement).unwrap();
+            batch.commit().unwrap();
+        }
+        {
+            let db = connect();
+            let selected = RwLock::new(DbSelectedChainStore::new(db.clone(), CachePolicy::Empty));
+            let guard = selected.read();
+            let store = DbIssuanceCheckpoint::new(db);
+            assert_eq!(store.load(&guard, next_anchor).unwrap(), Some(next));
+            assert!(store.load(&guard, previous_anchor).is_err());
+        }
 
         let payout = build(110, 180);
         let paid = CoinbaseManager::reconcile_settlement(&payout, &ghostdag, &rewards, &non_daa, 180).unwrap();
