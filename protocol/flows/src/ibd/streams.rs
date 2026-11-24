@@ -15,14 +15,18 @@ use kaspa_p2p_lib::{
     convert::{header::HeaderFormat, header::Versioned, model::trusted::TrustedDataEntry},
     make_message,
     pb::{
-        RequestNextHeadersMessage, RequestNextPruningPointAndItsAnticoneBlocksMessage, RequestNextPruningPointShieldedChunkMessage,
-        RequestNextPruningPointSmtChunkMessage, RequestNextPruningPointUtxoSetChunkMessage, kaspad_message::Payload,
+        PruningPointUtxoSetChunkMessage, RequestNextHeadersMessage, RequestNextPruningPointAndItsAnticoneBlocksMessage,
+        RequestNextPruningPointShieldedChunkMessage, RequestNextPruningPointSmtChunkMessage,
+        RequestNextPruningPointUtxoSetChunkMessage, kaspad_message::Payload,
     },
 };
 use std::sync::Arc;
 use tokio::time::timeout;
 
 pub const IBD_BATCH_SIZE: usize = 99;
+
+/// Maximum number of entries per pruning-point UTXO page.
+pub(crate) const PRUNING_UTXO_CHUNK_SIZE: usize = 1000;
 
 /// Maximum number of SMT lane entries carried by a single `SmtLaneChunkMessage`.
 #[cfg(not(feature = "test-smt-small-chunks"))]
@@ -156,6 +160,13 @@ impl<'a, 'b> HeadersChunkStream<'a, 'b> {
 /// A chunk of UTXOs
 pub type UtxosetChunk = Vec<(TransactionOutpoint, UtxoEntry)>;
 
+fn decode_pruning_utxo_chunk(payload: PruningPointUtxoSetChunkMessage) -> Result<UtxosetChunk, ProtocolError> {
+    if payload.outpoint_and_utxo_entry_pairs.len() > PRUNING_UTXO_CHUNK_SIZE {
+        return Err(ProtocolError::Other("PruningPointUtxoSetChunk exceeds the page size limit"));
+    }
+    Ok(payload.try_into()?)
+}
+
 pub struct PruningPointUtxosetChunkStream<'a, 'b> {
     router: &'a Router,
     incoming_route: &'b mut IncomingRoute,
@@ -173,7 +184,7 @@ impl<'a, 'b> PruningPointUtxosetChunkStream<'a, 'b> {
             Ok(op) => {
                 if let Some(msg) = op {
                     match msg.payload {
-                        Some(Payload::PruningPointUtxoSetChunk(payload)) => Ok(Some(payload.try_into()?)),
+                        Some(Payload::PruningPointUtxoSetChunk(payload)) => decode_pruning_utxo_chunk(payload).map(Some),
                         Some(Payload::DonePruningPointUtxoSetChunks(_)) => {
                             info!("Finished receiving the UTXO set. Total UTXOs: {}", self.utxo_count);
                             Ok(None)
@@ -454,5 +465,40 @@ impl<'a, 'b> ShieldedStream<'a, 'b> {
 
     pub fn count(&self) -> u64 {
         self.nullifier_count
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kaspa_consensus_core::tx::{ScriptPublicKey, ScriptVec};
+    use kaspa_p2p_lib::pb::OutpointAndUtxoEntryPair;
+
+    #[test]
+    fn pruning_utxo_chunk_preserves_empty_and_full_pages() {
+        // The sender can send an empty page before Done for an empty set or
+        // when the preceding page contained exactly the maximum entries.
+        assert!(decode_pruning_utxo_chunk(PruningPointUtxoSetChunkMessage::default()).unwrap().is_empty());
+        let tx_id = Hash::from_bytes([1; 32]);
+        let entry = UtxoEntry::new(10, ScriptPublicKey::new(0, ScriptVec::from_slice(&[0x51])), 20, false, None);
+        let rows: UtxosetChunk =
+            (0..PRUNING_UTXO_CHUNK_SIZE as u32).map(|index| (TransactionOutpoint::new(tx_id, index), entry.clone())).collect();
+        let payload = PruningPointUtxoSetChunkMessage {
+            outpoint_and_utxo_entry_pairs: rows.iter().map(|(outpoint, entry)| (outpoint, entry).into()).collect(),
+        };
+        assert_eq!(decode_pruning_utxo_chunk(payload).unwrap(), rows);
+    }
+
+    #[test]
+    fn pruning_utxo_chunk_rejects_excess_rows_and_missing_fields() {
+        let payload = PruningPointUtxoSetChunkMessage {
+            outpoint_and_utxo_entry_pairs: vec![OutpointAndUtxoEntryPair::default(); PRUNING_UTXO_CHUNK_SIZE + 1],
+        };
+        assert!(matches!(
+            decode_pruning_utxo_chunk(payload),
+            Err(ProtocolError::Other("PruningPointUtxoSetChunk exceeds the page size limit"))
+        ));
+        let payload = PruningPointUtxoSetChunkMessage { outpoint_and_utxo_entry_pairs: vec![OutpointAndUtxoEntryPair::default()] };
+        assert!(matches!(decode_pruning_utxo_chunk(payload), Err(ProtocolError::ConversionError(_))));
     }
 }
