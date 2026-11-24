@@ -1820,6 +1820,15 @@ impl ConsensusApi for Consensus {
             return Err(ConsensusError::UnexpectedPruningPoint);
         }
         let pruning_meta_read = self.pruning_meta_stores.read();
+        // The pruning point is published before its UTXO rows finish advancing.
+        // Each committed batch moves the position and its rows under this lock.
+        let position = pruning_meta_read
+            .utxoset_position()
+            .optional()
+            .map_err(|error| ConsensusError::GeneralOwned(format!("pruning UTXO position: {error}")))?;
+        if position != Some(expected_pruning_point) || !pruning_meta_read.pruning_utxoset_stable_flag() {
+            return Err(ConsensusError::UnexpectedPruningPoint);
+        }
         let iter = pruning_meta_read.utxo_set.seek_iterator(from_outpoint, chunk_size, skip_first);
         let utxos = iter.map(|item| item.unwrap()).collect();
         drop(pruning_meta_read);
@@ -2669,6 +2678,36 @@ mod tests {
     use crate::consensus::test_consensus::TestConsensus;
     use kaspa_consensus_core::api::{ConsensusApi, ShieldedExportMetadata};
     use kaspa_consensus_core::config::params::MAINNET_PARAMS;
+
+    #[test]
+    fn authority_integration_pruning_utxo_export_requires_committed_position() {
+        use kaspa_consensus_core::config::params::SIMNET_PARAMS;
+
+        let config = Config::new(SIMNET_PARAMS);
+        let tc = TestConsensus::new(&config);
+        let consensus = tc.consensus_clone();
+        let point = config.genesis.hash;
+        let change_export_state = |position, stable| {
+            let mut metadata = consensus.pruning_meta_stores.write();
+            let mut batch = WriteBatch::default();
+            metadata.set_utxoset_position(&mut batch, position).unwrap();
+            metadata.set_pruning_utxoset_stable_flag(&mut batch, stable).unwrap();
+            consensus.db.write(batch).unwrap();
+        };
+        let export = || consensus.get_pruning_point_utxos(point, None, 1, false);
+
+        assert!(export().is_ok());
+        // The visible pruning point can lead the UTXO position during catch-up.
+        change_export_state(Hash::from_bytes([1; 32]), true);
+        assert_eq!(consensus.pruning_point(), point);
+        assert!(matches!(export(), Err(ConsensusError::UnexpectedPruningPoint)));
+
+        change_export_state(point, false);
+        assert!(matches!(export(), Err(ConsensusError::UnexpectedPruningPoint)));
+
+        change_export_state(point, true);
+        assert!(export().is_ok());
+    }
 
     #[tokio::test]
     async fn live_reorg_replaces_selected_nonzero_issuance_checkpoint() {
