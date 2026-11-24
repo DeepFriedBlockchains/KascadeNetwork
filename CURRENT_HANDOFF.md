@@ -1,6 +1,36 @@
 # KASCADE public development handoff
 
-Updated November 23, 2026.
+Updated November 24, 2026.
+
+## November 24 Phase 6 recovery and acceptance
+
+| PR and Actions | Exact head | Result | Focused evidence |
+| --- | --- | --- | --- |
+| [#57](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/57) · [45241439865](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241439865) | `6df90717b0fdc41a6f85bc0bbb6a25709d688aa5` | 8/8 | Nonzero guarded publication and reopen |
+| [#58](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/58) · [45241630500](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241630500) | `42d6937163511280276964400e0bf8fab1844664` | 8/8 | Guarded exit 71/72 and complete native retry |
+| [#59](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/59) · [45241635579](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241635579) | `c327d527b6dc9c586048ef4450cb57bc26899de7` | 8/8 | Live retained-checkpoint replacement |
+| [#60](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/60) · [45243944211](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243944211) | `068c49622d572f39f6a64fa99322b12ca3f05a23` | 8/8 | Inactive v1 codec and context |
+| [#61](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/61) · [45251578576](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45251578576) | `d8a6c833420f751a204aa18055806267af00a586` | 8/8 | Live developer accrual and release replacement |
+| [#62](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/62) · [45243940522](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243940522) | `b99dd88562ac810e2ecb9090ddd345a9b0e233eb` | 8/8 | Fresh-process lost-ack retry exit 0 |
+| [#63](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/63) · [45254033624](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45254033624) | `3cb3d7f79504c850811382a715e6d5dc6b9924cb` | 8/8 | Live pruning eligibility and selected-child authentication |
+| [#64](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/64) · [45251521642](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45251521642) | `ab3835b056c5f90b3a2e3a0793ff5039f95e9f18` | 8/8 | Independent settlement and inactive field |
+
+[#58 first attempt](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241630500/attempts/1) lost a separate abrupt-exit worker before it reported an exit code. The exact native retry passed all 1,600 workspace tests, 38 authority cases and 32 no-asm cases. The worker signal from the first attempt is unknown. The crash artifacts show [#58 exit 71/72](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45241630500/artifacts/14858151003) and [#62 exit 71/72/0](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45243940522/artifacts/14854234556). Before commit the reopened checkpoint had 2 claims, 3,000 minted, 2,850 paid and 150 deferred, with readiness closed. At and after commit, the reopened ready checkpoint had 4 claims, 6,000 minted and paid, and no liability. The retry verified the complete checkpoint remained identical.
+
+[#65 original run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45252226323) failed the named exporter-to-receiver fixture at exact pruning UTXO equality: 180 rows captured on the exporter and 198 on the receiver. The virtual UTXO, SMT and shielded evidence agreed. The pruning processor publishes the point before adding its per-block UTXO diffs. The former export API checked the advertised hash around the read while the row set was still advancing. Two separate changes address the observed boundary: a commitment-based producer wait in #65 and an exporter API check in #68 under the same metadata lock as the row read.
+
+| Active draft and Actions | Exact head | Base | Milestone |
+| --- | --- | --- | --- |
+| [#65](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/65) · [45458788829](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458788829) | `81a8feb6c74dbbf1ac030c74782954b7fc423c9a` | #63 | Waits for a point-scoped full UTXO MuHash before fixture import. |
+| [#66](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/66) · [45458883372](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458883372) | `79fe770b6f50e5d471b4d2b0ce99c963160fe858` | #21 | Two-node sampled DAA crossing with native PoW and exact target rejection. |
+| [#67](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/67) · [45458883349](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458883349) | `89574d460bd87eb038e2aefb841175389fb43743` | #64 | Inactive replay endpoint binding and cross-checked v1 commitment vectors. |
+| [#68](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/68) · [45458954460](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458954460) | `da7c931922bad9078f26f06ebcdc8de59b2de0c3` | #65 | Rejects pruning UTXO chunks while the committed table position lags or the table is unstable. |
+| [#69](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/69) · [45458953963](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458953963) | `720ee756dc582a7f7425e77947087e93a033b275` | #62 | Verifies an abandoned worker cannot persist a different readiness point and records status. |
+
+Fixed-point reorganization follow-up `cc709a3a15f2fd6f2ce6bc568ecb87ac961b8ab8` is staged on `test/phase6-pruning-live-reorg-reopen-20261123`. Carry the #65 fixture correction into that branch before running its reorganization case. Require proof-based promotion, same-directory reopen, two accepted branches above shared finality and equality of retained evidence and converged state.
+
+**Next executable checks.** Validate #65 and #68 against the real exporter fixture, then run the corrected fixed-point reorganization branch. Verify the named DAA, inactive-issuance and process-exit tests plus their full matrices. Use the [classified acceptance checklist](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md#november-24-classified-testnet-gates) to distinguish isolated evidence from approval and workload gaps. Fresh issuance publication from pruned receivers requires an approved carrier, activation/migration and independent bootstrap verification. The 29B KCADE cap, 21B main and 8B tail budgets remain the policy inputs. The curve and tail duration require approval. Keep production issuance and public launch disabled.
+
 
 ## Exporter-to-receiver recovery session
 
