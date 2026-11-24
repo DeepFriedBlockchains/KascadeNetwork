@@ -1457,6 +1457,47 @@ impl IbdPayloadFixture {
     }
 }
 
+fn capture_committed_pruning_utxos(
+    session: &dyn kaspa_consensus_core::api::ConsensusApi,
+    point: Hash,
+    retry_pending_export: bool,
+) -> Vec<(TransactionOutpoint, UtxoEntry)> {
+    use kaspa_consensus_core::{errors::consensus::ConsensusError, muhash::MuHashExtensions};
+    use kaspa_muhash::MuHash;
+
+    // The pruning hash can be published before the exporter has applied the last
+    // UTXO diff. Match the complete snapshot to the agreed header before capturing it.
+    let expected_utxo_commitment = session.get_header(point).unwrap().utxo_commitment;
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let pruning_utxos = loop {
+        match session.get_pruning_point_utxos(point, None, 4096, false) {
+            Ok(rows) => {
+                assert!(rows.len() < 4096, "fixture pruning UTXO capture must cover the full set");
+                let mut multiset = MuHash::new();
+                for (outpoint, entry) in &rows {
+                    multiset.add_utxo(outpoint, entry);
+                }
+                let commitment = multiset.finalize();
+                if commitment == expected_utxo_commitment {
+                    break rows;
+                }
+                assert!(
+                    retry_pending_export,
+                    "promoted pruning UTXO commitment {commitment} differs from header {expected_utxo_commitment}"
+                );
+            }
+            Err(ConsensusError::UnexpectedPruningPoint) if retry_pending_export => {
+                assert_eq!(session.pruning_point(), point);
+            }
+            Err(error) => panic!("could not capture pruning UTXOs: {error}"),
+        }
+        assert!(std::time::Instant::now() < deadline, "exporter did not finish applying the pruning point UTXOs");
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    assert!(!pruning_utxos.is_empty(), "transparent fixture has no pruning-point UTXOs");
+    pruning_utxos
+}
+
 #[cfg(feature = "phase6-staging-preview")]
 #[derive(Debug, PartialEq, Eq)]
 struct PruningRecoveryEvidence {
@@ -1508,10 +1549,8 @@ impl PruningRecoveryEvidence {
 
             let smt = session.get_pruning_point_smt_metadata(point).unwrap();
             assert!(smt.active_lanes_count >= 10);
-            let pruning_utxos = session.get_pruning_point_utxos(point, None, 4096, false).unwrap();
+            let pruning_utxos = capture_committed_pruning_utxos(&*session, point, !require_promotion);
             let virtual_utxos = session.get_virtual_utxos(None, 4096, false);
-            // This fixture must compare complete sets within the bounded read.
-            assert!(!pruning_utxos.is_empty() && pruning_utxos.len() < 4096);
             assert!(!virtual_utxos.is_empty() && virtual_utxos.len() < 4096);
             Self {
                 selected_child,
@@ -1682,17 +1721,18 @@ async fn run_payload_ibd_at(
     } else {
         None
     };
-    if transparent {
+    if fixture == IbdPayloadFixture::Transparent {
         let service = kaspad1.core.find(ConsensusManager::IDENT).unwrap();
         let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
-        let active = manager.consensus();
-        let session = active.unguarded_session_blocking();
-        let metadata = session.get_pruning_point_smt_metadata(target_pruning_point).unwrap();
-        assert!(metadata.active_lanes_count >= 10, "fixture lanes fell outside the pruning-point finality window");
-        assert!(
-            !session.get_pruning_point_utxos(target_pruning_point, None, 1, false).unwrap().is_empty(),
-            "transparent fixture has no pruning-point UTXOs"
-        );
+        tokio::task::spawn_blocking(move || {
+            let active = manager.consensus();
+            let session = active.unguarded_session_blocking();
+            let metadata = session.get_pruning_point_smt_metadata(target_pruning_point).unwrap();
+            assert!(metadata.active_lanes_count >= 10, "fixture lanes fell outside the pruning-point finality window");
+            capture_committed_pruning_utxos(&*session, target_pruning_point, true);
+        })
+        .await
+        .unwrap();
     }
 
     #[cfg(feature = "phase6-staging-preview")]
