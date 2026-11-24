@@ -1293,6 +1293,18 @@ async fn authority_integration_preview_reopens_imported_pruning_evidence() {
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_retries_written_pruning_utxos_before_live_reorg() {
+    run_payload_ibd(
+        true,
+        Some(kaspa_consensus_core::api::StagingImportComponent::Utxo),
+        true,
+        IbdPayloadFixture::PruningEvidenceReopen,
+    )
+    .await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_recovers_descendants_after_header_sync() {
     run_payload_ibd(true, None, false, IbdPayloadFixture::DescendantRecovery).await;
 }
@@ -1568,6 +1580,20 @@ impl PruningRecoveryEvidence {
         .await
         .unwrap()
     }
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+fn assert_pruning_recovery_receiver_is_unpromoted(manager: &ConsensusManager) {
+    let active = manager.consensus();
+    let session = active.unguarded_session_blocking();
+    let genesis = SIMNET_GENESIS.hash;
+    assert_eq!(session.pruning_point(), genesis);
+    assert_eq!(session.get_headers_selected_tip(), genesis);
+    assert_eq!(session.get_sink(), genesis);
+    assert!(session.get_pruning_point_utxos(genesis, None, 1, false).unwrap().is_empty());
+    assert!(session.get_virtual_utxos(None, 1, false).is_empty());
+    assert!(!session.has_verified_staging_promotion().unwrap());
+    assert!(!session.supports_verified_staging_import());
 }
 
 #[cfg(feature = "phase6-staging-preview")]
@@ -1944,6 +1970,9 @@ async fn run_payload_ibd_at(
         assert!(manager.is_staging_import_pending(), "receiver released its reservation during the transfer");
         assert!(!manager.consensus().unguarded_session_blocking().supports_verified_staging_import());
         assert_eq!(rpc_client2.get_block_dag_info().await.unwrap().pruning_point_hash, SIMNET_GENESIS.hash);
+        if exporter_evidence.is_some() {
+            assert_pruning_recovery_receiver_is_unpromoted(&manager);
+        }
         if let Some((root, true)) = &persistent {
             // The parent kills this process while its real writer/continuation
             // is paused. No daemon shutdown or RocksDB close runs in the child.
@@ -1982,13 +2011,20 @@ async fn run_payload_ibd_at(
             let service = kaspad2.core.find(ConsensusManager::IDENT).unwrap();
             let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
             assert!(!manager.is_staging_import_pending());
-            let active = manager.consensus();
-            assert_eq!(active.unguarded_session_blocking().pruning_point(), SIMNET_GENESIS.hash);
-            assert!(!active.unguarded_session_blocking().supports_verified_staging_import());
-            assert!(!active.unguarded_session_blocking().has_verified_staging_promotion().unwrap());
-            drop(active);
+            if exporter_evidence.is_some() {
+                assert_pruning_recovery_receiver_is_unpromoted(&manager);
+            } else {
+                let active = manager.consensus();
+                let session = active.unguarded_session_blocking();
+                assert_eq!(session.pruning_point(), SIMNET_GENESIS.hash);
+                assert!(!session.supports_verified_staging_import());
+                assert!(!session.has_verified_staging_promotion().unwrap());
+            }
             drop(manager);
             rpc_client2 = kaspad2.start().await;
+            if exporter_evidence.is_some() {
+                assert!(rpc_client2.get_connected_peer_info().await.unwrap().peer_info.is_empty());
+            }
         }
         let peer_ip = "127.0.0.1".parse().unwrap();
         if rpc_client2.get_peer_addresses().await.unwrap().banned_addresses.contains(&peer_ip) {
