@@ -106,7 +106,7 @@ async fn authority_integration_native_pow_rejects_invalid_nonce_and_relays_valid
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn authority_integration_native_pow_relays_across_difficulty_retarget() {
+async fn authority_integration_native_pow_reopens_after_difficulty_retarget() {
     kaspa_alloc::init_allocator_with_default_settings();
     const WINDOW: u64 = 8;
     let temp = tempfile::tempdir().unwrap();
@@ -180,12 +180,35 @@ async fn authority_integration_native_pow_relays_across_difficulty_retarget() {
     wait_for_sink(&second_client, valid_hash).await;
     assert_eq!(second_client.get_block(valid_hash, false).await.unwrap().header.bits, expected_bits);
 
-    let mut next = second_client.get_block_template(miner.clone(), vec![]).await.unwrap().block;
-    assert_eq!(next.header.bits, first_client.get_block_template(miner, vec![]).await.unwrap().block.header.bits);
+    // The next rolling window drops its oldest block, then excludes the
+    // oldest timestamp from the average. Six old targets and the decoded
+    // first retarget remain.
+    let first_retarget = Uint256::from_compact_target_bits(expected_bits);
+    let average_target = (Uint320::from(old_target) * (WINDOW - 2) + Uint320::from(first_retarget)) / (WINDOW - 1);
+    let next_bits = Uint256::try_from(average_target * fast_interval / target_interval).unwrap().compact_target_bits();
+    assert_ne!(next_bits, expected_bits);
+    let observed = first_client.get_block_template(miner.clone(), vec![]).await.unwrap().block.header;
+    assert_eq!(observed.bits, next_bits);
+
+    second_client.disconnect().await.unwrap();
+    drop(second_client);
+    second = second.restart(10);
+    let second_client = second.start().await;
+    assert!(second_client.get_connected_peer_info().await.unwrap().peer_info.is_empty());
+    assert_eq!(second_client.get_block_dag_info().await.unwrap().sink, valid_hash);
+    assert_eq!(second_client.get_block(valid_hash, false).await.unwrap().header.bits, expected_bits);
+
+    let mut next = second_client.get_block_template(miner, vec![]).await.unwrap().block;
+    assert_eq!(next.header.parents_by_level[0], [valid_hash]);
+    assert_eq!(next.header.bits, next_bits);
+    assert_eq!(next.header.daa_score, observed.daa_score);
     next.header.timestamp = start + (WINDOW + 1) * fast_interval;
     let returned = solve_native_block(&mut next);
+
+    connect(&first, &second_client).await;
     submit_solved_block(&second_client, next, returned).await;
     wait_for_sink(&first_client, returned).await;
+    assert_eq!(first_client.get_block(returned, false).await.unwrap().header.bits, next_bits);
 
     first_client.disconnect().await.unwrap();
     second_client.disconnect().await.unwrap();
