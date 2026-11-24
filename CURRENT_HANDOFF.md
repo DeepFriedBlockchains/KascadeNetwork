@@ -2,6 +2,27 @@
 
 Updated November 24, 2026.
 
+## November 24 parallel Phase 6 continuation
+
+| Existing draft | Exact head | Actions at checkpoint |
+| --- | --- | --- |
+| [#67](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/67) · [45458883349](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458883349) | `89574d460bd87eb038e2aefb841175389fb43743` | 8/8. The named independent issuance vectors and both replay endpoints passed in native job 138675767413. 1,600 workspace tests passed. |
+| [#68](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/68) · [45458954460](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458954460) | `da7c931922bad9078f26f06ebcdc8de59b2de0c3` | 8/8. The committed-position test and production-path exporter reopen passed in native job 138675949106. 1,603 workspace tests passed. |
+| [#70](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/70) · [45469685474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45469685474) | `bbbee69ca52c08c38276e8648fe1ac18e08d53cc` | 7/8. Authority regressions completed, with native workspace step running in 138713943899. Both the two-daemon combined reorganization and committed-position guard also passed locally on this head. |
+
+| New draft | Exact head and base | Scope and focused result |
+| --- | --- | --- |
+| [#71](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/71) · [45473741398](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473741398) | `9d91cf60ebf38ca68cf8a54395c532bdb53704c8` on #66 | Reopen the native-PoW daemon after retarget, independently calculate its next rolling target, derive work while offline, and relay it after reconnection. Focused validation in progress. |
+| [#72](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/72) · [45473757936](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473757936) | `396599fffea16d5d28e5498bb49defa4c571a7c9` on #67 | Inactive replay rejects a duplicate developer release keyed by settlement block, including repeated block hashes at different indexes. Temporal fixture verifies earlier releases cannot spend later accrual. Ten focused Rust tests passed. |
+| [#73](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/73) · [45473758359](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473758359) | `acef2d08270a54133b997377e1dec3fea4e87b59` on #70 | Disconnect after a real nonempty P2P pruning UTXO write. Assert no active promotion before retry and after reopen, then require exact state equality and real reorganization with a second offline reopen. Focused validation in progress. |
+| [#74](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/74) · [45473814935](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473814935) | `cc45a08fc6d06f367464420925548efbc8bd166b` on #70 | The receiver rejects pages larger than the existing 1,000-entry exporter limit before converting UTXO entries. Full and empty pages preserve existing behavior, and missing row fields remain invalid. Focused validation in progress. |
+| [#75](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/75) · [45473893184](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473893184) | `a583b3deb377aebe7aed741cb3336f026054be84` on #62 | A final evidence recheck failure closes readiness durably, preserves prior authority state, revokes sibling leases and requires fresh verification after reopening. Focused RocksDB regression passed. |
+
+**Engineering continuation.** Check #70 native workspace and no-asm summaries. Require named focused passes and full Actions on #71–#75. After #73 and #74 validate, combine the P2P retry case with the receiver page guard on a pinned head and rerun the combined authority selection. Keep production issuance and public launch disabled.
+
+**Owner decisions.** The [fresh-receiver design](docs/development/PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md) recommends evaluating a versioned selected-parent commitment in the selected child's coinbase. A header carrier reduces inclusion-proof work and has broader header, miner and serialization effects. An accumulator still requires a consensus-validated carrier. Full settlement replay supplies independent evidence and has higher bootstrap cost. An approved migration anchor avoids full replay and needs explicit historical audit and reorganization rules. Selection, activation, bootstrap trust and the network profile still need approval. The monetary direction remains the 29B KCADE cap with 21B primary and 8B finite tail budgets.
+
+
 ## November 24 Phase 6 recovery and acceptance
 
 | PR and Actions | Exact head | Result | Focused evidence |
