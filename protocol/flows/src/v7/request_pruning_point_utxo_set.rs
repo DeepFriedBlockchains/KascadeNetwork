@@ -1,4 +1,8 @@
-use crate::{flow_context::FlowContext, flow_trait::Flow, ibd::IBD_BATCH_SIZE};
+use crate::{
+    flow_context::FlowContext,
+    flow_trait::Flow,
+    ibd::{IBD_BATCH_SIZE, PRUNING_UTXO_CHUNK_SIZE},
+};
 use itertools::Itertools;
 use kaspa_consensus_core::errors::consensus::ConsensusError;
 use kaspa_core::debug;
@@ -43,7 +47,6 @@ impl RequestPruningPointUtxoSetFlow {
     }
 
     async fn handle_request(&mut self, expected_pp: Hash) -> Result<(), ProtocolError> {
-        const CHUNK_SIZE: usize = 1000;
         let mut from_outpoint = None;
         let mut chunks_sent = 0;
 
@@ -52,11 +55,13 @@ impl RequestPruningPointUtxoSetFlow {
 
         loop {
             // We avoid keeping the consensus session across the limitless dequeue call below
-            let pruning_point_utxos =
-                match session.async_get_pruning_point_utxos(expected_pp, from_outpoint, CHUNK_SIZE, chunks_sent != 0).await {
-                    Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point_message().await,
-                    res => res,
-                }?;
+            let pruning_point_utxos = match session
+                .async_get_pruning_point_utxos(expected_pp, from_outpoint, PRUNING_UTXO_CHUNK_SIZE, chunks_sent != 0)
+                .await
+            {
+                Err(ConsensusError::UnexpectedPruningPoint) => return self.send_unexpected_pruning_point_message().await,
+                res => res,
+            }?;
             debug!("Retrieved {} UTXOs for pruning point {}", pruning_point_utxos.len(), expected_pp);
 
             // Send the chunk
@@ -80,7 +85,7 @@ impl RequestPruningPointUtxoSetFlow {
             }
 
             // This indicates that there are no more entries to query
-            if pruning_point_utxos.len() < CHUNK_SIZE {
+            if pruning_point_utxos.len() < PRUNING_UTXO_CHUNK_SIZE {
                 return self.send_done_message(expected_pp).await;
             }
 
