@@ -234,6 +234,8 @@ mod tests {
 
     fn reopen_after_abrupt_exit(ready: bool, exact_test: &str) {
         const CHILD_PATH: &str = "KASCADE_READINESS_CHILD_PATH";
+        const EXIT_BEFORE_COMMIT: i32 = 17;
+        let staged_point = ReadinessPoint { hash: Hash::from_bytes([8; 32]), index: 12 };
         if let Some(path) = std::env::var_os(CHILD_PATH) {
             let db = ConnBuilder::default()
                 .with_files_limit(32)
@@ -246,10 +248,12 @@ mod tests {
             if ready {
                 store.complete_sync(point()).unwrap();
             }
+            eprintln!("readiness worker committed the baseline (ready = {ready})");
             let mut unfinished = DeferredDbBatch::new(db);
-            store.stage_ready(&mut unfinished, point()).unwrap();
+            store.stage_ready(&mut unfinished, staged_point).unwrap();
             // Exercise WAL recovery without normal DB destruction or flushing.
-            std::process::exit(17);
+            eprintln!("readiness worker staged a different point and is exiting before commit");
+            std::process::exit(EXIT_BEFORE_COMMIT);
         }
         let temp = kaspa_database::utils::get_kaspa_tempdir();
         let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -257,7 +261,7 @@ mod tests {
             .env(CHILD_PATH, temp.path())
             .status()
             .unwrap();
-        assert_eq!(status.code(), Some(17));
+        assert_eq!(status.code(), Some(EXIT_BEFORE_COMMIT), "{exact_test} worker terminated with {status}");
         let db = ConnBuilder::default()
             .with_files_limit(32)
             .with_mem_budget(16_usize * 1024 * 1024)
@@ -267,6 +271,8 @@ mod tests {
             .unwrap();
         let store = DbBranchReadiness::new(db.clone());
         assert_eq!(store.is_ready(point()).unwrap(), ready);
+        assert_eq!(store.closed_revision().unwrap().is_some(), !ready);
+        assert!(!store.is_ready(staged_point).unwrap());
         if !ready {
             // Recovery is explicit and only a future processor's corroborated
             // owner path may invoke this operation, never an automatic default.
