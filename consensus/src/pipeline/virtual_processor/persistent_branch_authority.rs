@@ -510,6 +510,42 @@ mod tests {
     }
 
     #[test]
+    fn failed_final_evidence_recheck_closes_readiness_across_reopen() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(32).with_db_path(temp.path().to_owned()).build().unwrap();
+        {
+            let db = connect();
+            install_point(&db);
+            let owner = PersistentBranchAuthority::new(db.clone());
+            complete(&owner);
+            let mut original = DeferredDbBatch::new(db.clone());
+            original.put_raw(&db, DATA_KEY, b"prior").unwrap();
+            owner.commit(point(), owner.lease(point()).unwrap(), original).unwrap();
+
+            let lease = owner.lease(point()).unwrap();
+            let sibling = owner.lease(point()).unwrap();
+            let result = owner.commit_rechecked(point(), lease, data_batch(&db), |verified_db, actual| {
+                assert!(Arc::ptr_eq(&db, verified_db));
+                assert_eq!(actual, point());
+                Err(StoreError::DataInconsistency("final evidence rejected".into()))
+            });
+            assert!(matches!(result, Err(StoreError::DataInconsistency(error)) if error == "final evidence rejected"));
+            assert!(owner.commit(point(), sibling, data_batch(&db)).is_err());
+            assert!(owner.lease(point()).is_err());
+        }
+
+        let db = connect();
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(readiness.closed_revision().unwrap().is_some());
+        assert_eq!(db.get(DATA_KEY).unwrap().as_deref(), Some(b"prior".as_slice()));
+        let owner = PersistentBranchAuthority::new(db.clone());
+        assert!(owner.lease(point()).is_err());
+        complete(&owner);
+        owner.commit(point(), owner.lease(point()).unwrap(), data_batch(&db)).unwrap();
+        assert_eq!(db.get(DATA_KEY).unwrap().as_deref(), Some(b"committed".as_slice()));
+    }
+
+    #[test]
     fn legacy_and_missing_committed_history_require_explicit_recovery() {
         let (_temp, db) = create_temp_db!(ConnBuilder::default().with_files_limit(32).with_mem_budget(16_usize * 1024 * 1024));
         let owner = PersistentBranchAuthority::new(db.clone());
