@@ -91,9 +91,6 @@ impl IssuanceCommitmentField {
         claims: &[IssuanceClaim],
         releases: &[DeveloperPayoutRelease],
     ) -> Result<IssuanceCheckpoint, VerificationError> {
-        if selected_path.first() != Some(&network) {
-            return Err(VerificationError::WrongContext);
-        }
         let local =
             IssuanceCheckpoint::derive_from_settlements(network, selected_parent, supply_cap, selected_path, claims, releases)?;
         self.verify_checkpoint(network, selected_parent, supply_cap, &local)?;
@@ -227,7 +224,7 @@ impl IssuanceCheckpoint {
         claims: &[IssuanceClaim],
         releases: &[DeveloperPayoutRelease],
     ) -> Result<Self, VerificationError> {
-        if selected_path.last() != Some(&pruning_point) {
+        if selected_path.first() != Some(&network_id) || selected_path.last() != Some(&pruning_point) {
             return Err(VerificationError::WrongContext);
         }
         let mut ordered =
@@ -344,6 +341,80 @@ mod tests {
         assert_eq!(IssuanceCommitmentField::decode(&[0; 35]), Err(IssuanceFieldError::WrongLength));
         wire[1] = 1;
         assert_eq!(IssuanceCommitmentField::decode(&wire), Err(IssuanceFieldError::UnsupportedVersion));
+    }
+
+    #[test]
+    fn inactive_issuance_field_matches_independent_replay_vectors() {
+        let [genesis, parent, point, source_a, source_b, source_c] =
+            [0x11, 0x22, 0x33, 0xe1, 0xb2, 0xc3].map(|byte| Hash::from_bytes([byte; 32]));
+        let a = IssuanceClaim {
+            reward_source: source_a,
+            settlement_block: parent,
+            selected_index: 1,
+            minted: 500_123_456,
+            paid: 450_000_001,
+        };
+        let b = IssuanceClaim {
+            reward_source: source_b,
+            settlement_block: point,
+            selected_index: 2,
+            minted: 271_000_010,
+            paid: 250_000_003,
+        };
+        let c = IssuanceClaim {
+            reward_source: source_c,
+            settlement_block: point,
+            selected_index: 2,
+            minted: 409_000_000,
+            paid: 380_000_004,
+        };
+        let first = DeveloperPayoutRelease { settlement_block: parent, selected_index: 1, amount: 12_000_011 };
+        let second = DeveloperPayoutRelease { settlement_block: point, selected_index: 2, amount: 23_000_013 };
+        let path = [genesis, parent, point];
+
+        // Python hashlib.blake2b with 32-byte digests and the TransactionHash and MerkleBranchHash keys.
+        // The mixed tree's event order is a, first, b, c, second, with zero right siblings on the last branch.
+        let vectors = [
+            (&path[..1], &[][..], &[][..], "01004f9380a13eb22f4a9c29c39d6524b8bd3242f1e27ec9fcc45f81620b00447af2"),
+            (&path[..2], &[a], &[], "0100179b43b563d134af3162154297fe64ab596d5c95bc1be633a1b2ae8c654f71b3"),
+            (&path, &[c, b, a], &[second, first], "0100e88b423785a3fcf04ed7af6bea44967510de313ca9151419dc1e7dafc8ce2fdc"),
+        ];
+        for (selected_path, claims, releases, expected_hex) in vectors {
+            let point = *selected_path.last().unwrap();
+            let mut expected = [0; ISSUANCE_COMMITMENT_FIELD_SIZE];
+            faster_hex::hex_decode(expected_hex.as_bytes(), &mut expected).unwrap();
+
+            let replay = IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, selected_path, claims, releases).unwrap();
+            assert_eq!(IssuanceCommitmentField::from_checkpoint(&replay).encode(), expected);
+            assert_eq!(
+                IssuanceCommitmentField::decode(&expected).unwrap().verify_local_settlement(
+                    genesis,
+                    point,
+                    CAP,
+                    selected_path,
+                    claims,
+                    releases
+                ),
+                Ok(replay)
+            );
+        }
+    }
+
+    #[test]
+    fn replay_derivation_binds_both_path_endpoints() {
+        let [genesis, point, other] = [1, 2, 3].map(Hash::from_u64_word);
+        let claim = IssuanceClaim { reward_source: genesis, settlement_block: point, selected_index: 1, minted: 100, paid: 90 };
+        let release = DeveloperPayoutRelease { settlement_block: point, selected_index: 1, amount: 10 };
+        let derive_claims = |path: &[Hash]| IssuanceCheckpoint::derive_from_claims(genesis, point, CAP, path, &[claim]);
+        let derive_settlements =
+            |path: &[Hash]| IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, path, &[claim], &[release]);
+        for path in [&[][..], &[point], &[other, point], &[genesis, other]] {
+            assert_eq!(derive_claims(path), Err(VerificationError::WrongContext));
+            assert_eq!(derive_settlements(path), Err(VerificationError::WrongContext));
+        }
+        let path = [genesis, point];
+        assert_eq!(derive_claims(&path).unwrap().deferred, 10);
+        assert_eq!(derive_settlements(&path).unwrap().deferred, 0);
     }
 
     #[test]
