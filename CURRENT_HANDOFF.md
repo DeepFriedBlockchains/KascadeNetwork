@@ -34,6 +34,19 @@ Updated November 24, 2026.
 **Next executable checks.** Validate #65 and #68 against the real exporter fixture, then run the corrected fixed-point reorganization branch. Verify the named DAA, inactive-issuance and process-exit tests plus their full matrices. Use the [classified acceptance checklist](docs/development/PHASE6_TESTNET_ACCEPTANCE_2026-11-22.md#november-24-classified-testnet-gates) to distinguish isolated evidence from approval and workload gaps. Fresh issuance publication from pruned receivers requires an approved carrier, activation/migration and independent bootstrap verification. The 29B KCADE cap, 21B main and 8B tail budgets remain the policy inputs. The curve and tail duration require approval. Keep production issuance and public launch disabled.
 
 
+### Verified native results and combined validation
+
+| Draft | Tested head | Actions | Observed evidence |
+| --- | --- | --- | --- |
+| [#65](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/65) | `81a8feb6` | [45458788829](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458788829) · 8/8 | Named exporter/receiver reopen passed, with 38 authority cases, 1,602 workspace tests and 32 no-asm tests. |
+| [#66](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/66) | `79fe770b` | [45458883372](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458883372) · 8/8 | `authority_integration_native_pow_relays_across_difficulty_retarget` passed in both native PoW and authority selections. 1,579 workspace tests passed. |
+| [#67](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/67) | `89574d46` | [45458883349](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458883349) · 7/8 | Eight focused local Rust tests passed. The CI authority step passed, and its workspace step was running at checkpoint. |
+| [#68](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/68) | `da7c9319` | [45458954460](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458954460) · 7/8 | The focused production query regression passed locally. The CI authority step passed, and its workspace step was running at checkpoint. |
+| [#69](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/69) | `720ee756` | [45458953963](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45458953963) · 8/8 | Both named abrupt-worker readiness tests passed. The native job passed 1,600 workspace and 32 no-asm tests. |
+| [#70](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/70) | `ee2a81d9` | [45459339790](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45459339790) · 8/8 | Named fixed-point P2P reorganization and second offline reopen passed, with 38 authority and 1,602 workspace cases. |
+
+#70 now stacks on #68. Its fast-forward head `bbbee69ca52c08c38276e8648fe1ac18e08d53cc` combines the production pruning-UTXO guard and the verified fixed-point reorganization fixture without changing either implementation. [Combined PR run 45469685474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45469685474) started. The superseded duplicate is 45469682749. Retain the individual 8/8 evidence above and require the named regression and full matrix on the combined head before considering integration. Read the final #67 and #68 native logs for the independent replay vectors and committed-position test.
+
 ## Exporter-to-receiver recovery session
 
 The original stacks are #56 → #57 → #58 → #62, #57 → #59 → #61 → #63 → #65, and #53 → #60 → #64. All implementation PRs remain drafts. #65 also contains #61's DAA fixture correction.
