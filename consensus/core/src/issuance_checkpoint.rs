@@ -230,8 +230,8 @@ impl IssuanceCheckpoint {
         let mut ordered =
             claims.iter().map(SettlementEvent::Claim).chain(releases.iter().map(SettlementEvent::Release)).collect::<Vec<_>>();
         ordered.sort_unstable_by_key(|event| event.key());
-        let mut seen = HashSet::with_capacity(claims.len());
-        let mut last_release = None;
+        let mut reward_sources = HashSet::with_capacity(claims.len());
+        let mut release_blocks = HashSet::with_capacity(releases.len());
         let mut minted = 0u64;
         let mut paid = 0u64;
         for (position, event) in ordered.iter().copied().enumerate() {
@@ -246,7 +246,7 @@ impl IssuanceCheckpoint {
             }
             match event {
                 SettlementEvent::Claim(claim) => {
-                    if !seen.insert(claim.reward_source) {
+                    if !reward_sources.insert(claim.reward_source) {
                         return Err(VerificationError::DuplicateRewardSource);
                     }
                     minted = minted.checked_add(claim.minted).ok_or(VerificationError::AboveSupplyCap)?;
@@ -256,10 +256,9 @@ impl IssuanceCheckpoint {
                     paid = paid.checked_add(claim.paid).ok_or(VerificationError::UnbalancedSettlement)?;
                 }
                 SettlementEvent::Release(release) => {
-                    if last_release == Some(selected_index) {
+                    if !release_blocks.insert(release.settlement_block) {
                         return Err(VerificationError::DuplicateDeveloperRelease);
                     }
-                    last_release = Some(selected_index);
                     if release.amount == 0 || minted.checked_sub(paid).is_none_or(|balance| release.amount > balance) {
                         return Err(VerificationError::UnbalancedSettlement);
                     }
@@ -540,5 +539,43 @@ mod tests {
         assert_eq!(restore(&[early, late]), Err(VerificationError::OffSelectedPath));
         let replacement = restore(&[early, DeveloperPayoutRelease { settlement_block: sibling, ..late }]).unwrap();
         assert_eq!(replacement.verify(genesis, sibling, CAP, checkpoint.commitment()), Err(VerificationError::CommitmentMismatch));
+    }
+
+    #[test]
+    fn rejects_developer_releases_repeated_at_distinct_indexes() {
+        let [genesis, first, second, point, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
+        let claim = IssuanceClaim { reward_source: source, settlement_block: first, selected_index: 1, minted: 100, paid: 60 };
+        let release = DeveloperPayoutRelease { settlement_block: first, selected_index: 1, amount: 20 };
+        let next = DeveloperPayoutRelease { settlement_block: second, selected_index: 2, amount: 20 };
+        let derive = |path: &[Hash], releases: &[DeveloperPayoutRelease]| {
+            IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, path, &[claim], releases)
+        };
+        let checkpoint = derive(&[genesis, first, second, point], &[next, release]).unwrap();
+        assert_eq!((checkpoint.claim_count, checkpoint.minted, checkpoint.paid, checkpoint.deferred), (1, 100, 100, 0));
+
+        let repeated = DeveloperPayoutRelease { selected_index: 3, ..release };
+        assert_eq!(
+            derive(&[genesis, first, second, first, point], &[repeated, release]),
+            Err(VerificationError::DuplicateDeveloperRelease)
+        );
+    }
+
+    #[test]
+    fn rejects_releases_funded_only_by_later_selected_settlement() {
+        let [genesis, parent, point, source] = [1, 2, 3, 4].map(Hash::from_u64_word);
+        let path = [genesis, parent, point];
+        let claim = IssuanceClaim { reward_source: source, settlement_block: point, selected_index: 2, minted: 100, paid: 60 };
+        let early = DeveloperPayoutRelease { settlement_block: parent, selected_index: 1, amount: 40 };
+        let on_accrual = DeveloperPayoutRelease { settlement_block: point, selected_index: 2, ..early };
+        let derive = |release| IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, &path, &[claim], &[release]);
+
+        assert_eq!(derive(early), Err(VerificationError::UnbalancedSettlement));
+        let local = derive(on_accrual).unwrap();
+        let field = IssuanceCommitmentField::from_checkpoint(&local);
+        assert_eq!(
+            field.verify_local_settlement(genesis, point, CAP, &path, &[claim], &[early]),
+            Err(VerificationError::UnbalancedSettlement)
+        );
+        assert_eq!(field.verify_local_settlement(genesis, point, CAP, &path, &[claim], &[on_accrual]), Ok(local));
     }
 }
