@@ -47,6 +47,8 @@ Updated November 24, 2026.
 
 #70 now stacks on #68. Its fast-forward head `bbbee69ca52c08c38276e8648fe1ac18e08d53cc` combines the production pruning-UTXO guard and the verified fixed-point reorganization fixture without changing either implementation. [Combined PR run 45469685474](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45469685474) started. The superseded duplicate is 45469682749. Retain the individual 8/8 evidence above and require the named regression and full matrix on the combined head before considering integration. Read the final #67 and #68 native logs for the independent replay vectors and committed-position test.
 
+The exact combined head passed `daemon_integration_tests::authority_integration_preview_reopens_imported_pruning_evidence` locally in 13.79 seconds. It used the guarded exporter, adopted the replacement branch above the common finality point, and matched the retained and virtual state after a second offline reopen. This was the transparent Simnet fixture with an authenticated empty shielded state.
+
 ## Exporter-to-receiver recovery session
 
 The original stacks are #56 → #57 → #58 → #62, #57 → #59 → #61 → #63 → #65, and #53 → #60 → #64. All implementation PRs remain drafts. #65 also contains #61's DAA fixture correction.
