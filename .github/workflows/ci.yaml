@@ -166,6 +166,10 @@ jobs:
         if: github.head_ref == 'test/phase6-live-pruning-child-eligibility-20261123' || github.ref_name == 'test/phase6-live-pruning-child-eligibility-20261123'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::live_pruning_candidate_authenticates_selected_child_after_reorg)'
 
+      - name: Verify durable staging cleanup and restart recovery
+        if: github.head_ref == 'fix/phase6-atomic-staging-cleanup-20261125' || github.ref_name == 'fix/phase6-atomic-staging-cleanup-20261125'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=consensus::factory::tests::staging_cleanup_reopens_from_legacy_partial_cleanup)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
