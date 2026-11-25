@@ -3843,9 +3843,12 @@ dependencies = [
 name = "kaspa-grpc-simple-client-example"
 version = "2.0.1"
 dependencies = [
+ "clap",
  "futures",
  "kaspa-grpc-client",
  "kaspa-rpc-core",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
