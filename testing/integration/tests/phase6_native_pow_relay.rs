@@ -7,9 +7,11 @@ use kaspa_hashes::Hash;
 use kaspa_math::{Uint256, Uint320};
 use kaspa_pow::State;
 use kaspa_rpc_core::{RpcRawBlock, SubmitBlockRejectReason, SubmitBlockReport, api::rpc::RpcApi};
-use kaspa_testing_integration::common::daemon::Daemon;
+use kaspa_testing_integration::common::daemon::{ClientManager, Daemon};
+use kaspa_utils::networking::ContextualNetAddress;
+use kaspa_wrpc_server::address::WrpcNetAddress;
 use kaspad_lib::args::Args;
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 fn native_simnet_args(params: &Path) -> Args {
     Args {
@@ -214,4 +216,92 @@ async fn authority_integration_native_pow_reopens_after_difficulty_retarget() {
     second_client.disconnect().await.unwrap();
     first.shutdown();
     second.shutdown();
+}
+
+fn loopback_daemon(mut args: Args) -> Daemon {
+    Daemon::fill_args_with_random_ports(&mut args);
+    let loopback = |address: ContextualNetAddress| ContextualNetAddress::loopback().with_port(address.normalize(0).port);
+    args.listen = args.listen.map(loopback);
+    args.rpclisten = args.rpclisten.map(loopback);
+    let Some(WrpcNetAddress::Custom(borsh)) = args.rpclisten_borsh else {
+        panic!("the daemon fixture must allocate a Borsh RPC port");
+    };
+    args.rpclisten_borsh = Some(WrpcNetAddress::Custom(loopback(borsh)));
+    args.rpclisten_json = None;
+    Daemon::with_manager(Arc::new(ClientManager::new(args)), 10)
+}
+
+async fn wait_for_peer_count(client: &GrpcClient, expected: usize) {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while client.get_connected_peer_info().await.unwrap().peer_info.len() != expected {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("node did not reach {expected} connected peers"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_native_pow_competing_branches_rejoin() {
+    kaspa_alloc::init_allocator_with_default_settings();
+    let temp = tempfile::tempdir().unwrap();
+    let params = temp.path().join("native-pow-partition.json");
+    std::fs::write(&params, r#"{"skip_proof_of_work": false, "shielded_coinbase": false}"#).unwrap();
+    let args = native_simnet_args(&params);
+    let mut first = loopback_daemon(args.clone());
+    let mut second = loopback_daemon(args.clone());
+    let mut isolated = loopback_daemon(args);
+    let first_client = first.start().await;
+    let second_client = second.start().await;
+    let isolated_client = isolated.start().await;
+    let miner = Address::new(first.network.into(), Version::PubKey, &[0; 32]);
+    let isolated_miner = Address::new(isolated.network.into(), Version::PubKey, &[1; 32]);
+    let first_address = format!("127.0.0.1:{}", first.p2p_port).try_into().unwrap();
+
+    connect(&first, &second_client).await;
+    // Only the isolated node can request this connection. A temporary request allows it to close the link.
+    isolated_client.add_peer(first_address, false).await.unwrap();
+    wait_for_peer_count(&first_client, 2).await;
+    wait_for_peer_count(&isolated_client, 1).await;
+    let common = submit_native_block(&first_client, &miner, false).await;
+    wait_for_sink(&second_client, common).await;
+    wait_for_sink(&isolated_client, common).await;
+
+    let loopback_ip = "127.0.0.1".parse().unwrap();
+    isolated_client.ban(loopback_ip).await.unwrap();
+    wait_for_peer_count(&isolated_client, 0).await;
+    wait_for_peer_count(&first_client, 1).await;
+    let isolated_tip = submit_native_block(&isolated_client, &isolated_miner, false).await;
+    let mut connected_branch = Vec::new();
+    for _ in 0..4 {
+        let block = submit_native_block(&first_client, &miner, false).await;
+        wait_for_sink(&second_client, block).await;
+        connected_branch.push(block);
+    }
+    let connected_tip = *connected_branch.last().unwrap();
+    assert_eq!(isolated_client.get_block_dag_info().await.unwrap().sink, isolated_tip);
+    assert!(isolated_client.get_block(connected_tip, false).await.is_err());
+    assert!(first_client.get_block(isolated_tip, false).await.is_err());
+
+    isolated_client.unban(loopback_ip).await.unwrap();
+    isolated_client.add_peer(first_address, false).await.unwrap();
+    wait_for_peer_count(&first_client, 2).await;
+    wait_for_sink(&isolated_client, connected_tip).await;
+    let rollback = isolated_client.get_virtual_chain_from_block(isolated_tip, false, None).await.unwrap();
+    assert_eq!(rollback.removed_chain_block_hashes, [isolated_tip]);
+    assert_eq!(rollback.added_chain_block_hashes, connected_branch);
+
+    let recovered_tip = submit_native_block(&isolated_client, &isolated_miner, false).await;
+    let recovered = isolated_client.get_block_dag_info().await.unwrap();
+    for client in [&first_client, &second_client] {
+        wait_for_sink(client, recovered_tip).await;
+        let dag = client.get_block_dag_info().await.unwrap();
+        assert_eq!(dag.virtual_parent_hashes, recovered.virtual_parent_hashes);
+        assert_eq!(dag.virtual_daa_score, recovered.virtual_daa_score);
+        assert_eq!(dag.pruning_point_hash, recovered.pruning_point_hash);
+    }
+
+    first_client.disconnect().await.unwrap();
+    second_client.disconnect().await.unwrap();
+    isolated_client.disconnect().await.unwrap();
 }

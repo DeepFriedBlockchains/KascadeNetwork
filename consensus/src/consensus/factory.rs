@@ -9,8 +9,8 @@ use kaspa_consensusmanager::{ConsensusFactory, ConsensusInstance, DynConsensusCt
 use kaspa_core::{debug, time::unix_now, warn};
 use kaspa_database::{
     prelude::{
-        BatchDbWriter, CachePolicy, CachedDbAccess, CachedDbItem, DB, DirectDbWriter, RocksDbPreset, StoreError, StoreResult,
-        StoreResultExt,
+        BatchDbWriter, CachePolicy, CachedDbAccess, CachedDbItem, DB, DeferredDbBatch, DirectDbWriter, RocksDbPreset, StoreError,
+        StoreResult, StoreResultExt,
     },
     registry::DatabaseStorePrefixes,
 };
@@ -20,7 +20,14 @@ use kaspa_utils::mem_size::MemSizeEstimator;
 use parking_lot::RwLock;
 use rocksdb::WriteBatch;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error, fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fs,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ConsensusEntry {
@@ -132,7 +139,7 @@ impl MultiConsensusManagementStore {
     pub fn staging_consensus_entry(&mut self) -> Option<ConsensusEntry> {
         let metadata = self.metadata.read().unwrap();
         match metadata.staging_consensus_key {
-            Some(key) => Some(self.entries.read(key.into()).unwrap()),
+            Some(key) => self.entries.read(key.into()).optional().unwrap(),
             None => None,
         }
     }
@@ -183,6 +190,27 @@ impl MultiConsensusManagementStore {
             data
         })?;
         Ok(())
+    }
+
+    fn cleanup_staging_consensus(&mut self, db_root_dir: &Path) -> StoreResult<()> {
+        let mut metadata = self.metadata.read()?;
+        let Some(key) = metadata.staging_consensus_key.take() else { return Ok(()) };
+
+        if let Some(entry) = self.entries.read(key.into()).optional()?
+            && let Err(error) = fs::remove_dir_all(db_root_dir.join(entry.directory_name))
+            && error.kind() != ErrorKind::NotFound
+        {
+            warn!("Error deleting staging consensus entry {key}: {error}");
+            // Keep the entry available for later cleanup and release the staging slot.
+            return self.cancel_staging_consensus();
+        }
+
+        // A restart can encounter an already removed directory or a missing entry
+        // left by an older cleanup. Clear the pointer and entry together under the store lock.
+        let mut batch = DeferredDbBatch::new(self.db.clone());
+        self.entries.delete_deferred(&mut batch, key.into())?;
+        self.metadata.stage_exclusive_write(&mut batch, &metadata)?;
+        batch.commit()
     }
 
     fn iterator(&self) -> impl Iterator<Item = Result<ConsensusEntry, Box<dyn Error>>> + '_ {
@@ -436,25 +464,13 @@ impl ConsensusFactory for Factory {
     }
 
     fn delete_staging_entry(&self) {
-        let mut write_guard = self.management_store.write();
-        if let Some(entry) = write_guard.staging_consensus_entry() {
-            let dir = self.db_root_dir.join(entry.directory_name.clone());
-            match fs::remove_dir_all(dir) {
-                Ok(_) => {
-                    write_guard.delete_entry(entry).unwrap();
-                }
-                Err(e) => {
-                    warn!("Error deleting staging consensus entry {}: {}", entry.key, e);
-                }
-            };
-            write_guard.cancel_staging_consensus().unwrap();
-        }
+        self.management_store.write().cleanup_staging_consensus(&self.db_root_dir).unwrap();
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::MultiConsensusManagementStore;
+    use super::{ConsensusEntryType, MultiConsensusManagementStore, fs};
     use kaspa_database::{prelude::ConnBuilder, utils::get_kaspa_tempdir};
 
     #[test]
@@ -475,5 +491,49 @@ mod tests {
         assert!(store.is_archival_node().unwrap());
         drop(store);
         drop(db);
+    }
+
+    #[test]
+    fn staging_cleanup_reopens_from_legacy_partial_cleanup() {
+        let temp = get_kaspa_tempdir();
+        let management_path = temp.path().join("management");
+        let open = || {
+            let db = ConnBuilder::default().with_db_path(management_path.clone()).with_files_limit(10).build().unwrap();
+            MultiConsensusManagementStore::new(db)
+        };
+        let mut store = open();
+        let ConsensusEntryType::New(active) = store.active_consensus_entry().unwrap() else { panic!("expected a new active entry") };
+        let active_path = temp.path().join(&active.directory_name);
+        fs::create_dir(&active_path).unwrap();
+        store.save_new_active_consensus(active.clone()).unwrap();
+
+        // Cover ordinary cleanup, reopening after removing the directory, and
+        // reopening after legacy code also removed the entry in a separate write.
+        for (remove_directory, remove_entry) in [(false, false), (true, false), (true, true)] {
+            let staging = store.new_staging_consensus_entry().unwrap();
+            let staging_path = temp.path().join(&staging.directory_name);
+            fs::create_dir(&staging_path).unwrap();
+            if remove_directory {
+                fs::remove_dir_all(&staging_path).unwrap();
+            }
+            if remove_entry {
+                store.delete_entry(staging.clone()).unwrap();
+            }
+            drop(store);
+
+            store = open();
+            assert_eq!(store.staging_consensus_entry().is_some(), !remove_entry);
+            store.cleanup_staging_consensus(temp.path()).unwrap();
+            assert!(!store.entries.has(staging.key.into()).unwrap());
+            store.cleanup_staging_consensus(temp.path()).unwrap();
+            drop(store);
+
+            store = open();
+            assert!(!staging_path.exists());
+            assert_eq!(store.metadata.read().unwrap().staging_consensus_key, None);
+            assert!(!store.entries.has(staging.key.into()).unwrap());
+            assert_eq!(store.active_consensus_dir_name().unwrap().as_deref(), Some(active.directory_name.as_str()));
+            assert!(active_path.is_dir());
+        }
     }
 }
