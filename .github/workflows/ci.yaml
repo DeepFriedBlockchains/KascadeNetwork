@@ -159,6 +159,8 @@ jobs:
           assert all(isinstance(row[key], int) and row[key] >= 0 for row in rows for key in counters)
           assert all(row["rss_bytes"] > 0 and row["cpu_usage"] >= 0 for row in rows)
           PY
+          python3 scripts/phase6-native-pow-evidence.py record "$KASCADE_CLI_LOGS" \
+            --scenario recovery --binary target/debug/kaspad
 
       - name: Upload three-node CLI runbook evidence
         if: always() && (github.head_ref == 'docs/phase6-loopback-operator-runbook-20261123' || github.ref_name == 'docs/phase6-loopback-operator-runbook-20261123' || github.head_ref == 'test/phase6-cli-real-pow-recovery-20261123' || github.ref_name == 'test/phase6-cli-real-pow-recovery-20261123')
@@ -212,6 +214,8 @@ jobs:
           assert len(metrics) == len(expected)
           assert all(row["rss_bytes"] > 0 and row["cpu_usage"] >= 0 for row in metrics)
           PY
+          python3 scripts/phase6-native-pow-evidence.py record "$KASCADE_CLI_LOGS" \
+            --scenario reconnect --binary target/debug/kaspad
 
       - name: Upload native-PoW peer reconnection evidence
         if: always() && (github.head_ref == 'test/phase6-native-pow-live-peer-reconnect-20261123' || github.ref_name == 'test/phase6-native-pow-live-peer-reconnect-20261123')
