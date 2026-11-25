@@ -170,6 +170,10 @@ jobs:
         if: github.head_ref == 'fix/phase6-atomic-staging-cleanup-20261125' || github.ref_name == 'fix/phase6-atomic-staging-cleanup-20261125'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=consensus::factory::tests::staging_cleanup_reopens_from_legacy_partial_cleanup)'
 
+      - name: Verify staging cleanup recovery after process exit
+        if: github.head_ref == 'test/phase6-staging-cleanup-process-exit-20261125' || github.ref_name == 'test/phase6-staging-cleanup-process-exit-20261125'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=consensus::factory::tests::staging_cleanup_recovers_after_process_exit)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
