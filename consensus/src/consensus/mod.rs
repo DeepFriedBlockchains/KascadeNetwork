@@ -5,6 +5,9 @@ pub mod services;
 pub mod storage;
 pub mod test_consensus;
 
+#[cfg(test)]
+mod signed_fee_settlement_tests;
+
 #[cfg(feature = "devnet-prealloc")]
 mod utxo_set_override;
 
