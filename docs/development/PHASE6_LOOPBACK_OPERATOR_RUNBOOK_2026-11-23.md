@@ -57,6 +57,15 @@ The Linux Actions fixture starts the three documented commands with temporary pa
 
 ## Native-PoW acceptance on isolated Simnet
 
+On Linux, start and supervise all three native-PoW daemons from one terminal:
+
+```bash
+python3 scripts/phase6-loopback-launch.py --daemon "$KASPAD" \
+  --directory ./phase6-native-loopback
+```
+
+The launcher uses the loopback ports above, writes separate data and log paths, and reuses them when started again. Ctrl-C stops all three daemons. Add `--check` to stop after the listeners are reachable and check graceful shutdown. Use the RPC queries above to verify peer connectivity and selected state after startup.
+
 Create one absolute-path override file visible to all three processes:
 
 ```bash
