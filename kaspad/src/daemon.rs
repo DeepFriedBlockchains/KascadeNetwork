@@ -116,6 +116,21 @@ pub fn validate_args(args: &Args) -> ConfigResult<()> {
     Ok(())
 }
 
+fn validate_override_params(params: &Params) -> Result<(), &'static str> {
+    let required_nonzero = [
+        ("pre_crescendo_target_time_per_block", params.pre_crescendo_target_time_per_block),
+        ("blockrate.target_time_per_block", params.target_time_per_block()),
+        ("blockrate.difficulty_sample_rate", params.difficulty_sample_rate()),
+        ("blockrate.past_median_time_sample_rate", params.past_median_time_sample_rate()),
+    ];
+    for (field, value) in required_nonzero {
+        if value == 0 {
+            return Err(field);
+        }
+    }
+    Ok(())
+}
+
 fn request_database_deletion_approval(approve: bool) -> bool {
     let msg = "Node database is from a different Kaspad *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
     request_database_deletion_approval_with_message(msg, approve)
@@ -315,7 +330,12 @@ pub fn create_core_with_runtime(runtime: &Runtime, args: &Args, fd_total_budget:
                     println!("Failed to parse override params file '{}': {}", path, err);
                     exit(1);
                 });
-                params.override_params(override_params)
+                let params = params.override_params(override_params);
+                if let Err(field) = validate_override_params(&params) {
+                    println!("Invalid override params file '{}': {field} must be greater than zero", path);
+                    exit(1);
+                }
+                params
             }
             None => params,
         }
@@ -918,4 +938,37 @@ Do you confirm? (y/n)";
     core.bind(async_runtime);
 
     (core, rpc_core_service)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OverrideParams, Params, validate_override_params};
+    use kaspa_consensus_core::{config::params::BlockrateParams, network::NetworkType};
+
+    #[test]
+    fn override_preflight_accepts_default_and_five_bps_simnet() {
+        let defaults = Params::from(NetworkType::Simnet);
+        let overrides: OverrideParams =
+            serde_json::from_value(serde_json::json!({ "blockrate": BlockrateParams::new::<5>() })).unwrap();
+        assert_eq!(validate_override_params(&defaults), Ok(()));
+        let effective_params = defaults.override_params(overrides);
+        assert_eq!(validate_override_params(&effective_params), Ok(()));
+        assert_eq!(effective_params.target_time_per_block(), 200);
+    }
+
+    #[test]
+    fn override_preflight_rejects_zero_timing_and_sample_fields() {
+        let defaults = Params::from(NetworkType::Simnet);
+        let overrides = serde_json::from_str(r#"{"pre_crescendo_target_time_per_block":0}"#).unwrap();
+        let effective_params = defaults.clone().override_params(overrides);
+        assert_eq!(validate_override_params(&effective_params), Err("pre_crescendo_target_time_per_block"));
+
+        for field in ["target_time_per_block", "difficulty_sample_rate", "past_median_time_sample_rate"] {
+            let mut blockrate = serde_json::to_value(BlockrateParams::new::<5>()).unwrap();
+            blockrate[field] = 0.into();
+            let overrides = serde_json::from_value(serde_json::json!({ "blockrate": blockrate })).unwrap();
+            let effective_params = defaults.clone().override_params(overrides);
+            assert_eq!(validate_override_params(&effective_params).unwrap_err(), format!("blockrate.{field}"));
+        }
+    }
 }
