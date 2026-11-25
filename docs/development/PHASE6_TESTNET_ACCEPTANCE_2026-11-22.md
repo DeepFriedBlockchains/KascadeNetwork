@@ -13,6 +13,16 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 25 exact-source validation
+
+| Gate | Classification | Evidence and remaining work |
+| --- | --- | --- |
+| Native DAA restart and relay | Verified in native Simnet | [#71 run 45473741398](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473741398), 8/8 at `9d91cf6`. Native competing-branch partition and representative sustained workload remain open. |
+| Inactive issuance replay | Verified in local replay | [#72 run 45473757936](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473757936), 8/8 at `396599f`. Fresh-receiver authentication still requires the approved carrier and bootstrap rules. |
+| Interrupted pruning import and bounded wire pages | Verified in guarded Simnet | [#73 run 45498114481](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45498114481), 8/8 at `d5cf25c`, has the same source tree as combined `84589bb` and covers #74. The immediate recovery task is atomic abandoned-staging bookkeeping; multi-page retry coverage follows. |
+| Durable final evidence rejection | Verified for the RocksDB authority fixture | [#75 run 45473893184](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473893184), 8/8 at `a583b3d`. |
+| Production issuance and public testnet | Blocked on owner decisions | The final network profile and issuance authentication, migration and bootstrap trust require approval. |
+
 ## Next executable check
 
 [Draft #25](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/25) combines the independently validated #17 and #19 branches. It also stages the #22 relay source after its focused step passed. Once #22 validates, trigger and validate the combined candidate on all eight [CI jobs](../../.github/workflows/ci.yaml). Keep public activation gated on separate maintainer authorization.

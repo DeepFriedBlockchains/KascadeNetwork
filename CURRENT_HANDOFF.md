@@ -1,6 +1,30 @@
 # KASCADE public development handoff
 
-Updated November 24, 2026.
+Updated November 25, 2026.
+
+## November 25 Phase 6 session recovery
+
+GitHub `main` remains at `f34a2f03e87c57b36ccdaf51072ee360e0fa3d15`. These are the completed draft results, confirmed from the eight Actions jobs and native job logs. The table supersedes the pending statuses in the dated records below.
+
+| Draft | Head | Actions | Native evidence |
+| --- | --- | --- | --- |
+| [#71](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/71) | `9d91cf6` | [45473741398](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473741398) · 8/8 | Restarted native difficulty calculation and offline mining followed by real two-peer relay. 1,579 workspace tests. |
+| [#72](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/72) | `396599f` | [45473757936](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473757936) · 8/8 | Independent inactive replay vectors and duplicate developer release rejection. 1,602 workspace tests. |
+| [#73](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/73) | `d5cf25c` | [45498114481](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45498114481) · 8/8 | Real pruning UTXO transfer interruption after a committed page, reopen, retry, live reorganization and offline reopen. 40 authority cases, 1,605 workspace and 32 no-asm tests. |
+| [#74](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/74) | `cc45a08` | [45473814935](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473814935) · 8/8 | Receiver page bounds and empty/full behavior. 1,605 workspace tests. |
+| [#75](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/75) | `a583b3d` | [45473893184](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45473893184) · 8/8 | Closed durable readiness across reopening after final evidence rejection. 1,601 workspace tests. |
+
+PR #73 now targets #74. The earlier combined validation ref at `84589bb`, the current #73 head `d5cf25c` and Actions checkout `7afe67415751dd550455ff4f64bef2ba7f73e735` have the identical Git tree `7cb86c6b369a0f1dc5c3125a3388efa4af82e7a4`. Run 45498114481 verifies both changes together. Its cancelled duplicate 45498114718 ran no jobs.
+
+The surviving prior workspace has the #73 staging-cleanup checkout clean at `d5cf25c`, the native DAA partition checkout clean at #71, and the operator checkout clean at the validated #48 head `9132237`. The issuance checkout on #72 contains an uncommitted `consensus/src/processes/coinbase.rs` patch to reconcile reward-claim counts with settlement, including eligible zero-subsidy claims. Focused results for that patch were absent at recovery. These branch and working-tree states are the last recoverable checkpoint.
+
+### Next executable gates
+
+1. Finish and validate the recovered settlement count patch on a separate draft based on #72. Record the exact focused and full CI evidence.
+2. Make abandoned staging cleanup atomic and allow restart to recover a legacy staging pointer whose entry or directory has already been removed. Then cover a real multi-page pruning transfer followed by retry.
+3. Test competing native-work branches during a live loopback partition, then verify selection, convergence and continued relay after reconnection. Reuse the #71 source and distinguish it from the earlier simulated-PoW partition and idle-follower link-loss checks.
+4. Bind operational native peer recovery evidence to its source and effective configuration, then stage cross-stack validation of new code once its isolated results and dependencies are known.
+5. The owner still needs to approve the final network identity/profile, issuance commitment carrier, migration and fresh-pruned-receiver bootstrap trust. Keep public activation and production issuance disabled. Preserve the 29B KCADE cap and 21B main / 8B tail budgets.
 
 ## November 24 parallel Phase 6 continuation
 
