@@ -18,6 +18,18 @@ PR #73 now targets #74. The earlier combined validation ref at `84589bb`, the cu
 
 The surviving prior workspace has the #73 staging-cleanup checkout clean at `d5cf25c`, the native DAA partition checkout clean at #71, and the operator checkout clean at the validated #48 head `9132237`. The issuance checkout on #72 contains an uncommitted `consensus/src/processes/coinbase.rs` patch to reconcile reward-claim counts with settlement, including eligible zero-subsidy claims. Focused results for that patch were absent at recovery. These branch and working-tree states are the last recoverable checkpoint.
 
+### November 25 resumed engineering
+
+| Draft | Exact head | Parent and validation status |
+| --- | --- | --- |
+| [#76 cross-stack validation](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/76) | `20eb29f66af594c99ff728f0da4434863755afc4` | Combines #71, #72, #75 and the #73/#74 tree. The merged source was reviewed for unchanged native relay, inactive codec and committed recovery behavior. [New combined matrix 45622780578](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622780578) running. |
+| [#77 issuance claim count](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/77) | `6e729a8f32f6108a1493d726fd54a740e451d202` | On #72. Recovered prior work and passed focused coinbase/RocksDB test locally. [45622845484](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622845484) running. |
+| [#78 operator evidence provenance](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/78) | `b6662a96d2f2d3e12585860f5bc92f68fed5875c` | On #48. Local fixtures verify source, daemon and evidence hashes and detect modified artifacts. [45622905196](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622905196) running. |
+| [#79 abandoned staging cleanup](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/79) | `c570592670398b28e3f45e58890cb7c1df866c71` | On #73. Clears the staging pointer and entry atomically and handles incomplete cleanup from older versions. Local focused compilation and [45623057634](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45623057634) underway. |
+| [#80 native partition/rejoin](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/80) | `c3aac243f16943bb9dd7dea32f2e380892863805` | On #71. New loopback real-kHeavyHash competing-branch test passed locally in 5.57 s. Confirm Actions on this head. |
+
+The multi-page pruning retry case is staged locally at `11a50d1505dbcd9826acf226cb1e0b0347e35d8f` on #73. Its exact new test is `authority_integration_preview_retries_multi_page_pruning_utxos`. It reuses the verified exporter/receiver fixture with a larger chain and verifies the source actually exceeds one wire page before interrupting. Local focused execution is underway. Publish on a separate #73 draft once its result is understood.
+
 ### Next executable gates
 
 1. Finish and validate the recovered settlement count patch on a separate draft based on #72. Record the exact focused and full CI evidence.
