@@ -179,6 +179,14 @@ jobs:
           name: nonzero-pruning-process-exit
           path: nonzero-pruning-process-exit.log
 
+      - name: Verify durable staging cleanup and restart recovery
+        if: >-
+          github.head_ref == 'fix/phase6-atomic-staging-cleanup-20261125' ||
+          github.ref_name == 'fix/phase6-atomic-staging-cleanup-20261125' ||
+          github.head_ref == 'validation/phase6-operational-integration-20261125' ||
+          github.ref_name == 'validation/phase6-operational-integration-20261125'
+        run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=consensus::factory::tests::staging_cleanup_reopens_from_legacy_partial_cleanup)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
