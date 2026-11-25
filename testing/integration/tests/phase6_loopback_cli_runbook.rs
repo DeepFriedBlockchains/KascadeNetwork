@@ -287,7 +287,7 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     let log_dir = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
     let log_dir = Path::new(&log_dir);
     let data = tempfile::tempdir().unwrap();
-    let params_file = data.path().join("real-pow.json");
+    let params_file = log_dir.join("native-pow-params.json");
     std::fs::write(&params_file, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
     let options = NodeOptions { params: Some(params_file.as_path()), ..Default::default() };
 
@@ -396,7 +396,7 @@ async fn phase6_loopback_cli_live_peer_reconnect() {
     let logs = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
     let logs = Path::new(&logs);
     let data = tempfile::tempdir().unwrap();
-    let params = data.path().join("real-pow.json");
+    let params = logs.join("native-pow-params.json");
     std::fs::write(&params, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
     let options = NodeOptions { params: Some(&params), ..Default::default() };
     let listener = Arc::new(TcpListener::bind("127.0.0.1:0").await.unwrap());

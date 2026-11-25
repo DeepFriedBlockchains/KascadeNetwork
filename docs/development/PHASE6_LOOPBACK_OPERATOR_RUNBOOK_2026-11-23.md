@@ -68,6 +68,15 @@ cargo nextest run -p kaspa-testing-integration --test phase6_loopback_cli_runboo
 
 Pass requires a common fresh genesis and two followers connected to A, an above-target nonce rejected, exactly 12 valid blocks accepted, unchanged DAG accounting after an exact duplicate submission, and six missing blocks recovered by C after reopening. All three final selected tips, block counts, pruning points and virtual DAA scores must agree. Record reopen-to-RPC and reopen-to-tip times, per-node CPU and RSS, storage and P2P counters, and three clean exits. Inspect `driver.log`, the daemon stdout/stderr logs, `metrics.jsonl` and `recovery.json` in the Actions artifact. A loopback pass is evidence for this native-PoW workload; representative load and competing native-PoW tips remain separate gates.
 
+New native-PoW Actions artifacts also include the exact override file and `provenance.json`. The manifest records the source actually checked out by Actions, run and attempt identifiers, the daemon SHA-256, and SHA-256 digests of the native-PoW logs and observations. On pull requests the checked-out commit can be GitHub's synthetic merge commit. Use the commit printed by the workflow's checkout step for verification.
+
+```bash
+python3 scripts/phase6-native-pow-evidence.py verify "$EVIDENCE_DIRECTORY" \
+  --checkout-sha "$CHECKED_OUT_SHA"
+```
+
+Pass `--binary "$KASPAD"` to compare a retained binary against the recorded SHA-256. Use the artifact supplied by the expected Actions run as the reference.
+
 ## First native-PoW evidence
 
 On source `13dc263c9883b858ca30173d5087f954bc46b58d`, the focused native-PoW test passed in 4.878 seconds. All three processes accepted the expected 12-block DAG, rejected the invalid nonce, left the DAG unchanged on a duplicate submit, and shut down cleanly. C recovered six blocks in 312 ms from process reopen, with RPC ready after 310 ms. The raw artifact was uploaded. The matrix's metrics validator failed because Nextest appended an ANSI reset to the final JSON line, and early process metrics included zero RSS before the sampler's first observation. The follow-up strips terminal control sequences before JSON validation and waits up to ten seconds for each process sample. [Run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379) · [Raw artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379/artifacts/14803614244)
