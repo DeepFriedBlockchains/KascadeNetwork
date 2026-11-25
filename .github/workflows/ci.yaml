@@ -151,6 +151,25 @@ jobs:
             ${{ runner.temp }}/five-bps-profile.json
           if-no-files-found: error
 
+      - name: Verify signed traffic on three paced Simnet peers
+        if: github.head_ref == 'test/phase6-sustained-signed-traffic-20261125' || github.ref_name == 'test/phase6-sustained-signed-traffic-20261125'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          cargo nextest run -p kaspa-testing-integration --test phase6_five_bps_baseline --features phase6-staging-preview --run-ignored all --success-output immediate -E 'test(=phase6_five_bps_loopback_signed_traffic)' 2>&1 | tee "$RUNNER_TEMP/five-bps-signed-traffic.log"
+          sed -n 's/^[[:blank:]]*phase6_signed_traffic,//p' "$RUNNER_TEMP/five-bps-signed-traffic.log" > "$RUNNER_TEMP/five-bps-signed-traffic.json"
+          test -s "$RUNNER_TEMP/five-bps-signed-traffic.json"
+
+      - name: Upload signed Simnet traffic evidence
+        if: github.head_ref == 'test/phase6-sustained-signed-traffic-20261125' || github.ref_name == 'test/phase6-sustained-signed-traffic-20261125'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-five-bps-signed-traffic
+          path: |
+            ${{ runner.temp }}/five-bps-signed-traffic.log
+            ${{ runner.temp }}/five-bps-signed-traffic.json
+          if-no-files-found: error
+
       - name: Measure five minutes of isolated 5-BPS loopback
         if: github.head_ref == 'test/phase6-sustained-resource-sampling-20261122' || github.ref_name == 'test/phase6-sustained-resource-sampling-20261122'
         timeout-minutes: 30
