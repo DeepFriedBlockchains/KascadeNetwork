@@ -15,6 +15,8 @@ use crate::{constants, model::stores::ghostdag::GhostdagData};
 /// Issuance amounts reconciled against the existing coinbase builder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CoinbaseSettlement {
+    /// Distinct eligible reward sources, including zero-subsidy sources.
+    pub new_reward_claims: u64,
     pub new_subsidy: u64,
     pub paid_subsidy: u64,
     pub recycled_fees: u64,
@@ -40,11 +42,12 @@ pub struct CoinbaseClaimBatch {
 }
 
 impl CoinbaseSettlement {
-    /// Compare a cumulative checkpoint transition with the settled block.
+    /// Compare cumulative claim count and accounting with the settled block.
     /// The selected path, claim root, cap and independent digest require
     /// separate verification by checkpoint derivation and promotion.
     pub fn matches_checkpoint_transition(&self, previous: &IssuanceCheckpoint, next: &IssuanceCheckpoint) -> bool {
         previous.network_id == next.network_id
+            && previous.claim_count.checked_add(self.new_reward_claims) == Some(next.claim_count)
             && previous.deferred == self.deferred_before
             && next.deferred == self.deferred_after
             && previous.paid.checked_add(previous.deferred) == Some(previous.minted)
@@ -349,6 +352,7 @@ impl CoinbaseManager {
         deferred_before: u64,
     ) -> Option<CoinbaseSettlement> {
         let mut seen = BlockHashSet::default();
+        let mut new_reward_claims = 0u64;
         let mut new_subsidy = 0u64;
         let mut recycled_fees = 0u64;
         for (source, eligible) in Self::settlement_sources(ghostdag_data, mergeset_non_daa) {
@@ -358,6 +362,7 @@ impl CoinbaseManager {
             let reward = mergeset_rewards.get(source)?;
             recycled_fees = recycled_fees.checked_add(reward.total_fees)?;
             if eligible {
+                new_reward_claims = new_reward_claims.checked_add(1)?;
                 new_subsidy = new_subsidy.checked_add(reward.subsidy)?;
             }
         }
@@ -367,7 +372,7 @@ impl CoinbaseManager {
         if paid_subsidy.checked_add(deferred_after)? != new_subsidy.checked_add(deferred_before)? {
             return None;
         }
-        Some(CoinbaseSettlement { new_subsidy, paid_subsidy, recycled_fees, deferred_before, deferred_after })
+        Some(CoinbaseSettlement { new_reward_claims, new_subsidy, paid_subsidy, recycled_fees, deferred_before, deferred_after })
     }
 
     fn settlement_sources<'a>(
@@ -1055,13 +1060,13 @@ mod tests {
         }
         let mut non_daa = BlockHashSet::default();
         non_daa.insert(fee_only);
-        let build = |daa, accrued| {
+        let build = |daa, accrued, rewards: &BlockHashMap<BlockRewardData>| {
             manager
                 .expected_coinbase_transaction(
                     daa,
                     MinerData::new(script.clone(), vec![]),
                     &ghostdag,
-                    &rewards,
+                    rewards,
                     &non_daa,
                     [0; 32],
                     daa - 1,
@@ -1069,11 +1074,12 @@ mod tests {
                 )
                 .unwrap()
         };
-        let mut template = build(101, 30);
+        let mut template = build(101, 30, &rewards);
         let settlement = CoinbaseManager::reconcile_settlement(&template, &ghostdag, &rewards, &non_daa, 30).unwrap();
         assert_eq!(
             settlement,
             CoinbaseSettlement {
+                new_reward_claims: 2,
                 new_subsidy: 3_000,
                 paid_subsidy: 2_850,
                 recycled_fees: 33,
@@ -1095,6 +1101,10 @@ mod tests {
         let next = IssuanceCheckpoint::derive_from_claims(network, current, CAP, &[network, parent, current], &claims).unwrap();
         assert_eq!((next.claim_count, next.minted, next.paid, next.deferred), (3, 3_030, 2_850, 180));
         assert!(settlement.matches_checkpoint_transition(&previous, &next));
+        assert!(!settlement.matches_checkpoint_transition(
+            &IssuanceCheckpoint { claim_count: u64::MAX, ..previous },
+            &IssuanceCheckpoint { claim_count: 1, ..next }
+        ));
         assert!(!settlement.matches_checkpoint_transition(&previous, &IssuanceCheckpoint { paid: 2_849, deferred: 181, ..next }));
 
         let temp = kaspa_database::utils::get_kaspa_tempdir();
@@ -1130,21 +1140,26 @@ mod tests {
             store.stage(&mut batch, &guard, previous_anchor, &previous).unwrap();
             batch.commit().unwrap();
 
-            let mutated = IssuanceCheckpoint { paid: 2_849, deferred: 181, ..next };
-            let mut rejected = DeferredDbBatch::new(db.clone());
-            assert!(
-                store
-                    .stage_reconciled_transition(
-                        &mut rejected,
-                        &guard,
-                        previous_anchor,
-                        make_anchor(mutated, 2),
-                        &mutated,
-                        &settlement
-                    )
-                    .is_err()
-            );
-            assert!(rejected.commit().is_err());
+            for mutated in [
+                IssuanceCheckpoint { paid: 2_849, deferred: 181, ..next },
+                IssuanceCheckpoint { claim_count: 2, ..next },
+                IssuanceCheckpoint { claim_count: 4, ..next },
+            ] {
+                let mut rejected = DeferredDbBatch::new(db.clone());
+                assert!(
+                    store
+                        .stage_reconciled_transition(
+                            &mut rejected,
+                            &guard,
+                            previous_anchor,
+                            make_anchor(mutated, 2),
+                            &mutated,
+                            &settlement
+                        )
+                        .is_err()
+                );
+                assert!(rejected.commit().is_err());
+            }
 
             let mut unsubmitted = DeferredDbBatch::new(db);
             store.stage_reconciled_transition(&mut unsubmitted, &guard, previous_anchor, next_anchor, &next, &settlement).unwrap();
@@ -1169,11 +1184,18 @@ mod tests {
             assert!(store.load(&guard, previous_anchor).is_err());
         }
 
-        let payout = build(110, 180);
+        let payout = build(110, 180, &rewards);
         let paid = CoinbaseManager::reconcile_settlement(&payout, &ghostdag, &rewards, &non_daa, 180).unwrap();
         assert_eq!(
             paid,
-            CoinbaseSettlement { new_subsidy: 3_000, paid_subsidy: 3_180, recycled_fees: 33, deferred_before: 180, deferred_after: 0 }
+            CoinbaseSettlement {
+                new_reward_claims: 2,
+                new_subsidy: 3_000,
+                paid_subsidy: 3_180,
+                recycled_fees: 33,
+                deferred_before: 180,
+                deferred_after: 0
+            }
         );
         let payout_context = CoinbaseClaimContext { daa_score: 110, deferred_before: 180, ..context };
         let attributed_payout = manager.attribute_settlement_claims(&payout, &ghostdag, &rewards, &non_daa, payout_context).unwrap();
@@ -1218,6 +1240,20 @@ mod tests {
         let stale = DeveloperPayoutRelease { settlement_block: red, ..release };
         assert_eq!(verify(&wire, &path, &[stale]), Err(VerificationError::OffSelectedPath));
         assert_eq!(verify(&wire, &path, &[release, release]), Err(VerificationError::DuplicateDeveloperRelease));
+
+        let mut zero_subsidy_rewards = rewards.clone();
+        for (source, fees) in [(blue, 9), (red, 11)] {
+            zero_subsidy_rewards.insert(source, BlockRewardData::new(0, fees, script.clone()));
+        }
+        let zero_subsidy_template = build(101, 30, &zero_subsidy_rewards);
+        let zero_subsidy =
+            manager.attribute_settlement_claims(&zero_subsidy_template, &ghostdag, &zero_subsidy_rewards, &non_daa, context).unwrap();
+        assert_eq!((zero_subsidy.settlement.new_reward_claims, zero_subsidy.settlement.new_subsidy), (2, 0));
+        assert_eq!(zero_subsidy.settlement.recycled_fees, 33);
+        assert_eq!(
+            zero_subsidy.claims.iter().map(|claim| (claim.reward_source, claim.minted)).collect::<Vec<_>>(),
+            [(blue, 0), (red, 0)]
+        );
 
         template.tx.outputs[0].value = u64::MAX;
         assert!(CoinbaseManager::reconcile_settlement(&template, &ghostdag, &rewards, &non_daa, 30).is_none());
