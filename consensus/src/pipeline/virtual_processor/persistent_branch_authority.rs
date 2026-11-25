@@ -36,6 +36,11 @@ struct AuthorityInner {
 type AuthorityRegistry = Mutex<HashMap<usize, Weak<AuthorityInner>>>;
 static AUTHORITIES: OnceLock<AuthorityRegistry> = OnceLock::new();
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static GUARDED_PUBLICATION_EXIT: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Default)]
 struct AuthorityState {
     generation: Arc<()>,
@@ -215,7 +220,15 @@ impl PersistentBranchAuthority {
             batch.ensure_database(&self.db)?;
             batch.ensure_key_prefix(DatabaseStorePrefixes::KascadeBranchAuthorityData as u8)?;
             let revision = self.readiness.stage_ready(&mut batch, point)?;
+            #[cfg(test)]
+            if GUARDED_PUBLICATION_EXIT.get() == 71 {
+                std::process::exit(71);
+            }
             batch.commit()?;
+            #[cfg(test)]
+            if GUARDED_PUBLICATION_EXIT.get() == 72 {
+                std::process::exit(72);
+            }
             revision
         } else {
             self.readiness.complete_sync(point)?
@@ -494,6 +507,42 @@ mod tests {
         assert!(owner.commit(point(), lease, batch).is_err());
         assert!(db.get(DATA_KEY).unwrap().is_none());
         assert!(PersistentBranchAuthority::new(db).lease(point()).is_err());
+    }
+
+    #[test]
+    fn failed_final_evidence_recheck_closes_readiness_across_reopen() {
+        let temp = kaspa_database::utils::get_kaspa_tempdir();
+        let connect = || ConnBuilder::default().with_files_limit(32).with_db_path(temp.path().to_owned()).build().unwrap();
+        {
+            let db = connect();
+            install_point(&db);
+            let owner = PersistentBranchAuthority::new(db.clone());
+            complete(&owner);
+            let mut original = DeferredDbBatch::new(db.clone());
+            original.put_raw(&db, DATA_KEY, b"prior").unwrap();
+            owner.commit(point(), owner.lease(point()).unwrap(), original).unwrap();
+
+            let lease = owner.lease(point()).unwrap();
+            let sibling = owner.lease(point()).unwrap();
+            let result = owner.commit_rechecked(point(), lease, data_batch(&db), |verified_db, actual| {
+                assert!(Arc::ptr_eq(&db, verified_db));
+                assert_eq!(actual, point());
+                Err(StoreError::DataInconsistency("final evidence rejected".into()))
+            });
+            assert!(matches!(result, Err(StoreError::DataInconsistency(error)) if error == "final evidence rejected"));
+            assert!(owner.commit(point(), sibling, data_batch(&db)).is_err());
+            assert!(owner.lease(point()).is_err());
+        }
+
+        let db = connect();
+        let readiness = DbBranchReadiness::new(db.clone());
+        assert!(readiness.closed_revision().unwrap().is_some());
+        assert_eq!(db.get(DATA_KEY).unwrap().as_deref(), Some(b"prior".as_slice()));
+        let owner = PersistentBranchAuthority::new(db.clone());
+        assert!(owner.lease(point()).is_err());
+        complete(&owner);
+        owner.commit(point(), owner.lease(point()).unwrap(), data_batch(&db)).unwrap();
+        assert_eq!(db.get(DATA_KEY).unwrap().as_deref(), Some(b"committed".as_slice()));
     }
 
     #[test]
