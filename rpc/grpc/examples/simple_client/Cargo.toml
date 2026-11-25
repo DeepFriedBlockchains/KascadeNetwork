@@ -1,6 +1,7 @@
 [package]
 name = "kaspa-grpc-simple-client-example"
 description = "Kaspa GRPC simple client example"
+default-run = "kaspa-grpc-simple-client-example"
 publish = false
 rust-version.workspace = true
 version.workspace = true
@@ -11,9 +12,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+clap.workspace = true
 futures.workspace = true
 kaspa-rpc-core.workspace = true
 kaspa-grpc-client.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 
 

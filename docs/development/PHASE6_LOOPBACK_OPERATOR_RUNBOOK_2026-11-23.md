@@ -28,6 +28,17 @@ Use fresh, separate data directories with no inherited process configuration for
 
 Use the corresponding loopback gRPC port for each node. Query `GetCurrentNetwork`, `GetBlockDagInfo`, and `GetConnectedPeerInfo` and record the network, selected sink, pruning point, and peer topology. Before submitting blocks, verify the local genesis agrees with `SIMNET_GENESIS` at the pinned source. A fresh data directory's selected tip must agree on all nodes. [CLI options](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/15f99ca97799b414e57fb20b8f53f1d85feb1f6c/kaspad/src/args.rs) · [Genesis definitions](https://github.com/DeepFriedBlockchains/KascadeNetwork/blob/15f99ca97799b414e57fb20b8f53f1d85feb1f6c/consensus/core/src/config/genesis.rs)
 
+## One-shot health and convergence check
+
+After startup or reconnection, pause block submission while sampling the chain state:
+
+```bash
+cargo run --locked -p kaspa-grpc-simple-client-example --bin phase6-loopback-health -- \
+  --minimum-peers 1 --timeout-ms 3000 127.0.0.1:19110 127.0.0.1:19210 127.0.0.1:19310
+```
+
+The read-only probe returns JSON with network, version, sync status, peer count, selected tip, pruning point, and virtual DAA score for each endpoint. Exit status 0 requires a response from every node on Simnet, the requested peer count on each node, and agreement on the selected tip, pruning point and virtual DAA score. Inspect `issues` and the individual node results on a nonzero exit. Use `--minimum-peers 0` to observe a standalone node. Sync status and total block and header counts are reported for context. A sample during live block propagation can show a transient difference, so sample again after the topology settles.
+
 ## Restart and convergence evidence
 
 1. Save network, selected tip, pruning point, and peer state before stopping a follower. Stop it cleanly with Ctrl-C and preserve its data directory.
