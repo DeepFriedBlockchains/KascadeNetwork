@@ -13,6 +13,16 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 25 cross-stack and operational evidence
+
+| Gate | Evidence and scope |
+| --- | --- |
+| Cross-stack recovery, issuance, relay and readiness | [#76, 45622780578](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622780578) passed all eight jobs. The exact combined native run passed 42 authority and 1,613 workspace tests. Evidence includes real Simnet pruning transfer interruption, reorganization, nonzero guarded exit/retry, local issuance replay and durable failure readiness. |
+| Settlement claim conservation | [#77, 45622845484](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622845484) passed all eight jobs and the expanded coinbase/RocksDB regression. Applies to local attributed settlement. Fresh pruned receivers still require approved independent authentication. |
+| Staging directory and metadata cleanup | [#79, 45623057634](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45623057634) passed all eight jobs. The legacy partial database state opens and cleans up with the active directory preserved. Live retry/reorganization also passed with the fix. Multi-page retry and actual interruption inside management cleanup are follow-up coverage. |
+| Native competing branches | [#80, 45623236895](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45623236895) passed all eight jobs. Three loopback daemons mined competing native branches, rolled back and resumed mining and relay. Representative sustained transaction and resource workload remains incomplete. |
+| Operator evidence | [#78, 45622905196](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45622905196) passed all eight jobs. New source, daemon and evidence digest tooling also passed local offline fixtures. |
+
 ## November 25 exact-source validation
 
 | Gate | Classification | Evidence and remaining work |
