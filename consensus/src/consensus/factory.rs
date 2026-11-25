@@ -210,7 +210,12 @@ impl MultiConsensusManagementStore {
         let mut batch = DeferredDbBatch::new(self.db.clone());
         self.entries.delete_deferred(&mut batch, key.into())?;
         self.metadata.stage_exclusive_write(&mut batch, &metadata)?;
-        batch.commit()
+        #[cfg(test)]
+        tests::exit_at_staging_cleanup_boundary(tests::CleanupExitBoundary::BeforeCommit);
+        batch.commit()?;
+        #[cfg(test)]
+        tests::exit_at_staging_cleanup_boundary(tests::CleanupExitBoundary::AfterCommit);
+        Ok(())
     }
 
     fn iterator(&self) -> impl Iterator<Item = Result<ConsensusEntry, Box<dyn Error>>> + '_ {
@@ -472,6 +477,106 @@ impl ConsensusFactory for Factory {
 mod tests {
     use super::{ConsensusEntryType, MultiConsensusManagementStore, fs};
     use kaspa_database::{prelude::ConnBuilder, utils::get_kaspa_tempdir};
+    use std::{cell::Cell, path::Path, process::Command};
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub(super) enum CleanupExitBoundary {
+        BeforeCommit,
+        AfterCommit,
+    }
+
+    impl CleanupExitBoundary {
+        fn exit_code(self) -> i32 {
+            match self {
+                Self::BeforeCommit => 73,
+                Self::AfterCommit => 74,
+            }
+        }
+    }
+
+    thread_local! {
+        static EXIT_AT_STAGING_CLEANUP: Cell<Option<CleanupExitBoundary>> = const { Cell::new(None) };
+    }
+
+    pub(super) fn exit_at_staging_cleanup_boundary(boundary: CleanupExitBoundary) {
+        if EXIT_AT_STAGING_CLEANUP.get() == Some(boundary) {
+            std::process::exit(boundary.exit_code());
+        }
+    }
+
+    fn open_cleanup_store(root: &Path, create: bool) -> MultiConsensusManagementStore {
+        let db = ConnBuilder::default()
+            .with_db_path(root.join("management"))
+            .with_create_if_missing(create)
+            .with_files_limit(10)
+            .build()
+            .unwrap();
+        MultiConsensusManagementStore::new(db)
+    }
+
+    #[test]
+    fn staging_cleanup_recovers_after_process_exit() {
+        const CHILD_ROOT: &str = "KASCADE_STAGING_CLEANUP_CHILD_ROOT";
+        const CHILD_BOUNDARY: &str = "KASCADE_STAGING_CLEANUP_CHILD_BOUNDARY";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let boundary = match std::env::var(CHILD_BOUNDARY).as_deref() {
+                Ok("before-commit") => CleanupExitBoundary::BeforeCommit,
+                Ok("after-commit") => CleanupExitBoundary::AfterCommit,
+                _ => panic!("missing staging cleanup boundary"),
+            };
+            let root = Path::new(&root);
+            let mut store = open_cleanup_store(root, false);
+            EXIT_AT_STAGING_CLEANUP.set(Some(boundary));
+            store.cleanup_staging_consensus(root).unwrap();
+            panic!("staging cleanup never reached the requested process-exit boundary");
+        }
+
+        let temp = get_kaspa_tempdir();
+        let root = temp.path();
+        let mut store = open_cleanup_store(root, true);
+        let ConsensusEntryType::New(active) = store.active_consensus_entry().unwrap() else { panic!("expected a new active entry") };
+        let active_path = root.join(&active.directory_name);
+        let active_marker = active_path.join("active-marker");
+        fs::create_dir(&active_path).unwrap();
+        fs::write(&active_marker, b"active consensus").unwrap();
+        store.save_new_active_consensus(active.clone()).unwrap();
+
+        for (boundary, name) in
+            [(CleanupExitBoundary::BeforeCommit, "before-commit"), (CleanupExitBoundary::AfterCommit, "after-commit")]
+        {
+            let staging = store.new_staging_consensus_entry().unwrap();
+            let staging_path = root.join(&staging.directory_name);
+            fs::create_dir(&staging_path).unwrap();
+            fs::write(staging_path.join("incomplete-import"), b"incomplete").unwrap();
+            drop(store);
+
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "consensus::factory::tests::staging_cleanup_recovers_after_process_exit", "--nocapture"])
+                .env(CHILD_ROOT, root)
+                .env(CHILD_BOUNDARY, name)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(boundary.exit_code()), "worker did not exit at {name}");
+            assert!(!staging_path.exists(), "worker did not remove the staging directory");
+
+            store = open_cleanup_store(root, false);
+            let before_commit = boundary == CleanupExitBoundary::BeforeCommit;
+            let metadata = store.metadata.read().unwrap();
+            assert_eq!(metadata.current_consensus_key, Some(active.key));
+            assert_eq!(metadata.staging_consensus_key, before_commit.then_some(staging.key));
+            assert_eq!(store.entries.has(staging.key.into()).unwrap(), before_commit);
+
+            store.cleanup_staging_consensus(root).unwrap();
+            store.cleanup_staging_consensus(root).unwrap();
+            drop(store);
+
+            store = open_cleanup_store(root, false);
+            assert!(!store.entries.has(staging.key.into()).unwrap());
+            assert_eq!(store.metadata.read().unwrap().staging_consensus_key, None);
+            assert_eq!(store.active_consensus_dir_name().unwrap().as_deref(), Some(active.directory_name.as_str()));
+            assert_eq!(fs::read(&active_marker).unwrap(), b"active consensus");
+        }
+    }
 
     #[test]
     fn archival_node_flag_persists_after_reopen() {
