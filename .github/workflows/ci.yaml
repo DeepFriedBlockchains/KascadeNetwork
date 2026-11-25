@@ -166,6 +166,19 @@ jobs:
         if: github.head_ref == 'test/phase6-live-pruning-child-eligibility-20261123' || github.ref_name == 'test/phase6-live-pruning-child-eligibility-20261123'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::live_pruning_candidate_authenticates_selected_child_after_reorg)'
 
+      - name: Verify real process exits around nonzero pruning publication
+        if: github.head_ref == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.ref_name == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.head_ref == 'test/phase6-publication-retry-after-lost-ack-20261123' || github.ref_name == 'test/phase6-publication-retry-after-lost-ack-20261123'
+        run: |
+          set -o pipefail
+          cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview --success-output immediate -E 'test(=pipeline::virtual_processor::import_proof_readiness::tests::authority_integration_nonzero_publication_recovers_after_process_exit)' 2>&1 | tee nonzero-pruning-process-exit.log
+
+      - name: Preserve nonzero pruning process exit evidence
+        if: always() && (github.head_ref == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.ref_name == 'test/phase6-nonzero-guarded-publication-exit-20261123' || github.head_ref == 'test/phase6-publication-retry-after-lost-ack-20261123' || github.ref_name == 'test/phase6-publication-retry-after-lost-ack-20261123')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonzero-pruning-process-exit
+          path: nonzero-pruning-process-exit.log
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
@@ -200,6 +213,14 @@ jobs:
           github.head_ref == 'test/phase6-issuance-checkpoint-persistence-20261122' ||
           github.ref_name == 'test/phase6-issuance-checkpoint-persistence-20261122'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(issuance_checkpoint_)'
+
+      - name: Verify inactive issuance field codec and authenticated context
+        if: github.head_ref == 'feat/phase6-inactive-issuance-field-20261123' || github.ref_name == 'feat/phase6-inactive-issuance-field-20261123'
+        run: cargo nextest run -p kaspa-consensus-core --lib -E 'test(=issuance_checkpoint::tests::inactive_issuance_field_has_canonical_encoding) | test(=issuance_checkpoint::tests::inactive_issuance_field_rejects_context_and_equal_total_substitution)'
+
+      - name: Verify inactive issuance field against locally derived coinbase settlement
+        if: github.head_ref == 'test/phase6-inactive-field-verified-settlement-20261123' || github.ref_name == 'test/phase6-inactive-field-verified-settlement-20261123'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
 
       - name: Run cargo build with devnet-prealloc feature
         run: cargo build --features devnet-prealloc --workspace --all --tests --benches

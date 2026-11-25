@@ -22,6 +22,82 @@ pub struct IssuanceCheckpoint {
     pub deferred: u64,
 }
 
+/// Size of the proposed versioned issuance field. This codec is inactive:
+/// no transaction parser, block builder or validation rule uses it.
+pub const ISSUANCE_COMMITMENT_FIELD_SIZE: usize = 34;
+const ISSUANCE_COMMITMENT_VERSION: u16 = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IssuanceCommitmentField {
+    digest: Hash,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IssuanceFieldError {
+    WrongLength,
+    UnsupportedVersion,
+}
+
+impl IssuanceCommitmentField {
+    /// Construct from a locally verified checkpoint before placing it in a
+    /// proposal. The caller owns verification of the underlying settlement.
+    pub fn from_checkpoint(checkpoint: &IssuanceCheckpoint) -> Self {
+        Self { digest: checkpoint.commitment() }
+    }
+
+    pub fn encode(self) -> [u8; ISSUANCE_COMMITMENT_FIELD_SIZE] {
+        let mut field = [0; ISSUANCE_COMMITMENT_FIELD_SIZE];
+        field[..2].copy_from_slice(&ISSUANCE_COMMITMENT_VERSION.to_le_bytes());
+        field[2..].copy_from_slice(&self.digest.as_bytes());
+        field
+    }
+
+    /// Decode only the exact field, without scanning or advancing a payload.
+    /// Decoding establishes syntax. The caller authenticates the bytes and
+    /// establishes the selected parent through independently verified evidence.
+    pub fn decode(bytes: &[u8]) -> Result<Self, IssuanceFieldError> {
+        let field: &[u8; ISSUANCE_COMMITMENT_FIELD_SIZE] = bytes.try_into().map_err(|_| IssuanceFieldError::WrongLength)?;
+        if u16::from_le_bytes([field[0], field[1]]) != ISSUANCE_COMMITMENT_VERSION {
+            return Err(IssuanceFieldError::UnsupportedVersion);
+        }
+        let mut digest = [0; 32];
+        digest.copy_from_slice(&field[2..]);
+        Ok(Self { digest: Hash::from_bytes(digest) })
+    }
+
+    /// Compare a checkpoint against an independently authenticated field. The
+    /// expected parent must be the selected parent and the intended pruning
+    /// point. The caller validates ancestry and the historical settlement.
+    pub fn verify_checkpoint(
+        self,
+        network: Hash,
+        selected_parent: Hash,
+        supply_cap: u64,
+        checkpoint: &IssuanceCheckpoint,
+    ) -> Result<(), VerificationError> {
+        checkpoint.verify(network, selected_parent, supply_cap, self.digest)
+    }
+
+    /// Compare the field to a checkpoint derived entirely from a bounded,
+    /// locally verified settlement replay. The caller supplies the selected
+    /// path and consensus-validated reward and release records independently
+    /// of the block carrying this field. No import checkpoint enters here.
+    pub fn verify_local_settlement(
+        self,
+        network: Hash,
+        selected_parent: Hash,
+        supply_cap: u64,
+        selected_path: &[Hash],
+        claims: &[IssuanceClaim],
+        releases: &[DeveloperPayoutRelease],
+    ) -> Result<IssuanceCheckpoint, VerificationError> {
+        let local =
+            IssuanceCheckpoint::derive_from_settlements(network, selected_parent, supply_cap, selected_path, claims, releases)?;
+        self.verify_checkpoint(network, selected_parent, supply_cap, &local)?;
+        Ok(local)
+    }
+}
+
 /// One unique reward source attributed to the selected block that settles it.
 /// Paid amounts exclude recycled transaction fees and can include deferred
 /// issuance from an earlier settlement. All amounts are in atomic units.
@@ -148,14 +224,14 @@ impl IssuanceCheckpoint {
         claims: &[IssuanceClaim],
         releases: &[DeveloperPayoutRelease],
     ) -> Result<Self, VerificationError> {
-        if selected_path.last() != Some(&pruning_point) {
+        if selected_path.first() != Some(&network_id) || selected_path.last() != Some(&pruning_point) {
             return Err(VerificationError::WrongContext);
         }
         let mut ordered =
             claims.iter().map(SettlementEvent::Claim).chain(releases.iter().map(SettlementEvent::Release)).collect::<Vec<_>>();
         ordered.sort_unstable_by_key(|event| event.key());
-        let mut seen = HashSet::with_capacity(claims.len());
-        let mut last_release = None;
+        let mut reward_sources = HashSet::with_capacity(claims.len());
+        let mut release_blocks = HashSet::with_capacity(releases.len());
         let mut minted = 0u64;
         let mut paid = 0u64;
         for (position, event) in ordered.iter().copied().enumerate() {
@@ -170,7 +246,7 @@ impl IssuanceCheckpoint {
             }
             match event {
                 SettlementEvent::Claim(claim) => {
-                    if !seen.insert(claim.reward_source) {
+                    if !reward_sources.insert(claim.reward_source) {
                         return Err(VerificationError::DuplicateRewardSource);
                     }
                     minted = minted.checked_add(claim.minted).ok_or(VerificationError::AboveSupplyCap)?;
@@ -180,10 +256,9 @@ impl IssuanceCheckpoint {
                     paid = paid.checked_add(claim.paid).ok_or(VerificationError::UnbalancedSettlement)?;
                 }
                 SettlementEvent::Release(release) => {
-                    if last_release == Some(selected_index) {
+                    if !release_blocks.insert(release.settlement_block) {
                         return Err(VerificationError::DuplicateDeveloperRelease);
                     }
-                    last_release = Some(selected_index);
                     if release.amount == 0 || minted.checked_sub(paid).is_none_or(|balance| release.amount > balance) {
                         return Err(VerificationError::UnbalancedSettlement);
                     }
@@ -251,6 +326,115 @@ mod tests {
             paid: 180,
             deferred: 20,
         }
+    }
+
+    #[test]
+    fn inactive_issuance_field_has_canonical_encoding() {
+        let saved = checkpoint();
+        let field = IssuanceCommitmentField::from_checkpoint(&saved);
+        let mut wire = field.encode();
+        assert_eq!(&wire[..2], &[1, 0]);
+        assert_eq!(&wire[2..], &saved.commitment().as_bytes());
+        assert_eq!(IssuanceCommitmentField::decode(&wire), Ok(field));
+        assert_eq!(IssuanceCommitmentField::decode(&wire[..33]), Err(IssuanceFieldError::WrongLength));
+        assert_eq!(IssuanceCommitmentField::decode(&[0; 35]), Err(IssuanceFieldError::WrongLength));
+        wire[1] = 1;
+        assert_eq!(IssuanceCommitmentField::decode(&wire), Err(IssuanceFieldError::UnsupportedVersion));
+    }
+
+    #[test]
+    fn inactive_issuance_field_matches_independent_replay_vectors() {
+        let [genesis, parent, point, source_a, source_b, source_c] =
+            [0x11, 0x22, 0x33, 0xe1, 0xb2, 0xc3].map(|byte| Hash::from_bytes([byte; 32]));
+        let a = IssuanceClaim {
+            reward_source: source_a,
+            settlement_block: parent,
+            selected_index: 1,
+            minted: 500_123_456,
+            paid: 450_000_001,
+        };
+        let b = IssuanceClaim {
+            reward_source: source_b,
+            settlement_block: point,
+            selected_index: 2,
+            minted: 271_000_010,
+            paid: 250_000_003,
+        };
+        let c = IssuanceClaim {
+            reward_source: source_c,
+            settlement_block: point,
+            selected_index: 2,
+            minted: 409_000_000,
+            paid: 380_000_004,
+        };
+        let first = DeveloperPayoutRelease { settlement_block: parent, selected_index: 1, amount: 12_000_011 };
+        let second = DeveloperPayoutRelease { settlement_block: point, selected_index: 2, amount: 23_000_013 };
+        let path = [genesis, parent, point];
+
+        // Python hashlib.blake2b with 32-byte digests and the TransactionHash and MerkleBranchHash keys.
+        // The mixed tree's event order is a, first, b, c, second, with zero right siblings on the last branch.
+        let vectors = [
+            (&path[..1], &[][..], &[][..], "01004f9380a13eb22f4a9c29c39d6524b8bd3242f1e27ec9fcc45f81620b00447af2"),
+            (&path[..2], &[a], &[], "0100179b43b563d134af3162154297fe64ab596d5c95bc1be633a1b2ae8c654f71b3"),
+            (&path, &[c, b, a], &[second, first], "0100e88b423785a3fcf04ed7af6bea44967510de313ca9151419dc1e7dafc8ce2fdc"),
+        ];
+        for (selected_path, claims, releases, expected_hex) in vectors {
+            let point = *selected_path.last().unwrap();
+            let mut expected = [0; ISSUANCE_COMMITMENT_FIELD_SIZE];
+            faster_hex::hex_decode(expected_hex.as_bytes(), &mut expected).unwrap();
+
+            let replay = IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, selected_path, claims, releases).unwrap();
+            assert_eq!(IssuanceCommitmentField::from_checkpoint(&replay).encode(), expected);
+            assert_eq!(
+                IssuanceCommitmentField::decode(&expected).unwrap().verify_local_settlement(
+                    genesis,
+                    point,
+                    CAP,
+                    selected_path,
+                    claims,
+                    releases
+                ),
+                Ok(replay)
+            );
+        }
+    }
+
+    #[test]
+    fn replay_derivation_binds_both_path_endpoints() {
+        let [genesis, point, other] = [1, 2, 3].map(Hash::from_u64_word);
+        let claim = IssuanceClaim { reward_source: genesis, settlement_block: point, selected_index: 1, minted: 100, paid: 90 };
+        let release = DeveloperPayoutRelease { settlement_block: point, selected_index: 1, amount: 10 };
+        let derive_claims = |path: &[Hash]| IssuanceCheckpoint::derive_from_claims(genesis, point, CAP, path, &[claim]);
+        let derive_settlements =
+            |path: &[Hash]| IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, path, &[claim], &[release]);
+        for path in [&[][..], &[point], &[other, point], &[genesis, other]] {
+            assert_eq!(derive_claims(path), Err(VerificationError::WrongContext));
+            assert_eq!(derive_settlements(path), Err(VerificationError::WrongContext));
+        }
+        let path = [genesis, point];
+        assert_eq!(derive_claims(&path).unwrap().deferred, 10);
+        assert_eq!(derive_settlements(&path).unwrap().deferred, 0);
+    }
+
+    #[test]
+    fn inactive_issuance_field_rejects_context_and_equal_total_substitution() {
+        let saved = checkpoint();
+        let wire = IssuanceCommitmentField::from_checkpoint(&saved).encode();
+        let field = IssuanceCommitmentField::decode(&wire).unwrap();
+        assert_eq!(field.verify_checkpoint(saved.network_id, saved.pruning_point, CAP, &saved), Ok(()));
+        assert_eq!(
+            field.verify_checkpoint(Hash::from_u64_word(7), saved.pruning_point, CAP, &saved),
+            Err(VerificationError::WrongContext)
+        );
+        assert_eq!(
+            field.verify_checkpoint(saved.network_id, Hash::from_u64_word(7), CAP, &saved),
+            Err(VerificationError::WrongContext)
+        );
+        let substituted = IssuanceCheckpoint { ordered_claims_root: Hash::from_u64_word(7), ..saved };
+        assert_eq!(
+            field.verify_checkpoint(saved.network_id, saved.pruning_point, CAP, &substituted),
+            Err(VerificationError::CommitmentMismatch)
+        );
     }
 
     #[test]
@@ -355,5 +539,43 @@ mod tests {
         assert_eq!(restore(&[early, late]), Err(VerificationError::OffSelectedPath));
         let replacement = restore(&[early, DeveloperPayoutRelease { settlement_block: sibling, ..late }]).unwrap();
         assert_eq!(replacement.verify(genesis, sibling, CAP, checkpoint.commitment()), Err(VerificationError::CommitmentMismatch));
+    }
+
+    #[test]
+    fn rejects_developer_releases_repeated_at_distinct_indexes() {
+        let [genesis, first, second, point, source] = [1, 2, 3, 4, 5].map(Hash::from_u64_word);
+        let claim = IssuanceClaim { reward_source: source, settlement_block: first, selected_index: 1, minted: 100, paid: 60 };
+        let release = DeveloperPayoutRelease { settlement_block: first, selected_index: 1, amount: 20 };
+        let next = DeveloperPayoutRelease { settlement_block: second, selected_index: 2, amount: 20 };
+        let derive = |path: &[Hash], releases: &[DeveloperPayoutRelease]| {
+            IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, path, &[claim], releases)
+        };
+        let checkpoint = derive(&[genesis, first, second, point], &[next, release]).unwrap();
+        assert_eq!((checkpoint.claim_count, checkpoint.minted, checkpoint.paid, checkpoint.deferred), (1, 100, 100, 0));
+
+        let repeated = DeveloperPayoutRelease { selected_index: 3, ..release };
+        assert_eq!(
+            derive(&[genesis, first, second, first, point], &[repeated, release]),
+            Err(VerificationError::DuplicateDeveloperRelease)
+        );
+    }
+
+    #[test]
+    fn rejects_releases_funded_only_by_later_selected_settlement() {
+        let [genesis, parent, point, source] = [1, 2, 3, 4].map(Hash::from_u64_word);
+        let path = [genesis, parent, point];
+        let claim = IssuanceClaim { reward_source: source, settlement_block: point, selected_index: 2, minted: 100, paid: 60 };
+        let early = DeveloperPayoutRelease { settlement_block: parent, selected_index: 1, amount: 40 };
+        let on_accrual = DeveloperPayoutRelease { settlement_block: point, selected_index: 2, ..early };
+        let derive = |release| IssuanceCheckpoint::derive_from_settlements(genesis, point, CAP, &path, &[claim], &[release]);
+
+        assert_eq!(derive(early), Err(VerificationError::UnbalancedSettlement));
+        let local = derive(on_accrual).unwrap();
+        let field = IssuanceCommitmentField::from_checkpoint(&local);
+        assert_eq!(
+            field.verify_local_settlement(genesis, point, CAP, &path, &[claim], &[early]),
+            Err(VerificationError::UnbalancedSettlement)
+        );
+        assert_eq!(field.verify_local_settlement(genesis, point, CAP, &path, &[claim], &[on_accrual]), Ok(local));
     }
 }
