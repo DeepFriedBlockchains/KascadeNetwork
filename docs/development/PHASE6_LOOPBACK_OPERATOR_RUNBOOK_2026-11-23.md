@@ -64,7 +64,7 @@ python3 scripts/phase6-loopback-launch.py --daemon "$KASPAD" \
   --directory ./phase6-native-loopback
 ```
 
-The launcher uses the loopback ports above, writes separate data and log paths, and reuses them when started again. Ctrl-C stops all three daemons. Add `--check` to stop after the listeners are reachable and check graceful shutdown. Use the RPC queries above to verify peer connectivity and selected state after startup.
+The launcher waits for node A's loopback P2P listener before starting B and C as outbound-only followers. All three nodes expose the loopback gRPC ports above. The launcher writes separate data and log paths and reuses them when started again. Ctrl-C stops all three daemons. Add `--check` to stop after the listeners are reachable and check graceful shutdown. Use the RPC queries above to verify peer connectivity and selected state after startup.
 
 Create one absolute-path override file visible to all three processes:
 

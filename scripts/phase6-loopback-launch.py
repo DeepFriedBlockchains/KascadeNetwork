@@ -9,11 +9,12 @@ from pathlib import Path
 import signal
 import socket
 import subprocess
-import threading
 import time
 
 
-NODES = {"a": (19111, 19110), "b": (19211, 19210), "c": (19311, 19310)}
+LOOPBACK = "127.0.0.1"
+SEED_PORT = 19111
+RPC_PORTS = {"a": 19110, "b": 19210, "c": 19310}
 PARAMS = '{"skip_proof_of_work":false,"shielded_coinbase":false}\n'
 
 
@@ -26,35 +27,31 @@ def pin_file(path, content):
             raise ValueError(f"{path} differs from the launcher configuration")
 
 
-def listen_addresses():
-    return (("127.0.0.1", port) for ports in NODES.values() for port in ports)
-
-
 def ports_available():
-    for address in listen_addresses():
+    for port in (SEED_PORT, *RPC_PORTS.values()):
         try:
             with socket.socket() as listener:
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                listener.bind(address)
+                listener.bind((LOOPBACK, port))
         except OSError as error:
-            raise OSError(f"loopback port {address[1]} is unavailable: {error}") from error
+            raise OSError(f"loopback port {port} is unavailable: {error}") from error
 
 
-def wait_for_listeners(processes, stop, timeout):
-    pending = set(listen_addresses())
-    limit = time.monotonic() + timeout
-    while pending and not stop.is_set():
+def wait_for_listeners(processes, ports, should_stop, deadline):
+    pending = set(ports)
+    while pending and not should_stop():
         check_processes(processes)
-        for address in tuple(pending):
+        for port in tuple(pending):
             try:
-                with socket.create_connection(address, timeout=0.15):
-                    pending.remove(address)
+                with socket.create_connection((LOOPBACK, port), timeout=0.15):
+                    pending.remove(port)
             except OSError:
                 pass
-        if pending and time.monotonic() >= limit:
-            raise TimeoutError(f"listeners did not start on ports {sorted(port for _, port in pending)}")
-        stop.wait(0.1)
-    return not stop.is_set()
+        if pending:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"listeners did not start on ports {sorted(pending)}")
+            time.sleep(0.1)
+    return not should_stop()
 
 
 def check_processes(processes):
@@ -76,7 +73,7 @@ def stop_processes(processes):
     return all(process.returncode == 0 for process in processes.values())
 
 
-def launch(args, stop):
+def launch(args, should_stop):
     root = args.directory.resolve()
     root.mkdir(parents=True, exist_ok=True)
     with (root / ".launcher.lock").open("a") as lock:
@@ -89,8 +86,11 @@ def launch(args, stop):
         daemon = args.daemon.resolve(strict=True)
         env = {key: value for key, value in os.environ.items() if not key.startswith("KASPAD_")}
         processes = {}
+        deadline = time.monotonic() + args.timeout
         try:
-            for name, (p2p, rpc) in NODES.items():
+            for name, rpc in RPC_PORTS.items():
+                if should_stop():
+                    break
                 data = root / f"node-{name}"
                 if data.is_symlink():
                     raise ValueError(f"expected a separate directory at {data}")
@@ -100,19 +100,25 @@ def launch(args, stop):
                     f"--configfile={config}",
                     f"--appdir={data}",
                     f"--override-params-file={params}",
-                    f"--listen=127.0.0.1:{p2p}",
-                    f"--rpclisten=127.0.0.1:{rpc}",
+                    f"--rpclisten={LOOPBACK}:{rpc}",
                     "--nodnsseed",
                     "--disable-upnp",
                 ]
-                invocation += ["--outpeers=0", "--enable-unsynced-mining"] if name == "a" else ["--connect=127.0.0.1:19111"]
+                if name == "a":
+                    invocation += [f"--listen={LOOPBACK}:{SEED_PORT}", "--outpeers=0", "--enable-unsynced-mining"]
+                else:
+                    invocation.append(f"--connect={LOOPBACK}:{SEED_PORT}")
                 with (root / f"node-{name}.log").open("ab") as log:
                     processes[name] = subprocess.Popen(invocation, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
-            if wait_for_listeners(processes, stop, args.timeout):
+                # The permanent peers back off after a failed first connection.
+                if name == "a" and not wait_for_listeners(processes, (SEED_PORT,), should_stop, deadline):
+                    break
+            if wait_for_listeners(processes, RPC_PORTS.values(), should_stop, deadline):
                 check_processes(processes)
-                print(json.dumps({"status": "listeners_ready", "rpc_ports": {name: rpc for name, (_, rpc) in NODES.items()}}), flush=True)
+                print(json.dumps({"status": "listeners_ready", "rpc_ports": RPC_PORTS}), flush=True)
                 if not args.check:
-                    while not stop.wait(0.5):
+                    while not should_stop():
+                        time.sleep(0.5)
                         check_processes(processes)
         finally:
             stopped = stop_processes(processes)
@@ -130,11 +136,16 @@ def main():
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error("--timeout must be greater than 0 and at most 300 seconds")
-    stop = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    stop_requested = False
+
+    def request_stop(*_):
+        nonlocal stop_requested
+        stop_requested = True
+
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
     try:
-        launch(args, stop)
+        launch(args, lambda: stop_requested)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
 

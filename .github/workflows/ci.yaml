@@ -242,6 +242,10 @@ jobs:
             healthy=false
             for sample in {1..20}; do
               kill -0 "$launcher_pid"
+              if ! grep -q '"status": "listeners_ready"' "$run_dir/launcher-$attempt.log"; then
+                sleep 1
+                continue
+              fi
               if target/debug/phase6-loopback-health --minimum-peers 1 --timeout-ms 2000 \
                 127.0.0.1:19110 127.0.0.1:19210 127.0.0.1:19310 >"$health"; then
                 healthy=true
@@ -249,7 +253,11 @@ jobs:
               fi
               sleep 1
             done
-            [[ "$healthy" == true ]]
+            if [[ "$healthy" != true ]]; then
+              cat "$run_dir/launcher-$attempt.log"
+              if [[ -f "$health" ]]; then cat "$health"; fi
+              exit 1
+            fi
             python3 - "$health" <<'PY'
           import json
           import sys
@@ -262,6 +270,7 @@ jobs:
             kill -INT "$launcher_pid"
             wait "$launcher_pid"
             launcher_pid=
+            grep -q '"status": "stopped"' "$run_dir/launcher-$attempt.log"
           done
 
       - name: Upload loopback launcher logs
