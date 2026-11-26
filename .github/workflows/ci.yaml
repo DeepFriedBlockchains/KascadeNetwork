@@ -225,6 +225,65 @@ jobs:
           path: ${{ runner.temp }}/phase6-live-peer-reconnect
           if-no-files-found: error
 
+      - name: Start, sample and reopen three daemons with the loopback launcher
+        if: github.head_ref == 'ops/phase6-loopback-launcher-20261125' || github.ref_name == 'ops/phase6-loopback-launcher-20261125'
+        timeout-minutes: 30
+        run: |
+          cargo build --locked -p kaspad -p kaspa-grpc-simple-client-example
+          run_dir="$RUNNER_TEMP/phase6-loopback-launch"
+          mkdir -p "$run_dir"
+          launcher_pid=
+          trap 'if [[ -n "$launcher_pid" ]]; then kill -INT "$launcher_pid" || true; wait "$launcher_pid" || true; fi' EXIT
+          for attempt in 1 2; do
+            python3 scripts/phase6-loopback-launch.py --daemon target/debug/kaspad \
+              --directory "$run_dir" >"$run_dir/launcher-$attempt.log" 2>&1 &
+            launcher_pid=$!
+            health="$run_dir/health-$attempt.json"
+            healthy=false
+            for sample in {1..20}; do
+              kill -0 "$launcher_pid"
+              if ! grep -q '"status": "listeners_ready"' "$run_dir/launcher-$attempt.log"; then
+                sleep 1
+                continue
+              fi
+              if target/debug/phase6-loopback-health --minimum-peers 1 --timeout-ms 2000 \
+                127.0.0.1:19110 127.0.0.1:19210 127.0.0.1:19310 >"$health"; then
+                healthy=true
+                break
+              fi
+              sleep 1
+            done
+            if [[ "$healthy" != true ]]; then
+              cat "$run_dir/launcher-$attempt.log"
+              if [[ -f "$health" ]]; then cat "$health"; fi
+              exit 1
+            fi
+            python3 - "$health" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as stream:
+              observation = json.load(stream)
+          assert observation["healthy"] and observation["converged"], observation
+          assert [node["state"]["connected_peers"] for node in observation["nodes"]] == [2, 1, 1], observation
+          PY
+            kill -INT "$launcher_pid"
+            wait "$launcher_pid"
+            launcher_pid=
+            grep -q '"status": "stopped"' "$run_dir/launcher-$attempt.log"
+          done
+
+      - name: Upload loopback launcher logs
+        if: always() && (github.head_ref == 'ops/phase6-loopback-launcher-20261125' || github.ref_name == 'ops/phase6-loopback-launcher-20261125')
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-loopback-launcher
+          path: |
+            ${{ runner.temp }}/phase6-loopback-launch/node-*.log
+            ${{ runner.temp }}/phase6-loopback-launch/launcher-*.log
+            ${{ runner.temp }}/phase6-loopback-launch/health-*.json
+            ${{ runner.temp }}/phase6-loopback-launch/native-pow.json
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
