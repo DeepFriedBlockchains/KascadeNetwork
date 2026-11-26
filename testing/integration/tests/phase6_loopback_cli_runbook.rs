@@ -6,10 +6,12 @@ use kaspa_grpc_client::GrpcClient;
 use kaspa_hashes::Hash;
 use kaspa_pow::State;
 use kaspa_rpc_core::{
-    GetBlockDagInfoResponse, SubmitBlockRejectReason, SubmitBlockReport, api::rpc::RpcApi, notify::mode::NotificationMode,
+    GetBlockDagInfoResponse, RpcPeerAddress, SubmitBlockRejectReason, SubmitBlockReport, api::rpc::RpcApi,
+    notify::mode::NotificationMode,
 };
 use std::{
     fs::File,
+    net::SocketAddr,
     path::Path,
     process::{Child, Command},
     sync::Arc,
@@ -62,6 +64,33 @@ impl Node {
             command.arg(format!("--override-params-file={}", params.display()));
             command.args(["--perf-metrics", "--perf-metrics-interval-sec=1"]);
         }
+        Self::spawn(command, logs, label)
+    }
+
+    fn start_discovery(
+        binary: &Path,
+        data_root: &Path,
+        logs: &Path,
+        index: u16,
+        label: &str,
+        bootstrap: Option<SocketAddr>,
+        outbound_target: usize,
+    ) -> Self {
+        let base_port = 19_000 + index * 100;
+        let mut command = Command::new(binary);
+        command
+            .args(["--simnet", "--nodnsseed", "--disable-upnp"])
+            .arg(format!("--appdir={}", data_root.join(format!("node-{index}")).display()))
+            .arg(format!("--listen=10.203.0.{}:{}", 10 + index, base_port + 11))
+            .arg(format!("--rpclisten=127.0.0.1:{}", base_port + 10))
+            .arg(format!("--outpeers={outbound_target}"));
+        if let Some(bootstrap) = bootstrap {
+            command.arg(format!("--addpeer={bootstrap}"));
+        }
+        Self::spawn(command, logs, label)
+    }
+
+    fn spawn(mut command: Command, logs: &Path, label: &str) -> Self {
         let log = File::create(logs.join(format!("{label}.log"))).unwrap();
         command.stdout(log.try_clone().unwrap()).stderr(log);
         eprintln!("starting {label}: {command:?}");
@@ -148,6 +177,65 @@ async fn expect_tip(client: &GrpcClient, tip: Hash) -> GetBlockDagInfoResponse {
     })
     .await
     .unwrap_or_else(|_| panic!("selected DAG tip did not converge: expected {tip}, last observed (tip, block count) {last_seen:?}"))
+}
+
+async fn expect_known_peer(client: &GrpcClient, address: RpcPeerAddress) {
+    timeout(Duration::from_secs(15), async {
+        loop {
+            if client.get_peer_addresses().await.unwrap().known_addresses.contains(&address) {
+                return;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("address book did not learn {address}"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the isolated private-peer Linux network namespace and built kaspad"]
+async fn phase6_private_peer_discovery() {
+    let namespace = std::env::var_os("KASCADE_CLI_DISCOVERY_NAMESPACE").expect("start via the private discovery namespace script");
+    assert_eq!(std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(), namespace);
+    let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
+    let log_dir = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
+    let (binary, logs) = (Path::new(&binary), Path::new(&log_dir));
+    let data = tempfile::tempdir().unwrap();
+    let (hub, advertised) = ("10.203.0.11:19111".parse::<SocketAddr>().unwrap(), "10.203.0.12:19211".parse::<SocketAddr>().unwrap());
+
+    let mut b = Node::start_discovery(binary, data.path(), logs, 2, "b", None, 0);
+    let b_rpc = connect(19210).await;
+    let mut a = Node::start_discovery(binary, data.path(), logs, 1, "a", Some(advertised), 0);
+    let a_rpc = connect(19110).await;
+    expect_known_peer(&a_rpc, advertised.into()).await;
+
+    // A is the only bootstrap input to C and C starts with no saved address book.
+    assert!(!data.path().join("node-3").exists());
+    let mut c = Node::start_discovery(binary, data.path(), logs, 3, "c-discovery", Some(hub), 2);
+    let c_rpc = connect(19310).await;
+    expect_known_peer(&c_rpc, advertised.into()).await;
+    timeout(Duration::from_secs(75), async {
+        loop {
+            let peers = c_rpc.get_connected_peer_info().await.unwrap().peer_info;
+            if [hub, advertised].into_iter().all(|address| peers.iter().any(|peer| peer.is_outbound && peer.address == address.into()))
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("C did not connect outbound to both its sole bootstrap and the discovered peer");
+
+    for client in [&a_rpc, &b_rpc, &c_rpc] {
+        assert_eq!(client.get_current_network().await.unwrap(), NetworkType::Simnet);
+        assert_eq!(expect_tip(client, SIMNET_GENESIS.hash).await.pruning_point_hash, SIMNET_GENESIS.hash);
+        client.disconnect().await.unwrap();
+    }
+    c.stop().await;
+    a.stop().await;
+    b.stop().await;
+    eprintln!("phase6_private_discovery: C learned {advertised} through {hub} and handshook outbound with both in Simnet");
 }
 
 async fn submit_block(client: &GrpcClient) -> Hash {
