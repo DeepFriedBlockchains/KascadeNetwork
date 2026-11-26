@@ -14,6 +14,7 @@ MANIFEST = "provenance.json"
 SCENARIO_FILES = {
     "recovery": ("recovery.json", "a-real-pow.log", "b-real-pow.log", "c-real-pow.log", "c-real-pow-reopen.log"),
     "reconnect": ("peer-recovery.json", "a-reconnect.log", "b-reconnect.log", "c-reconnect.log", "c-reconnect-reopen.log"),
+    "sustained": ("sustained.json", "blocks.jsonl", "a-sustained.log", "b-sustained.log", "c-sustained.log", "c-sustained-reopen.log"),
 }
 
 

@@ -225,6 +225,64 @@ jobs:
           path: ${{ runner.temp }}/phase6-live-peer-reconnect
           if-no-files-found: error
 
+      - name: Exercise paced native-PoW relay and follower restart
+        if: github.head_ref == 'test/phase6-sustained-native-20261125' || github.ref_name == 'test/phase6-sustained-native-20261125'
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-sustained-native"
+          mkdir -p "$KASCADE_CLI_LOGS"
+          cargo build --locked -p kaspad
+          cargo nextest run --locked -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --test-threads=1 --success-output immediate -E 'test(=phase6_loopback_cli_sustained_native_pow)' 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          folder = Path(os.environ["KASCADE_CLI_LOGS"])
+          summary = json.loads((folder / "sustained.json").read_text())
+          plain_log = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", (folder / "driver.log").read_text())
+
+          def write_rows(prefix, name):
+              rows = [json.loads(line.removeprefix(prefix)) for line in map(str.lstrip, plain_log.splitlines())
+                      if line.startswith(prefix)]
+              (folder / name).write_text("".join(json.dumps(row) + "\n" for row in rows))
+              return rows
+
+          blocks = write_rows("phase6_native_paced_block,", "blocks.jsonl")
+          metrics = write_rows("phase6_node_metrics,", "metrics.jsonl")
+          counts = {"connected": 61, "offline": 10, "rejoined": 5}
+          assert len(blocks) == summary["accepted_blocks"] == sum(counts.values())
+          assert len({row["tip"] for row in blocks}) == len(blocks)
+          for phase, count in counts.items():
+              rows = [row for row in blocks if row["phase"] == phase]
+              assert [row["sequence"] for row in rows] == list(range(1, count + 1))
+              elapsed = [row["accepted_since_phase_start_ms"] for row in rows]
+              assert elapsed[0] == 0
+              assert all(later - earlier >= 1000 for earlier, later in zip(elapsed, elapsed[1:]))
+          assert summary["connected_first_to_last_accept_ms"] >= 60000
+          assert 0 < summary["connected_observed_bps"] <= 1
+          assert summary["missed_blocks"] == counts["offline"]
+          assert 0 <= summary["reopen_to_rpc_ready_ms"] <= summary["reopen_to_tip_convergence_ms"]
+          assert summary["final_tip"] == blocks[-1]["tip"]
+          expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
+          expected.add(("c", "before_stop"))
+          assert len(metrics) == len(expected)
+          assert {(row["node"], row["stage"]) for row in metrics} == expected
+          assert all(row["rss_bytes"] > 0 and row["cpu_usage"] >= 0 for row in metrics)
+          PY
+          python3 scripts/phase6-native-pow-evidence.py record "$KASCADE_CLI_LOGS" \
+            --scenario sustained --binary "$KASCADE_CLI_KASPAD"
+
+      - name: Upload paced native-PoW and follower restart evidence
+        if: always() && (github.head_ref == 'test/phase6-sustained-native-20261125' || github.ref_name == 'test/phase6-sustained-native-20261125')
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-sustained-native-pow
+          path: ${{ runner.temp }}/phase6-sustained-native
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
