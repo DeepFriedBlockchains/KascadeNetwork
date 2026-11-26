@@ -1442,13 +1442,13 @@ async fn submit_ibd_fixture_lanes(rpc: &GrpcClient, miner: &Address, maturity: u
 }
 
 #[cfg(feature = "phase6-staging-preview")]
-async fn split_mature_pruning_fixture_reward(rpc: &GrpcClient, miner: &Address, maturity: u64) -> RpcTransactionId {
+async fn split_pruning_fixture_reward(
+    rpc: &GrpcClient,
+    miner: &Address,
+    outpoint: TransactionOutpoint,
+    entry: UtxoEntry,
+) -> RpcTransactionId {
     const OUTPUTS: u64 = 24;
-    let (outpoint, entry) = fetch_spendable_utxos(rpc, miner.clone(), maturity)
-        .await
-        .into_iter()
-        .find(|(_, entry)| entry.is_coinbase)
-        .expect("multi-page pruning fixture requires a mature coinbase output");
     let value = (entry.amount - fee::calc_for_plain_standard_tx(1, OUTPUTS)) / OUTPUTS;
     let output = TransactionOutput { value, script_public_key: pay_to_address_script(miner), covenant: None };
     let transaction = Transaction::new(
@@ -1750,6 +1750,8 @@ async fn run_payload_ibd_at(
         _ => 80,
     };
     let initial_blocks = coinbase_maturity as usize + pruning_depth as usize + blocks_before_pruning;
+    #[cfg(feature = "phase6-staging-preview")]
+    let mut split_sources = Vec::new();
     for mined in 0..if recovering { 0 } else { initial_blocks } {
         #[cfg(feature = "phase6-staging-preview")]
         if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) && mined == 230 {
@@ -1762,10 +1764,20 @@ async fn run_payload_ibd_at(
         #[cfg(not(feature = "phase6-staging-preview"))]
         let _ = mined;
         #[cfg(feature = "phase6-staging-preview")]
-        let split_id = if fixture == IbdPayloadFixture::MultiPagePruning && (60..108).contains(&mined) {
-            Some(split_mature_pruning_fixture_reward(&rpc_client1, &miner_address, coinbase_maturity).await)
-        } else {
-            None
+        if fixture == IbdPayloadFixture::MultiPagePruning && mined == 81 {
+            // Use distinct mature rewards between the lane refresh blocks at 80 and 130.
+            split_sources = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity)
+                .await
+                .into_iter()
+                .filter(|(_, entry)| entry.is_coinbase)
+                .take(48)
+                .collect();
+            assert_eq!(split_sources.len(), 48);
+        }
+        #[cfg(feature = "phase6-staging-preview")]
+        let split_id = match split_sources.pop() {
+            Some((outpoint, entry)) => Some(split_pruning_fixture_reward(&rpc_client1, &miner_address, outpoint, entry).await),
+            None => None,
         };
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
         #[cfg(feature = "phase6-staging-preview")]
