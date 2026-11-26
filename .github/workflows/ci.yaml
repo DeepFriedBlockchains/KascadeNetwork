@@ -124,6 +124,10 @@ jobs:
         if: github.head_ref == 'feat/phase6-coinbase-settlement-checkpoint-20261123' || github.ref_name == 'feat/phase6-coinbase-settlement-checkpoint-20261123'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=processes::coinbase::tests::reconciles_coinbase_settlement_checkpoint_with_red_fees_and_deferred_payout)'
 
+      - name: Verify signed transparent fee and durable issuance settlement
+        if: github.head_ref == 'test/phase6-signed-fee-settlement-20261125' || github.ref_name == 'test/phase6-signed-fee-settlement-20261125'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::signed_fee_settlement_tests::signed_transparent_fee_is_recycled_without_increasing_issuance)'
+
       - name: Verify selected developer release commitments and coinbase settlement
         if: github.head_ref == 'feat/phase6-issuance-developer-release-20261123' || github.ref_name == 'feat/phase6-issuance-developer-release-20261123'
         run: >-
