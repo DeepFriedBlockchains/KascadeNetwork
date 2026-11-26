@@ -170,6 +170,13 @@ jobs:
         if: github.head_ref == 'fix/phase6-atomic-staging-cleanup-20261125' || github.ref_name == 'fix/phase6-atomic-staging-cleanup-20261125'
         run: cargo nextest run -p kaspa-consensus --lib --features phase6-staging-preview -E 'test(=consensus::factory::tests::staging_cleanup_reopens_from_legacy_partial_cleanup)'
 
+      - name: Verify the interrupted multi-page pruning transfer and durable recovery
+        if: github.head_ref == 'test/phase6-multipage-pruning-fanout-20261125' || github.ref_name == 'test/phase6-multipage-pruning-fanout-20261125'
+        run: >-
+          cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview
+          --success-output immediate
+          -E 'test(=daemon_integration_tests::authority_integration_preview_retries_multi_page_pruning_utxos)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
