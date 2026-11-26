@@ -13,6 +13,16 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 25 operational validation
+
+| Gate | Exact evidence and remaining scope |
+| --- | --- |
+| Combined settlement, restart, partitions, reorganization and readiness | [#82 45707467797](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45707467797) passed 8/8 on head `406535f2` with 43 authority and 1,614 workspace tests. |
+| Actual management cleanup process termination | [#84 45707670756](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45707670756) passed 8/8 on `ca6e7c3f`. The same RocksDB was reopened after the two asserted process exits, with consistent staging and preserved active state. Live reorganization and readiness remain separate named checks. |
+| Signed transactions at a configured rate | [#83 45707623704](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45707623704) passed 8/8. Eight measured simulated-PoW blocks, 16 included signed spends, three agreeing nodes, and 4.99344 submitted BPS across seven intervals in the [recorded artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45707623704/artifacts/15067398989). |
+| Operational launcher and health | [#85 45707905412](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45707905412) passed 8/8. The replacement [#87 run 45755694915](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45755694915) must still verify launcher peer topology and persistent restart with real daemon processes. |
+| Sustained native operation | In progress. The next real-process workload must record a paced mining interval, offline follower gap, same-directory reopen and exact post-restart convergence. The short native partition and simulated throughput evidence cover their own scopes. |
+
 ## November 25 cross-stack and operational evidence
 
 | Gate | Evidence and scope |
