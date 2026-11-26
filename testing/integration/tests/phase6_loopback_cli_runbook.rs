@@ -19,7 +19,7 @@ use tokio::{
     io::copy_bidirectional,
     net::{TcpListener, TcpStream},
     task::JoinSet,
-    time::{Instant, sleep, timeout},
+    time::{Instant, sleep, sleep_until, timeout},
 };
 
 #[derive(Clone, Copy, Default)]
@@ -376,6 +376,143 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     c.stop().await;
     b.stop().await;
     a.stop().await;
+}
+
+const SUSTAINED_INTERVAL: Duration = Duration::from_secs(1);
+const SUSTAINED_CONNECTED_BLOCKS: u32 = 61;
+const SUSTAINED_OFFLINE_BLOCKS: u32 = 10;
+const SUSTAINED_REJOINED_BLOCKS: u32 = 5;
+
+async fn mine_paced_native_blocks(
+    leader: &GrpcClient,
+    followers: &[&GrpcClient],
+    phase: &str,
+    count: u32,
+    mut tip: Hash,
+) -> (Hash, Duration, Duration) {
+    let mut next_start = Instant::now();
+    let mut accepted = next_start;
+    let mut first_accepted = accepted;
+    let mut max_tip_wait = Duration::ZERO;
+    for sequence in 1..=count {
+        sleep_until(next_start).await;
+        let block = timeout(Duration::from_secs(15), submit_real_pow_block(leader, false))
+            .await
+            .unwrap_or_else(|_| panic!("{phase} block {sequence} could not be mined and submitted within 15 seconds"));
+        assert_ne!(tip, block);
+        tip = block;
+        accepted = Instant::now();
+        next_start = accepted + SUSTAINED_INTERVAL;
+        if sequence == 1 {
+            first_accepted = accepted;
+        }
+        for client in std::iter::once(leader).chain(followers.iter().copied()) {
+            expect_tip(client, tip).await;
+        }
+        let tip_wait = accepted.elapsed();
+        max_tip_wait = max_tip_wait.max(tip_wait);
+        let observation = serde_json::json!({
+            "phase": phase,
+            "sequence": sequence,
+            "tip": tip.to_string(),
+            "accepted_since_phase_start_ms": accepted.duration_since(first_accepted).as_millis(),
+            "all_expected_nodes_selected_ms": tip_wait.as_millis(),
+        });
+        eprintln!("phase6_native_paced_block,{observation}");
+    }
+    (tip, accepted.duration_since(first_accepted), max_tip_wait)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires a built kaspad binary and isolated Linux runner"]
+async fn phase6_loopback_cli_sustained_native_pow() {
+    let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
+    let binary = Path::new(&binary);
+    let logs = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
+    let logs = Path::new(&logs);
+    let data = tempfile::tempdir().unwrap();
+    let params = logs.join("native-pow-params.json");
+    std::fs::write(&params, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
+    let options = NodeOptions { params: Some(&params), ..Default::default() };
+
+    let mut a = Node::start(binary, data.path(), logs, 1, "a-sustained", true, options);
+    let a_rpc = connect(19110).await;
+    let mut b = Node::start(binary, data.path(), logs, 2, "b-sustained", false, options);
+    let b_rpc = connect(19210).await;
+    let mut c = Node::start(binary, data.path(), logs, 3, "c-sustained", false, options);
+    let c_rpc = connect(19310).await;
+    expect_peers(&a_rpc, 2).await;
+    let genesis = expect_tip(&a_rpc, SIMNET_GENESIS.hash).await;
+    for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
+        assert_eq!(client.get_current_network().await.unwrap(), NetworkType::Simnet);
+        let dag = expect_tip(client, SIMNET_GENESIS.hash).await;
+        assert_eq!(dag.block_count, genesis.block_count);
+        assert_eq!(dag.pruning_point_hash, SIMNET_GENESIS.hash);
+        assert_eq!(dag.virtual_daa_score, genesis.virtual_daa_score);
+        record_node_metrics(client, name, "genesis").await;
+    }
+
+    let (connected_tip, connected_span, connected_max_wait) =
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", SUSTAINED_CONNECTED_BLOCKS, SIMNET_GENESIS.hash).await;
+    let before = expect_tip(&c_rpc, connected_tip).await;
+    assert_eq!(before.block_count, genesis.block_count + u64::from(SUSTAINED_CONNECTED_BLOCKS));
+    record_node_metrics(&c_rpc, "c", "before_stop").await;
+    c_rpc.disconnect().await.unwrap();
+    c.stop().await;
+    expect_peers(&a_rpc, 1).await;
+
+    let offline_started = Instant::now();
+    let (offline_tip, offline_span, _) =
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc], "offline", SUSTAINED_OFFLINE_BLOCKS, connected_tip).await;
+    let offline_duration = offline_started.elapsed();
+    let reopen_started = Instant::now();
+    let mut c = Node::start(binary, data.path(), logs, 3, "c-sustained-reopen", false, options);
+    let c_rpc = connect(19310).await;
+    let reopen_rpc_ready = reopen_started.elapsed();
+    expect_peers(&a_rpc, 2).await;
+    expect_peers(&c_rpc, 1).await;
+    let recovered = expect_tip(&c_rpc, offline_tip).await;
+    let reopen_converged = reopen_started.elapsed();
+    assert_eq!(recovered.block_count - before.block_count, u64::from(SUSTAINED_OFFLINE_BLOCKS));
+
+    let (tip, rejoined_span, _) =
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "rejoined", SUSTAINED_REJOINED_BLOCKS, offline_tip).await;
+    let authority = expect_tip(&a_rpc, tip).await;
+    let accepted_total = u64::from(SUSTAINED_CONNECTED_BLOCKS + SUSTAINED_OFFLINE_BLOCKS + SUSTAINED_REJOINED_BLOCKS);
+    assert_eq!(authority.block_count - genesis.block_count, accepted_total);
+    for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
+        let dag = expect_tip(client, tip).await;
+        assert_eq!(dag.block_count, authority.block_count);
+        assert_eq!(dag.pruning_point_hash, authority.pruning_point_hash);
+        assert_eq!(dag.virtual_daa_score, authority.virtual_daa_score);
+        record_node_metrics(client, name, "converged").await;
+        client.disconnect().await.unwrap();
+    }
+    c.stop().await;
+    b.stop().await;
+    a.stop().await;
+
+    let result = serde_json::json!({
+        "target_submission_interval_ms": SUSTAINED_INTERVAL.as_millis(),
+        "accepted_blocks": accepted_total,
+        "connected_blocks": SUSTAINED_CONNECTED_BLOCKS,
+        "connected_first_to_last_accept_ms": connected_span.as_millis(),
+        "connected_observed_bps": f64::from(SUSTAINED_CONNECTED_BLOCKS - 1) / connected_span.as_secs_f64(),
+        "connected_max_all_expected_nodes_selected_ms": connected_max_wait.as_millis(),
+        "missed_blocks": recovered.block_count - before.block_count,
+        "offline_first_to_last_accept_ms": offline_span.as_millis(),
+        "offline_workload_ms": offline_duration.as_millis(),
+        "reopen_to_rpc_ready_ms": reopen_rpc_ready.as_millis(),
+        "reopen_to_tip_convergence_ms": reopen_converged.as_millis(),
+        "rejoined_blocks": SUSTAINED_REJOINED_BLOCKS,
+        "rejoined_first_to_last_accept_ms": rejoined_span.as_millis(),
+        "final_tip": tip.to_string(),
+        "final_block_count": authority.block_count,
+        "final_pruning_point": authority.pruning_point_hash.to_string(),
+        "final_virtual_daa_score": authority.virtual_daa_score,
+    });
+    std::fs::write(logs.join("sustained.json"), serde_json::to_string_pretty(&result).unwrap()).unwrap();
+    eprintln!("phase6_native_sustained,{result}");
 }
 
 async fn forward_peer(listener: Arc<TcpListener>) -> std::io::Result<()> {

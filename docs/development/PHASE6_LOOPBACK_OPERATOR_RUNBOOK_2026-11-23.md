@@ -80,3 +80,15 @@ Pass `--binary "$KASPAD"` to compare a retained binary against the recorded SHA-
 ## First native-PoW evidence
 
 On source `13dc263c9883b858ca30173d5087f954bc46b58d`, the focused native-PoW test passed in 4.878 seconds. All three processes accepted the expected 12-block DAG, rejected the invalid nonce, left the DAG unchanged on a duplicate submit, and shut down cleanly. C recovered six blocks in 312 ms from process reopen, with RPC ready after 310 ms. The raw artifact was uploaded. The matrix's metrics validator failed because Nextest appended an ANSI reset to the final JSON line, and early process metrics included zero RSS before the sampler's first observation. The follow-up strips terminal control sequences before JSON validation and waits up to ten seconds for each process sample. [Run](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379) · [Raw artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45143950379/artifacts/14803614244)
+
+## Paced native-PoW run with follower catch-up
+
+Use the same built daemon, isolated ports and environment variables as the recovery run. Select the paced case:
+
+```bash
+cargo nextest run --locked -p kaspa-testing-integration --test phase6_loopback_cli_runbook \
+  --run-ignored all --test-threads=1 --success-output immediate \
+  -E 'test(=phase6_loopback_cli_sustained_native_pow)'
+```
+
+The driver waits at least one second between accepted blocks. It requires all three daemons to select 61 consecutive native-PoW blocks, stops C for 10 blocks, reopens C on its original directory and verifies catch-up, then checks five further blocks on all three peers. The summary reports observed selected-block cadence measured from the first to the last acceptance in the connected phase, RPC and catch-up latency, and final tip, block count, pruning point and virtual DAA. Actions retain raw logs, individual block observations, per-node resource metrics and the pinned provenance manifest. The one-block-per-second submission pace leaves the Simnet network configuration at its defaults. Higher-rate representative transaction load and sustained retarget coverage remain separate gates.
