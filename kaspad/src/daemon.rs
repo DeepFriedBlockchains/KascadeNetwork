@@ -31,7 +31,7 @@ use kaspa_consensus::{
 };
 use kaspa_consensus::{
     consensus::factory::{Factory as ConsensusFactory, LATEST_DB_VERSION},
-    params::{OverrideParams, Params},
+    params::{ForkActivation, OverrideParams, Params},
     pipeline::ProcessingCounters,
 };
 use kaspa_consensusmanager::ConsensusManager;
@@ -116,17 +116,31 @@ pub fn validate_args(args: &Args) -> ConfigResult<()> {
     Ok(())
 }
 
-fn validate_override_params(params: &Params) -> Result<(), &'static str> {
+fn validate_override_params(params: &Params) -> Result<(), (&'static str, &'static str)> {
+    const PRE_TARGET: &str = "pre_crescendo_target_time_per_block";
+    const POST_TARGET: &str = "blockrate.target_time_per_block";
+    const WHOLE_BPS: &str = "must produce at least one whole block per second for subsidy accounting (at most 1000 ms per block)";
+
     let required_nonzero = [
-        ("pre_crescendo_target_time_per_block", params.pre_crescendo_target_time_per_block),
-        ("blockrate.target_time_per_block", params.target_time_per_block()),
+        (PRE_TARGET, params.pre_crescendo_target_time_per_block),
+        (POST_TARGET, params.target_time_per_block()),
         ("blockrate.difficulty_sample_rate", params.difficulty_sample_rate()),
         ("blockrate.past_median_time_sample_rate", params.past_median_time_sample_rate()),
     ];
     for (field, value) in required_nonzero {
         if value == 0 {
-            return Err(field);
+            return Err((field, "must be greater than zero"));
         }
+    }
+
+    // Subsidy construction uses the fork-adjusted whole BPS values. Both raw times must
+    // be nonzero for bps_history(), but an unused phase does not need its own subsidy rate.
+    let history = params.bps_history();
+    if history.activation() != ForkActivation::always() && history.before() == 0 {
+        return Err((PRE_TARGET, WHOLE_BPS));
+    }
+    if history.activation() != ForkActivation::never() && history.after() == 0 {
+        return Err((POST_TARGET, WHOLE_BPS));
     }
     Ok(())
 }
@@ -331,8 +345,8 @@ pub fn create_core_with_runtime(runtime: &Runtime, args: &Args, fd_total_budget:
                     exit(1);
                 });
                 let params = params.override_params(override_params);
-                if let Err(field) = validate_override_params(&params) {
-                    println!("Invalid override params file '{}': {field} must be greater than zero", path);
+                if let Err((field, reason)) = validate_override_params(&params) {
+                    println!("Invalid override params file '{}': {field} {reason}", path);
                     exit(1);
                 }
                 params
@@ -942,7 +956,7 @@ Do you confirm? (y/n)";
 
 #[cfg(test)]
 mod tests {
-    use super::{OverrideParams, Params, validate_override_params};
+    use super::{ForkActivation, OverrideParams, Params, validate_override_params};
     use kaspa_consensus_core::{config::params::BlockrateParams, network::NetworkType};
 
     #[test]
@@ -961,14 +975,45 @@ mod tests {
         let defaults = Params::from(NetworkType::Simnet);
         let overrides = serde_json::from_str(r#"{"pre_crescendo_target_time_per_block":0}"#).unwrap();
         let effective_params = defaults.clone().override_params(overrides);
-        assert_eq!(validate_override_params(&effective_params), Err("pre_crescendo_target_time_per_block"));
+        assert_eq!(
+            validate_override_params(&effective_params),
+            Err(("pre_crescendo_target_time_per_block", "must be greater than zero"))
+        );
 
         for field in ["target_time_per_block", "difficulty_sample_rate", "past_median_time_sample_rate"] {
             let mut blockrate = serde_json::to_value(BlockrateParams::new::<5>()).unwrap();
             blockrate[field] = 0.into();
             let overrides = serde_json::from_value(serde_json::json!({ "blockrate": blockrate })).unwrap();
             let effective_params = defaults.clone().override_params(overrides);
-            assert_eq!(validate_override_params(&effective_params).unwrap_err(), format!("blockrate.{field}"));
+            let (rejected_field, reason) = validate_override_params(&effective_params).unwrap_err();
+            assert_eq!(rejected_field, format!("blockrate.{field}"));
+            assert_eq!(reason, "must be greater than zero");
         }
+    }
+
+    #[test]
+    fn override_preflight_requires_whole_bps_in_effective_subsidy_phases() {
+        let mut params = Params::from(NetworkType::Simnet);
+        params.crescendo_activation = ForkActivation::new(100);
+        params.pre_crescendo_target_time_per_block = 1000;
+        params.blockrate.target_time_per_block = 1000;
+        assert_eq!(validate_override_params(&params), Ok(()));
+
+        params.pre_crescendo_target_time_per_block = 1001;
+        let (field, reason) = validate_override_params(&params).unwrap_err();
+        assert_eq!(field, "pre_crescendo_target_time_per_block");
+        assert!(reason.contains("at least one whole block per second"));
+        params.crescendo_activation = ForkActivation::always();
+        assert_eq!(validate_override_params(&params), Ok(()));
+
+        params.pre_crescendo_target_time_per_block = 1000;
+        params.blockrate.target_time_per_block = 1001;
+        assert_eq!(validate_override_params(&params).unwrap_err().0, "blockrate.target_time_per_block");
+        params.crescendo_activation = ForkActivation::new(100);
+        assert_eq!(validate_override_params(&params).unwrap_err().0, "blockrate.target_time_per_block");
+        params.crescendo_activation = ForkActivation::never();
+        assert_eq!(validate_override_params(&params), Ok(()));
+        params.pre_crescendo_target_time_per_block = 1001;
+        assert_eq!(validate_override_params(&params).unwrap_err().0, "pre_crescendo_target_time_per_block");
     }
 }

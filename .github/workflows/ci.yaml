@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Check effective operator subsidy timing preflight
+        if: github.head_ref == 'fix/phase6-operator-whole-bps-preflight-20261125' || github.ref_name == 'fix/phase6-operator-whole-bps-preflight-20261125'
+        run: cargo nextest run -p kaspad --lib -E 'test(=daemon::tests::override_preflight_requires_whole_bps_in_effective_subsidy_phases)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
