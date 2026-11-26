@@ -20,6 +20,7 @@ use kaspa_consensus_core::{
 use kaspa_database::prelude::{ConnBuilder, DeferredDbBatch};
 use kaspa_hashes::Hash;
 use kaspa_txscript::pay_to_address_script;
+use std::sync::Arc;
 
 async fn append_selected_block(
     consensus: &TestConsensus,
@@ -98,11 +99,13 @@ async fn signed_transparent_fee_is_recycled_without_increasing_issuance() {
         0,
         vec![],
     );
-    let mut signed = sign(MutableTransaction::with_entries(unsigned, vec![entry]), key);
-    consensus.validate_mempool_transaction(&mut signed, &TransactionValidationArgs::default()).unwrap();
-    assert_eq!(signed.calculated_fee, Some(FEE));
-    let spend_id = signed.tx.id();
-    let (source, before_fee) = append_selected_block(&consensus, &miner, &mut path, vec![signed.tx]).await;
+    let signed = sign(MutableTransaction::with_entries(unsigned, vec![entry]), key).tx;
+    let mut mempool_spend = MutableTransaction::from_tx(signed);
+    consensus.validate_mempool_transaction(&mut mempool_spend, &TransactionValidationArgs::default()).unwrap();
+    assert_eq!(mempool_spend.calculated_fee, Some(FEE));
+    let spend_id = mempool_spend.id();
+    let (source, before_fee) =
+        append_selected_block(&consensus, &miner, &mut path, vec![Arc::unwrap_or_clone(mempool_spend.tx)]).await;
     claims.extend(before_fee.claims);
     let previous = IssuanceCheckpoint::derive_from_claims(genesis, source.hash(), CAP, &path, &claims).unwrap();
 
