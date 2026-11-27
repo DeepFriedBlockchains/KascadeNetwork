@@ -226,9 +226,15 @@ jobs:
           if-no-files-found: error
 
       - name: Exercise paced native-PoW relay and follower restart
-        if: github.head_ref == 'test/phase6-sustained-native-20261125' || github.ref_name == 'test/phase6-sustained-native-20261125'
-        timeout-minutes: 45
+        if: >-
+          github.head_ref == 'test/phase6-sustained-native-20261125' ||
+          github.ref_name == 'test/phase6-sustained-native-20261125' ||
+          github.head_ref == 'test/phase6-native-1000-block-20261127' ||
+          github.ref_name == 'test/phase6-native-1000-block-20261127'
+        timeout-minutes: 65
         shell: bash
+        env:
+          KASCADE_CLI_CONNECTED_BLOCKS: ${{ (github.head_ref == 'test/phase6-native-1000-block-20261127' || github.ref_name == 'test/phase6-native-1000-block-20261127') && '1000' || '61' }}
         run: |
           export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
           export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-sustained-native"
@@ -253,7 +259,8 @@ jobs:
 
           blocks = write_rows("phase6_native_paced_block,", "blocks.jsonl")
           metrics = write_rows("phase6_node_metrics,", "metrics.jsonl")
-          counts = {"connected": 61, "offline": 10, "rejoined": 5}
+          counts = {"connected": int(os.environ["KASCADE_CLI_CONNECTED_BLOCKS"]), "offline": 10, "rejoined": 5}
+          assert summary["connected_blocks"] == counts["connected"]
           assert len(blocks) == summary["accepted_blocks"] == sum(counts.values())
           assert len({row["tip"] for row in blocks}) == len(blocks)
           for phase, count in counts.items():
@@ -262,22 +269,33 @@ jobs:
               elapsed = [row["accepted_since_phase_start_ms"] for row in rows]
               assert elapsed[0] == 0
               assert all(later - earlier >= 1000 for earlier, later in zip(elapsed, elapsed[1:]))
-          assert summary["connected_first_to_last_accept_ms"] >= 60000
+              assert all(row["mine_and_submit_ms"] >= 0 and row["leader_rpc_difficulty"] is not None for row in rows)
+          assert summary["connected_first_to_last_accept_ms"] >= (counts["connected"] - 1) * 1000
           assert 0 < summary["connected_observed_bps"] <= 1
           assert summary["missed_blocks"] == counts["offline"]
           assert 0 <= summary["reopen_to_rpc_ready_ms"] <= summary["reopen_to_tip_convergence_ms"]
           assert summary["final_tip"] == blocks[-1]["tip"]
           expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
           expected.add(("c", "before_stop"))
+          expected.update((node, f"connected-{block}") for node in "abc" for block in range(100, counts["connected"] + 1, 100))
           assert len(metrics) == len(expected)
           assert {(row["node"], row["stage"]) for row in metrics} == expected
           assert all(row["rss_bytes"] > 0 and row["cpu_usage"] >= 0 for row in metrics)
+          data_sizes = summary["node_data_logical_bytes"]
+          assert set(data_sizes) == {"genesis_running", "final_running", "final_stopped"}
+          assert all(set(sizes) == set("abc") and all(size > 0 for size in sizes.values()) for sizes in data_sizes.values())
           PY
           python3 scripts/phase6-native-pow-evidence.py record "$KASCADE_CLI_LOGS" \
             --scenario sustained --binary "$KASCADE_CLI_KASPAD"
 
       - name: Upload paced native-PoW and follower restart evidence
-        if: always() && (github.head_ref == 'test/phase6-sustained-native-20261125' || github.ref_name == 'test/phase6-sustained-native-20261125')
+        if: >-
+          always() && (
+            github.head_ref == 'test/phase6-sustained-native-20261125' ||
+            github.ref_name == 'test/phase6-sustained-native-20261125' ||
+            github.head_ref == 'test/phase6-native-1000-block-20261127' ||
+            github.ref_name == 'test/phase6-native-1000-block-20261127'
+          )
         uses: actions/upload-artifact@v4
         with:
           name: phase6-sustained-native-pow
