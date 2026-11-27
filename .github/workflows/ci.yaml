@@ -130,6 +130,10 @@ jobs:
           github.head_ref == 'validation/phase6-settlement-pruning-integration-20261127' || github.ref_name == 'validation/phase6-settlement-pruning-integration-20261127'
         run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::signed_fee_settlement_tests::signed_transparent_fee_is_recycled_without_increasing_issuance)'
 
+      - name: Verify locally attributed issuance replay after a signed spend fork
+        if: github.head_ref == 'test/phase6-live-attributed-issuance-replay-20261127' || github.ref_name == 'test/phase6-live-attributed-issuance-replay-20261127'
+        run: cargo nextest run -p kaspa-consensus --lib -E 'test(=consensus::signed_fee_settlement_tests::locally_attributed_issuance_replay_replaces_a_selected_spend_fork)'
+
       - name: Verify selected developer release commitments and coinbase settlement
         if: github.head_ref == 'feat/phase6-issuance-developer-release-20261123' || github.ref_name == 'feat/phase6-issuance-developer-release-20261123'
         run: >-
