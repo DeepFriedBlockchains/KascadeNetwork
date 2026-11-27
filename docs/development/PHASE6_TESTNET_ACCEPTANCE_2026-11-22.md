@@ -13,6 +13,17 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 27 acceptance evidence
+
+| Gate | Result and scope |
+| --- | --- |
+| Three-node operator startup and restart | [#87, 45755694915](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45755694915), 8/8. Both starts sustained exact 2/1/1 peer topology at common genesis and clean shutdown. [#93](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/93) will exercise persistent non-genesis operator state and the bundled miner. |
+| Isolated peer discovery | [#92, 45756304425](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45756304425), 8/8. Actual private address exchange and two independent outbound handshakes proved through a sole explicit seed. Discovered peer reconnection and an approved multi-host profile remain separate. |
+| Paced native operation and catch-up | [#90, 45755839747](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45755839747), 8/8. 76 actual native blocks, 0.99305 connected BPS, max observed all-node selection delay 107 ms, and exact follower convergence 313 ms after reopening with a 10-block gap. The 5 BPS and longer representative workload gates are open. |
+| Signed fee settlement and persistence | [#86, 45755786331](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45755786331), 8/8. The named case validated fee recycling, conserved issuance and reopened RocksDB. Full multi-node native transaction lifecycle remains open. |
+| Authenticated multi-page pruning | [#91, 45756192380](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45756192380), 8/8. Focused case passed in 15.624 s with interruption, closure, retry and live reorganization. Actual process termination during the same multi-page workload remains a separate case. |
+| Composite operations and settlement | [#88, 45755686377](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45755686377), 8/8 with 1,617 workspace tests. [#94, 45972050245](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/45972050245) is the composite pending native/CI gate for #86/#89/#91. |
+
 ## November 25 operational validation
 
 | Gate | Exact evidence and remaining scope |
