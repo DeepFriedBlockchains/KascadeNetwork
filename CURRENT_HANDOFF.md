@@ -2,6 +2,26 @@
 
 Updated November 27, 2026.
 
+## November 27 native 200 ms measurement and current work
+
+[Draft #100](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/100) at `4444072038702e2214425624537d6ad523001bad` passed its focused real-native run in 28.02 s. The [archive](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073116603/artifacts/15234218055) matched GitHub SHA-256 `37a85f6491cea6aafe02cc79751a0d77e4ae56f78cd8fe0a539f12be8ae251e4`; nine manifest files verified at checkout `0d19e63045e201073f4ef5771c41a72e13e58353`.
+
+Three processes accepted 115 native blocks, including 100 connected, 10 offline and five after rejoining. Connected throughput was **4.972084 BPS** over 99 acceptance intervals in 19.911 s. Difficulty remained constant at 1.0000001192093038. Mine-and-submit took a median 5 ms and at most 12 ms. Mining-start gaps averaged 201.18 ms with a 200 ms minimum, explaining the small rate gap for this runner and workload. Maximum RPC-observed all-node selection time was 107 ms, which includes polling. The restarted follower reached RPC in 308 ms and exact tip convergence in 311 ms. Final stopped logical file sizes were 720,964 / 715,501 / 673,528 bytes. This run leaves longer saturation, retarget, mixed traffic, and representative network links open. The full matrix was 7/8 with native still running when recorded.
+
+| Work | Exact checkpoint |
+| --- | --- |
+| #98 native signed settlement | `8111a6753ccf0a469f2b74d5973b82a92efa4494`, [46073361121](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073361121) running. Local focused pass recorded below. |
+| #99 read-only profile inspector | `481e6a5b8354760a02fc89c637b7c7efe592e9c2`, [46073076619](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073076619), focused CLI pass, full matrix 7/8 at this checkpoint. |
+| #101 local attributed replay | `c92ca69b09f9adb72e37240b27bee4c9e6f3e37d`, [46073210355](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073210355), named focused pass, full matrix 7/8. |
+| #102 combined pruning crash | `1e908d275d4114ff17540aff624ddf9ad7b1367e`, [46073308597](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073308597), named focused pass, full matrix 7/8. |
+| #103 idle relay | Corrected lint-only head `d55cb6632837d41e6ef2c652a15f883303a2e98c`, [46075946419](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46075946419) running. Removed the now-unused queue helpers and retained FIFO, duplicate filtering, empty and reenqueue coverage. The queue test passed locally. |
+| [#104 TOML profile overrides](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/104) | `639cdccc3ec3d1c353b3861c5704e90f487ca01d`, [46076116187](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46076116187) pending. Honors the file-declared override while retaining explicit CLI precedence. |
+| [#105 1,000-block 200 ms run](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/105) | `efbbdc68248336756cf90d172ed08c9c911cd7c6`. Uses the same consensus settings and restarts with a ten-block gap after 1,000 connected native blocks. No long-run result yet. |
+
+Two combined trees are staged locally with all named checks preserved. Native signed relay is `1d81cfbd055fb63858a20d84d03d8afb2710013b` on `validation/phase6-native-signed-relay-combined-20261127`; publish when #98 and corrected #103 are green. Attributed replay and abrupt pruning are `2118a3a66e297f75a481a68b1b63ba1b698e0dfd` on `validation/phase6-attributed-replay-crash-20261127`; publish when #101/#102 are green.
+
+**Owner decisions.** Keep the verified 200 ms Simnet as the engineering baseline. For private qualification, recommend a separate KASCADE identity/domain, deterministic recorded genesis with explicit initial allocation, reviewed address prefixes and ports, and explicit private bootstrap peers. An inherited profile is faster for staging but leaves isolation and wallet/miner compatibility ambiguous. The dedicated profile needs a bilateral cross-network rejection check plus a signed configuration and genesis derivation record before use. Exact identifiers, genesis and bootstrap addresses still require approval. For fresh pruned receivers, the existing selected-parent v1 coinbase-carrier design is the lower-compatibility-impact starting point. Full genesis replay gives transition assurance at bootstrap storage cost. An independently verified, owner-approved migration anchor preserves the pruning benefit but needs authenticated historical uniqueness and liability state plus verified successor transitions. A header carrier changes mining and serialization, so reserve it for a justified proof-size requirement. No activation or monetary change is scheduled. See [profile audit](docs/development/PHASE6_TESTNET_PROFILE_AUDIT_2026-11-22.md) and [issuance design](docs/development/PHASE6_FRESH_RECEIVER_ISSUANCE_DESIGN_2026-11-23.md).
+
 ## November 27 sustained native and operational continuation
 
 | Draft | Exact head | Verified evidence |

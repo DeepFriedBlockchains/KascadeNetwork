@@ -13,6 +13,14 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 27 native 200 ms acceptance evidence
+
+| Gate | Measured scope |
+| --- | --- |
+| Three-process native 200 ms pacing | [#100 artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46073116603/artifacts/15234218055) verified. 4.972084 connected BPS, 100 connected and 115 total native blocks, exact convergence in 311 ms after same-directory restart and ten missed blocks. Difficulty constant. [#105](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/105) extends this workload to 1,000 connected blocks. |
+| Near-target overhead | Mean mining-start spacing 201.18 ms, mine-and-submit at most 12 ms, and max RPC-observed all-node tip delay 107 ms. Only representative linked-host and mixed workloads can qualify deployment headroom. |
+| Read-only profile inspection | #99 named real CLI test passed. [#104](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/104) adds the TOML precedence regression. The network profile decision remains open. |
+
 ## November 27 sustained operation and recovery results
 
 | Gate | Scope and evidence |
