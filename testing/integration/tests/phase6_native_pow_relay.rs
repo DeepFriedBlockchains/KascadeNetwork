@@ -126,6 +126,7 @@ async fn settled_output(
 async fn phase6_native_signed_fee_settles_and_reopens_across_peers() {
     kaspa_alloc::init_allocator_with_default_settings();
     const MATURITY: u64 = 2;
+    const WARMUP_INTERVAL: Duration = Duration::from_secs(1);
     let temp = tempfile::tempdir().unwrap();
     let params = temp.path().join("native-signed-fee.json");
     let mut blockrate = SIMNET_PARAMS.blockrate.clone();
@@ -176,6 +177,14 @@ async fn phase6_native_signed_fee_settles_and_reopens_across_peers() {
         for client in clients {
             wait_for_sink(client, tip).await;
         }
+        // Keep the fixture's native warmup on the same one-second cadence as the
+        // sustained relay rehearsal. After the last tip, let the preceding block's
+        // mempool bookkeeping finish and its 500 ms announcement interval elapse
+        // before submitting the only transaction in this otherwise idle fixture.
+        tokio::time::sleep(WARMUP_INTERVAL).await;
+    }
+    for client in clients {
+        assert!(client.get_server_info().await.unwrap().is_synced, "transaction relay requires a recent sink");
     }
 
     let (input, entry) = tokio::time::timeout(Duration::from_secs(10), async {
@@ -194,7 +203,7 @@ async fn phase6_native_signed_fee_settles_and_reopens_across_peers() {
     let conflict = signed_spend(input, entry, &destination, key, fee_amount + 1);
     assert_ne!(signed.id(), conflict.id());
     assert_eq!(second_client.submit_transaction((&signed).into(), false).await.unwrap(), signed.id());
-    for client in clients {
+    for (node, client) in ["miner", "submitter", "follower"].into_iter().zip(clients) {
         let mempool = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 if let Ok(tx) = client.get_mempool_entry(signed.id(), false, false).await {
@@ -204,7 +213,7 @@ async fn phase6_native_signed_fee_settles_and_reopens_across_peers() {
             }
         })
         .await
-        .expect("peer did not receive the signed spend");
+        .unwrap_or_else(|_| panic!("{node} did not receive signed spend {}", signed.id()));
         assert!(!mempool.is_orphan);
         assert_eq!(mempool.fee, fee_amount);
         assert_eq!(Transaction::try_from(mempool.transaction).unwrap().id(), signed.id());
