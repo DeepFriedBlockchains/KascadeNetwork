@@ -216,6 +216,15 @@ jobs:
           --success-output immediate
           -E 'test(=daemon_integration_tests::authority_integration_preview_retries_multi_page_pruning_utxos)'
 
+      - name: Recover after process exit during multi-page pruning transfer
+        if: >-
+          github.head_ref == 'test/phase6-multipage-pruning-process-exit-20261127' || github.ref_name == 'test/phase6-multipage-pruning-process-exit-20261127' ||
+          github.head_ref == 'validation/phase6-multipage-crash-combined-20261127' || github.ref_name == 'validation/phase6-multipage-crash-combined-20261127'
+        run: >-
+          cargo nextest run -p kaspa-testing-integration --lib --features phase6-staging-preview
+          --success-output immediate
+          -E 'test(=daemon_integration_tests::authority_integration_preview_recovers_abrupt_multi_page_pruning_utxos)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
