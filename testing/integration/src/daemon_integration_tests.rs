@@ -1373,6 +1373,12 @@ async fn authority_integration_preview_recovers_abrupt_utxo_payload() {
 
 #[cfg(all(feature = "phase6-staging-preview", unix))]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_recovers_abrupt_multi_page_pruning_utxos() {
+    run_abrupt_payload_import("multi-page-utxo", IbdPayloadFixture::MultiPagePruning).await;
+}
+
+#[cfg(all(feature = "phase6-staging-preview", unix))]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn phase6_payload_crash_worker() {
     let Ok(root) = std::env::var("KASCADE_PHASE6_CRASH_ROOT") else { return };
     let component = std::env::var("KASCADE_PHASE6_CRASH_COMPONENT").unwrap();
@@ -1380,6 +1386,7 @@ async fn phase6_payload_crash_worker() {
         "smt" => (kaspa_consensus_core::api::StagingImportComponent::Smt, IbdPayloadFixture::Transparent),
         "shielded" => (kaspa_consensus_core::api::StagingImportComponent::Shielded, IbdPayloadFixture::SpentNullifiers),
         "utxo" => (kaspa_consensus_core::api::StagingImportComponent::Utxo, IbdPayloadFixture::Transparent),
+        "multi-page-utxo" => (kaspa_consensus_core::api::StagingImportComponent::Utxo, IbdPayloadFixture::MultiPagePruning),
         _ => panic!("unknown crash component"),
     };
     run_payload_ibd_at(true, Some(component), false, fixture, Some((root.into(), true))).await;
@@ -1412,6 +1419,7 @@ async fn run_abrupt_payload_import(component: &str, fixture: IbdPayloadFixture) 
     child.start_kill().unwrap();
     let status = child.wait().await.unwrap();
     assert_eq!(status.signal(), Some(9), "test must kill the process without graceful cleanup");
+    eprintln!("Killed the {component} worker after its durable receiver-write checkpoint");
     run_payload_ibd_at(true, None, false, fixture, Some((root.path().to_path_buf(), false))).await;
 }
 
@@ -1873,6 +1881,13 @@ async fn run_payload_ibd_at(
             let rows = evidence.pruning_utxos.len();
             assert!(rows > 1_000, "fixture must span multiple pruning UTXO wire pages, found {rows} rows");
             kaspa_core::info!("Multi-page pruning recovery fixture captured {rows} committed UTXOs");
+            if let Some((root, false)) = &persistent {
+                assert_eq!(
+                    std::fs::read_to_string(root.join("payload-written")).unwrap(),
+                    target_pruning_point.to_string(),
+                    "exporter moved to another pruning point after process exit"
+                );
+            }
         }
         Some(evidence)
     } else {
@@ -1887,11 +1902,7 @@ async fn run_payload_ibd_at(
             let service = daemon.core.find(ConsensusManager::IDENT).unwrap();
             let manager = Arc::downcast::<ConsensusManager>(service.into_any_arc()).unwrap();
             assert!(!manager.is_staging_import_pending(), "restart resurrected a worker reservation");
-            let active = manager.consensus();
-            let session = active.unguarded_session_blocking();
-            assert_eq!(session.pruning_point(), SIMNET_GENESIS.hash, "restart promoted incomplete staging evidence");
-            assert!(!session.supports_verified_staging_import(), "active reopen acquired staging authority");
-            assert!(!session.has_verified_staging_promotion().unwrap(), "restart accepted an unauthenticated promotion");
+            assert_pruning_recovery_receiver_is_unpromoted(&manager);
         }
         daemon
     } else {
@@ -2051,7 +2062,9 @@ async fn run_payload_ibd_at(
         if let Some((root, true)) = &persistent {
             // The parent kills this process while its real writer/continuation
             // is paused. No daemon shutdown or RocksDB close runs in the child.
-            std::fs::write(root.join("payload-written"), b"receiver-write-committed").unwrap();
+            let checkpoint = root.join("payload-writing");
+            std::fs::write(&checkpoint, target_pruning_point.to_string()).unwrap();
+            std::fs::rename(checkpoint, root.join("payload-written")).unwrap();
             std::future::pending::<()>().await;
             unreachable!();
         }
