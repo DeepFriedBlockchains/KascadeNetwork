@@ -1305,6 +1305,13 @@ async fn authority_integration_preview_retries_written_pruning_utxos_before_live
 
 #[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn authority_integration_preview_retries_multi_page_pruning_utxos() {
+    run_payload_ibd(true, Some(kaspa_consensus_core::api::StagingImportComponent::Utxo), true, IbdPayloadFixture::MultiPagePruning)
+        .await;
+}
+
+#[cfg(feature = "phase6-staging-preview")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_recovers_descendants_after_header_sync() {
     run_payload_ibd(true, None, false, IbdPayloadFixture::DescendantRecovery).await;
 }
@@ -1435,6 +1442,32 @@ async fn submit_ibd_fixture_lanes(rpc: &GrpcClient, miner: &Address, maturity: u
 }
 
 #[cfg(feature = "phase6-staging-preview")]
+async fn split_pruning_fixture_reward(
+    rpc: &GrpcClient,
+    miner: &Address,
+    outpoint: TransactionOutpoint,
+    entry: UtxoEntry,
+) -> RpcTransactionId {
+    const OUTPUTS: u64 = 24;
+    let value = (entry.amount - fee::calc_for_plain_standard_tx(1, OUTPUTS)) / OUTPUTS;
+    let output = TransactionOutput { value, script_public_key: pay_to_address_script(miner), covenant: None };
+    let transaction = Transaction::new(
+        TX_VERSION_TOCCATA,
+        vec![TransactionInput::new(outpoint, vec![], 0, 1)],
+        vec![output; OUTPUTS as usize],
+        0,
+        SUBNETWORK_ID_NATIVE,
+        0,
+        vec![],
+    );
+    let key = secp256k1::Keypair::from_seckey_slice(secp256k1::SECP256K1, &[9u8; 32]).unwrap();
+    let signed = sign(MutableTransaction::with_entries(transaction, vec![entry]), key);
+    let id = signed.tx.id();
+    rpc.submit_transaction((&signed.tx).into(), false).await.unwrap();
+    id
+}
+
+#[cfg(feature = "phase6-staging-preview")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn authority_integration_preview_rejects_tampered_nullifier_payload() {
     run_payload_ibd(true, None, false, IbdPayloadFixture::TamperedNullifiers).await;
@@ -1456,6 +1489,8 @@ enum IbdPayloadFixture {
     DescendantRecovery,
     #[cfg(feature = "phase6-staging-preview")]
     PruningEvidenceReopen,
+    #[cfg(feature = "phase6-staging-preview")]
+    MultiPagePruning,
 }
 
 impl IbdPayloadFixture {
@@ -1463,9 +1498,14 @@ impl IbdPayloadFixture {
         match self {
             Self::Transparent => true,
             #[cfg(feature = "phase6-staging-preview")]
-            Self::PruningEvidenceReopen => true,
+            Self::PruningEvidenceReopen | Self::MultiPagePruning => true,
             _ => false,
         }
+    }
+
+    #[cfg(feature = "phase6-staging-preview")]
+    fn compares_pruning_evidence(self) -> bool {
+        matches!(self, Self::PruningEvidenceReopen | Self::MultiPagePruning)
     }
 }
 
@@ -1670,11 +1710,7 @@ async fn run_payload_ibd_at(
     };
 
     #[cfg(feature = "phase6-staging-preview")]
-    let args = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
-        Args { outbound_target: 0, disable_dns_seeding: true, ..args }
-    } else {
-        args
-    };
+    let args = if fixture.compares_pruning_evidence() { Args { outbound_target: 0, disable_dns_seeding: true, ..args } } else { args };
 
     let total_fd_limit = 10;
     #[cfg(feature = "phase6-staging-preview")]
@@ -1709,9 +1745,13 @@ async fn run_payload_ibd_at(
     let finality_depth = params.finality_depth();
     let pruning_depth = params.pruning_depth();
     let coinbase_maturity = params.coinbase_maturity();
-    let initial_blocks = (coinbase_maturity as usize)
-        + pruning_depth as usize
-        + if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) { 300 } else { 80 };
+    let blocks_before_pruning = match fixture {
+        IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers => 300,
+        _ => 80,
+    };
+    let initial_blocks = coinbase_maturity as usize + pruning_depth as usize + blocks_before_pruning;
+    #[cfg(feature = "phase6-staging-preview")]
+    let mut split_sources = Vec::new();
     for mined in 0..if recovering { 0 } else { initial_blocks } {
         #[cfg(feature = "phase6-staging-preview")]
         if matches!(fixture, IbdPayloadFixture::SpentNullifiers | IbdPayloadFixture::TamperedNullifiers) && mined == 230 {
@@ -1723,8 +1763,37 @@ async fn run_payload_ibd_at(
         }
         #[cfg(not(feature = "phase6-staging-preview"))]
         let _ = mined;
+        #[cfg(feature = "phase6-staging-preview")]
+        if fixture == IbdPayloadFixture::MultiPagePruning && mined == 81 {
+            // Use distinct mature rewards between the lane refresh blocks at 80 and 130.
+            split_sources = fetch_spendable_utxos(&rpc_client1, miner_address.clone(), coinbase_maturity)
+                .await
+                .into_iter()
+                .filter(|(_, entry)| entry.is_coinbase)
+                .take(48)
+                .collect();
+            assert_eq!(split_sources.len(), 48);
+        }
+        #[cfg(feature = "phase6-staging-preview")]
+        let split_id = match split_sources.pop() {
+            Some((outpoint, entry)) => Some(split_pruning_fixture_reward(&rpc_client1, &miner_address, outpoint, entry).await),
+            None => None,
+        };
         let template = rpc_client1.get_block_template(miner_address.clone(), vec![]).await.unwrap();
-        rpc_client1.submit_block(template.block, false).await.unwrap();
+        #[cfg(feature = "phase6-staging-preview")]
+        if let Some(split_id) = split_id {
+            assert!(
+                template.block.transactions.iter().any(|tx| Transaction::try_from(tx.clone()).unwrap().id() == split_id),
+                "block template omitted the multi-page pruning fixture spend"
+            );
+        }
+        let report = rpc_client1.submit_block(template.block, false).await.unwrap();
+        #[cfg(feature = "phase6-staging-preview")]
+        if split_id.is_some() {
+            assert!(report.report.is_success(), "{report:?}");
+        }
+        #[cfg(not(feature = "phase6-staging-preview"))]
+        let _ = report;
     }
 
     let mut dag_info = rpc_client1.get_block_dag_info().await.unwrap();
@@ -1797,8 +1866,15 @@ async fn run_payload_ibd_at(
     }
 
     #[cfg(feature = "phase6-staging-preview")]
-    let exporter_evidence = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
-        Some(PruningRecoveryEvidence::capture(&kaspad1, target_pruning_point, false).await)
+    let exporter_evidence = if fixture.compares_pruning_evidence() {
+        let evidence = PruningRecoveryEvidence::capture(&kaspad1, target_pruning_point, false).await;
+        if fixture == IbdPayloadFixture::MultiPagePruning {
+            // The receiver pauses immediately after committing its first nonempty page.
+            let rows = evidence.pruning_utxos.len();
+            assert!(rows > 1_000, "fixture must span multiple pruning UTXO wire pages, found {rows} rows");
+            kaspa_core::info!("Multi-page pruning recovery fixture captured {rows} committed UTXOs");
+        }
+        Some(evidence)
     } else {
         None
     };
@@ -1833,7 +1909,7 @@ async fn run_payload_ibd_at(
         let (proof, metadata) = tokio::task::spawn_blocking(move || {
             let session = source.unguarded_session_blocking();
             let tip = session.get_header(session.get_headers_selected_tip()).unwrap();
-            let proof = if fixture == IbdPayloadFixture::PruningEvidenceReopen {
+            let proof = if fixture.compares_pruning_evidence() {
                 let proof = session.get_pruning_point_proof();
                 assert_eq!(proof[0].last().unwrap().hash, target_pruning_point);
                 proof
@@ -1884,8 +1960,7 @@ async fn run_payload_ibd_at(
 
     let permanent_peer = interruption.is_none() && fixture != IbdPayloadFixture::TamperedNullifiers;
     #[cfg(feature = "phase6-staging-preview")]
-    let permanent_peer =
-        permanent_peer && !matches!(fixture, IbdPayloadFixture::DescendantRecovery | IbdPayloadFixture::PruningEvidenceReopen);
+    let permanent_peer = permanent_peer && fixture != IbdPayloadFixture::DescendantRecovery && !fixture.compares_pruning_evidence();
     rpc_client2.add_peer(format!("127.0.0.1:{}", kaspad1.p2p_port).try_into().unwrap(), permanent_peer).await.unwrap();
     let check_client = rpc_client2.clone();
     wait_for(
