@@ -379,9 +379,55 @@ async fn phase6_loopback_cli_real_pow_recovery() {
 }
 
 const SUSTAINED_INTERVAL: Duration = Duration::from_secs(1);
-const SUSTAINED_CONNECTED_BLOCKS: u32 = 61;
+const SUSTAINED_DEFAULT_CONNECTED_BLOCKS: u32 = 61;
+const SUSTAINED_MAX_CONNECTED_BLOCKS: u32 = 1_000;
+const SUSTAINED_RESOURCE_SAMPLE_BLOCKS: u32 = 100;
 const SUSTAINED_OFFLINE_BLOCKS: u32 = 10;
 const SUSTAINED_REJOINED_BLOCKS: u32 = 5;
+
+fn sustained_connected_blocks() -> u32 {
+    match std::env::var("KASCADE_CLI_CONNECTED_BLOCKS") {
+        Ok(value) => {
+            let blocks = value.parse::<u32>().expect("connected block count must be an integer");
+            assert!((2..=SUSTAINED_MAX_CONNECTED_BLOCKS).contains(&blocks), "connected block count must be between 2 and 1,000");
+            blocks
+        }
+        Err(std::env::VarError::NotPresent) => SUSTAINED_DEFAULT_CONNECTED_BLOCKS,
+        Err(error) => panic!("invalid KASCADE_CLI_CONNECTED_BLOCKS: {error}"),
+    }
+}
+
+fn logical_data_size(path: &Path) -> std::io::Result<u64> {
+    let mut bytes = 0;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let entry_bytes = if kind.is_dir() {
+            logical_data_size(&entry.path())
+        } else if kind.is_file() {
+            entry.metadata().map(|metadata| metadata.len())
+        } else {
+            continue;
+        };
+        match entry_bytes {
+            Ok(size) => bytes += size,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(bytes)
+}
+
+fn measure_node_data(root: &Path) -> std::collections::BTreeMap<&'static str, u64> {
+    ["a", "b", "c"]
+        .into_iter()
+        .map(|node| {
+            let path = root.join(format!("phase6-node-{node}"));
+            let size = logical_data_size(&path).unwrap_or_else(|error| panic!("cannot sample node {node} data size: {error}"));
+            (node, size)
+        })
+        .collect()
+}
 
 async fn mine_paced_native_blocks(
     leader: &GrpcClient,
@@ -396,6 +442,7 @@ async fn mine_paced_native_blocks(
     let mut max_tip_wait = Duration::ZERO;
     for sequence in 1..=count {
         sleep_until(next_start).await;
+        let mine_started = Instant::now();
         let block = timeout(Duration::from_secs(15), submit_real_pow_block(leader, false))
             .await
             .unwrap_or_else(|_| panic!("{phase} block {sequence} could not be mined and submitted within 15 seconds"));
@@ -406,7 +453,8 @@ async fn mine_paced_native_blocks(
         if sequence == 1 {
             first_accepted = accepted;
         }
-        for client in std::iter::once(leader).chain(followers.iter().copied()) {
+        let leader_dag = expect_tip(leader, tip).await;
+        for client in followers.iter().copied() {
             expect_tip(client, tip).await;
         }
         let tip_wait = accepted.elapsed();
@@ -416,9 +464,18 @@ async fn mine_paced_native_blocks(
             "sequence": sequence,
             "tip": tip.to_string(),
             "accepted_since_phase_start_ms": accepted.duration_since(first_accepted).as_millis(),
+            "mine_and_submit_ms": accepted.duration_since(mine_started).as_millis(),
             "all_expected_nodes_selected_ms": tip_wait.as_millis(),
+            "leader_rpc_difficulty": leader_dag.difficulty,
+            "virtual_daa_score": leader_dag.virtual_daa_score,
         });
         eprintln!("phase6_native_paced_block,{observation}");
+        if phase == "connected" && sequence.is_multiple_of(SUSTAINED_RESOURCE_SAMPLE_BLOCKS) {
+            let stage = format!("connected-{sequence}");
+            for (name, client) in ["a", "b", "c"].into_iter().zip(std::iter::once(leader).chain(followers.iter().copied())) {
+                record_node_metrics(client, name, &stage).await;
+            }
+        }
     }
     (tip, accepted.duration_since(first_accepted), max_tip_wait)
 }
@@ -426,6 +483,7 @@ async fn mine_paced_native_blocks(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires a built kaspad binary and isolated Linux runner"]
 async fn phase6_loopback_cli_sustained_native_pow() {
+    let connected_blocks = sustained_connected_blocks();
     let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
     let binary = Path::new(&binary);
     let logs = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
@@ -451,11 +509,12 @@ async fn phase6_loopback_cli_sustained_native_pow() {
         assert_eq!(dag.virtual_daa_score, genesis.virtual_daa_score);
         record_node_metrics(client, name, "genesis").await;
     }
+    let genesis_data_bytes = measure_node_data(data.path());
 
     let (connected_tip, connected_span, connected_max_wait) =
-        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", SUSTAINED_CONNECTED_BLOCKS, SIMNET_GENESIS.hash).await;
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", connected_blocks, SIMNET_GENESIS.hash).await;
     let before = expect_tip(&c_rpc, connected_tip).await;
-    assert_eq!(before.block_count, genesis.block_count + u64::from(SUSTAINED_CONNECTED_BLOCKS));
+    assert_eq!(before.block_count, genesis.block_count + u64::from(connected_blocks));
     record_node_metrics(&c_rpc, "c", "before_stop").await;
     c_rpc.disconnect().await.unwrap();
     c.stop().await;
@@ -478,7 +537,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     let (tip, rejoined_span, _) =
         mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "rejoined", SUSTAINED_REJOINED_BLOCKS, offline_tip).await;
     let authority = expect_tip(&a_rpc, tip).await;
-    let accepted_total = u64::from(SUSTAINED_CONNECTED_BLOCKS + SUSTAINED_OFFLINE_BLOCKS + SUSTAINED_REJOINED_BLOCKS);
+    let accepted_total = u64::from(connected_blocks + SUSTAINED_OFFLINE_BLOCKS + SUSTAINED_REJOINED_BLOCKS);
     assert_eq!(authority.block_count - genesis.block_count, accepted_total);
     for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
         let dag = expect_tip(client, tip).await;
@@ -488,16 +547,18 @@ async fn phase6_loopback_cli_sustained_native_pow() {
         record_node_metrics(client, name, "converged").await;
         client.disconnect().await.unwrap();
     }
+    let final_running_data_bytes = measure_node_data(data.path());
     c.stop().await;
     b.stop().await;
     a.stop().await;
+    let final_stopped_data_bytes = measure_node_data(data.path());
 
     let result = serde_json::json!({
         "target_submission_interval_ms": SUSTAINED_INTERVAL.as_millis(),
         "accepted_blocks": accepted_total,
-        "connected_blocks": SUSTAINED_CONNECTED_BLOCKS,
+        "connected_blocks": connected_blocks,
         "connected_first_to_last_accept_ms": connected_span.as_millis(),
-        "connected_observed_bps": f64::from(SUSTAINED_CONNECTED_BLOCKS - 1) / connected_span.as_secs_f64(),
+        "connected_observed_bps": f64::from(connected_blocks - 1) / connected_span.as_secs_f64(),
         "connected_max_all_expected_nodes_selected_ms": connected_max_wait.as_millis(),
         "missed_blocks": recovered.block_count - before.block_count,
         "offline_first_to_last_accept_ms": offline_span.as_millis(),
@@ -510,6 +571,11 @@ async fn phase6_loopback_cli_sustained_native_pow() {
         "final_block_count": authority.block_count,
         "final_pruning_point": authority.pruning_point_hash.to_string(),
         "final_virtual_daa_score": authority.virtual_daa_score,
+        "node_data_logical_bytes": {
+            "genesis_running": genesis_data_bytes,
+            "final_running": final_running_data_bytes,
+            "final_stopped": final_stopped_data_bytes,
+        },
     });
     std::fs::write(logs.join("sustained.json"), serde_json::to_string_pretty(&result).unwrap()).unwrap();
     eprintln!("phase6_native_sustained,{result}");
