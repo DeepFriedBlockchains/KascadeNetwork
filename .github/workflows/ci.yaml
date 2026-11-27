@@ -118,6 +118,10 @@ jobs:
         if: github.head_ref == 'ops/phase6-network-profile-inspection-20261127' || github.ref_name == 'ops/phase6-network-profile-inspection-20261127'
         run: cargo nextest run -p kaspad --test network_profile_inspection
 
+      - name: Verify file-based profile overrides and CLI precedence
+        if: github.head_ref == 'fix/phase6-toml-profile-override-20261127' || github.ref_name == 'fix/phase6-toml-profile-override-20261127'
+        run: cargo nextest run -p kaspad --test network_profile_inspection -E 'test(=inspect_uses_configured_override_unless_the_cli_supplies_one)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
