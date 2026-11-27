@@ -13,6 +13,7 @@
 mod merged;
 mod solver;
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -43,6 +44,10 @@ struct Args {
     /// follows new tips instead of wasting work on a stale parent set).
     #[arg(long, default_value_t = 5)]
     refresh_secs: u64,
+
+    /// Exit successfully after this many accepted block submissions.
+    #[arg(long)]
+    max_blocks: Option<NonZeroU64>,
 
     /// Skip proof-of-work: submit each template immediately with nonce 0 instead of
     /// grinding a valid hash. Only useful against a node running with
@@ -79,6 +84,7 @@ async fn main() {
     let client = connect(&args.rpc_server).await;
     log::info!("mining to {} with {threads} threads, refreshing template every {}s", mining_address, args.refresh_secs);
 
+    let mut blocks_remaining = args.max_blocks.map(NonZeroU64::get);
     let mut warned_unsynced = false;
     loop {
         // Fetch a fresh template for the current tips.
@@ -128,7 +134,12 @@ async fn main() {
             let fc_with_aux = fc_header.with_aux_pow(aux);
             raw_block.header = (&fc_with_aux).into();
             match client.submit_block(raw_block, false).await {
-                Ok(resp) if resp.report.is_success() => log::info!("AUX BLOCK ACCEPTED  hash={block_hash}"),
+                Ok(resp) if resp.report.is_success() => {
+                    log::info!("AUX BLOCK ACCEPTED  hash={block_hash}");
+                    if accepted_block_limit_reached(&mut blocks_remaining) {
+                        break;
+                    }
+                }
                 Ok(resp) => log::warn!("aux block rejected: {:?}  (hash={block_hash})", resp.report),
                 Err(e) => log::warn!("submit_block (aux) failed: {e}"),
             }
@@ -173,10 +184,25 @@ async fn main() {
         raw_block.header.nonce = nonce;
         let block_hash = header_hash_with_nonce(&header, nonce);
         match client.submit_block(raw_block, false).await {
-            Ok(resp) if resp.report.is_success() => log::info!("BLOCK ACCEPTED  nonce={nonce}  hash={block_hash}"),
+            Ok(resp) if resp.report.is_success() => {
+                log::info!("BLOCK ACCEPTED  nonce={nonce}  hash={block_hash}");
+                if accepted_block_limit_reached(&mut blocks_remaining) {
+                    break;
+                }
+            }
             Ok(resp) => log::warn!("block rejected: {:?}  (nonce={nonce})", resp.report),
             Err(e) => log::warn!("submit_block failed: {e}  (nonce={nonce})"),
         }
+    }
+    let _ = client.disconnect().await;
+}
+
+fn accepted_block_limit_reached(blocks_remaining: &mut Option<u64>) -> bool {
+    if let Some(remaining) = blocks_remaining {
+        *remaining -= 1;
+        *remaining == 0
+    } else {
+        false
     }
 }
 
@@ -207,4 +233,21 @@ async fn connect(address: &str) -> GrpcClient {
         log::error!("failed to connect to {address}: {e}");
         std::process::exit(1);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_blocks_is_optional_positive_and_stops_on_last_acceptance() {
+        let args = ["zkas-miner", "--mining-address", "fixture"];
+        let mut unbounded = Args::try_parse_from(args).unwrap().max_blocks.map(NonZeroU64::get);
+        assert!(!accepted_block_limit_reached(&mut unbounded));
+        assert!(Args::try_parse_from(args.into_iter().chain(["--max-blocks", "0"])).is_err());
+
+        let mut bounded = Args::try_parse_from(args.into_iter().chain(["--max-blocks", "2"])).unwrap().max_blocks.map(NonZeroU64::get);
+        assert!(!accepted_block_limit_reached(&mut bounded));
+        assert!(accepted_block_limit_reached(&mut bounded));
+    }
 }
