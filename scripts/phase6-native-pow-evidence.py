@@ -11,10 +11,12 @@ import subprocess
 
 
 MANIFEST = "provenance.json"
+SUSTAINED_FILES = ("sustained.json", "blocks.jsonl", "a-sustained.log", "b-sustained.log", "c-sustained.log", "c-sustained-reopen.log")
 SCENARIO_FILES = {
     "recovery": ("recovery.json", "a-real-pow.log", "b-real-pow.log", "c-real-pow.log", "c-real-pow-reopen.log"),
     "reconnect": ("peer-recovery.json", "a-reconnect.log", "b-reconnect.log", "c-reconnect.log", "c-reconnect-reopen.log"),
-    "sustained": ("sustained.json", "blocks.jsonl", "a-sustained.log", "b-sustained.log", "c-sustained.log", "c-sustained-reopen.log"),
+    "sustained": SUSTAINED_FILES,
+    "sustained-5bps": SUSTAINED_FILES,
 }
 
 
@@ -29,9 +31,14 @@ def sha256(path):
 def artifact_files(directory, scenario):
     params_file = directory / "native-pow-params.json"
     params = json.loads(params_file.read_text(encoding="utf-8"))
-    expected_keys = {"skip_proof_of_work", "shielded_coinbase"}
-    if not isinstance(params, dict) or params.keys() != expected_keys or any(value is not False for value in params.values()):
+    native_flags = {"skip_proof_of_work", "shielded_coinbase"}
+    expected_keys = native_flags | {"blockrate"} if scenario == "sustained-5bps" else native_flags
+    if not isinstance(params, dict) or params.keys() != expected_keys or any(params[key] is not False for key in native_flags):
         raise ValueError("unexpected native-PoW Simnet overrides")
+    if scenario == "sustained-5bps":
+        blockrate = params["blockrate"]
+        if not isinstance(blockrate, dict) or blockrate.get("target_time_per_block") != 200:
+            raise ValueError("expected the 200 ms Simnet blockrate")
     filenames = (params_file.name, "driver.log", "metrics.jsonl", *SCENARIO_FILES[scenario])
     return {filename: sha256(directory / filename) for filename in filenames}
 

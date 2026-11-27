@@ -1,7 +1,11 @@
 #![cfg(target_os = "linux")]
 
 use kaspa_addresses::{Address, Version};
-use kaspa_consensus_core::{config::genesis::SIMNET_GENESIS, header::Header, network::NetworkType};
+use kaspa_consensus_core::{
+    config::{genesis::SIMNET_GENESIS, params::BlockrateParams},
+    header::Header,
+    network::NetworkType,
+};
 use kaspa_grpc_client::GrpcClient;
 use kaspa_hashes::Hash;
 use kaspa_pow::State;
@@ -378,12 +382,35 @@ async fn phase6_loopback_cli_real_pow_recovery() {
     a.stop().await;
 }
 
-const SUSTAINED_INTERVAL: Duration = Duration::from_secs(1);
 const SUSTAINED_DEFAULT_CONNECTED_BLOCKS: u32 = 61;
 const SUSTAINED_MAX_CONNECTED_BLOCKS: u32 = 1_000;
 const SUSTAINED_RESOURCE_SAMPLE_BLOCKS: u32 = 100;
 const SUSTAINED_OFFLINE_BLOCKS: u32 = 10;
 const SUSTAINED_REJOINED_BLOCKS: u32 = 5;
+
+#[derive(Clone, Copy)]
+enum NativePace {
+    OneSecond,
+    FiveBps,
+}
+
+impl NativePace {
+    fn from_env() -> Self {
+        match std::env::var("KASCADE_CLI_NATIVE_PACE") {
+            Ok(value) if value == "one-second" => Self::OneSecond,
+            Ok(value) if value == "five-bps" => Self::FiveBps,
+            Err(std::env::VarError::NotPresent) => Self::OneSecond,
+            invalid => panic!("unsupported KASCADE_CLI_NATIVE_PACE: {invalid:?}"),
+        }
+    }
+
+    fn interval(self) -> Duration {
+        match self {
+            Self::OneSecond => Duration::from_secs(1),
+            Self::FiveBps => Duration::from_millis(BlockrateParams::new::<5>().target_time_per_block),
+        }
+    }
+}
 
 fn sustained_connected_blocks() -> u32 {
     match std::env::var("KASCADE_CLI_CONNECTED_BLOCKS") {
@@ -435,23 +462,31 @@ async fn mine_paced_native_blocks(
     phase: &str,
     count: u32,
     mut tip: Hash,
+    pace: NativePace,
 ) -> (Hash, Duration, Duration) {
     let mut next_start = Instant::now();
     let mut accepted = next_start;
     let mut first_accepted = accepted;
+    let mut first_mining_start = accepted;
     let mut max_tip_wait = Duration::ZERO;
     for sequence in 1..=count {
         sleep_until(next_start).await;
         let mine_started = Instant::now();
-        let block = timeout(Duration::from_secs(15), submit_real_pow_block(leader, false))
+        let verify_pow_gate = matches!(pace, NativePace::FiveBps) && phase == "connected" && sequence == 1;
+        let block = timeout(Duration::from_secs(15), submit_real_pow_block(leader, verify_pow_gate))
             .await
             .unwrap_or_else(|_| panic!("{phase} block {sequence} could not be mined and submitted within 15 seconds"));
         assert_ne!(tip, block);
         tip = block;
         accepted = Instant::now();
-        next_start = accepted + SUSTAINED_INTERVAL;
+        // Anchor the next deadline to this actual attempt. A slow iteration cannot queue a burst.
+        next_start = match pace {
+            NativePace::OneSecond => accepted,
+            NativePace::FiveBps => mine_started,
+        } + pace.interval();
         if sequence == 1 {
             first_accepted = accepted;
+            first_mining_start = mine_started;
         }
         let leader_dag = expect_tip(leader, tip).await;
         for client in followers.iter().copied() {
@@ -464,6 +499,7 @@ async fn mine_paced_native_blocks(
             "sequence": sequence,
             "tip": tip.to_string(),
             "accepted_since_phase_start_ms": accepted.duration_since(first_accepted).as_millis(),
+            "mining_started_since_phase_start_ms": mine_started.duration_since(first_mining_start).as_millis(),
             "mine_and_submit_ms": accepted.duration_since(mine_started).as_millis(),
             "all_expected_nodes_selected_ms": tip_wait.as_millis(),
             "leader_rpc_difficulty": leader_dag.difficulty,
@@ -484,13 +520,18 @@ async fn mine_paced_native_blocks(
 #[ignore = "requires a built kaspad binary and isolated Linux runner"]
 async fn phase6_loopback_cli_sustained_native_pow() {
     let connected_blocks = sustained_connected_blocks();
+    let pace = NativePace::from_env();
     let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
     let binary = Path::new(&binary);
     let logs = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
     let logs = Path::new(&logs);
     let data = tempfile::tempdir().unwrap();
     let params = logs.join("native-pow-params.json");
-    std::fs::write(&params, r#"{"skip_proof_of_work":false,"shielded_coinbase":false}"#).unwrap();
+    let mut overrides = serde_json::json!({"skip_proof_of_work": false, "shielded_coinbase": false});
+    if matches!(pace, NativePace::FiveBps) {
+        overrides["blockrate"] = serde_json::to_value(BlockrateParams::new::<5>()).unwrap();
+    }
+    std::fs::write(&params, serde_json::to_vec(&overrides).unwrap()).unwrap();
     let options = NodeOptions { params: Some(&params), ..Default::default() };
 
     let mut a = Node::start(binary, data.path(), logs, 1, "a-sustained", true, options);
@@ -512,7 +553,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     let genesis_data_bytes = measure_node_data(data.path());
 
     let (connected_tip, connected_span, connected_max_wait) =
-        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", connected_blocks, SIMNET_GENESIS.hash).await;
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", connected_blocks, SIMNET_GENESIS.hash, pace).await;
     let before = expect_tip(&c_rpc, connected_tip).await;
     assert_eq!(before.block_count, genesis.block_count + u64::from(connected_blocks));
     record_node_metrics(&c_rpc, "c", "before_stop").await;
@@ -522,7 +563,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
 
     let offline_started = Instant::now();
     let (offline_tip, offline_span, _) =
-        mine_paced_native_blocks(&a_rpc, &[&b_rpc], "offline", SUSTAINED_OFFLINE_BLOCKS, connected_tip).await;
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc], "offline", SUSTAINED_OFFLINE_BLOCKS, connected_tip, pace).await;
     let offline_duration = offline_started.elapsed();
     let reopen_started = Instant::now();
     let mut c = Node::start(binary, data.path(), logs, 3, "c-sustained-reopen", false, options);
@@ -535,7 +576,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     assert_eq!(recovered.block_count - before.block_count, u64::from(SUSTAINED_OFFLINE_BLOCKS));
 
     let (tip, rejoined_span, _) =
-        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "rejoined", SUSTAINED_REJOINED_BLOCKS, offline_tip).await;
+        mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "rejoined", SUSTAINED_REJOINED_BLOCKS, offline_tip, pace).await;
     let authority = expect_tip(&a_rpc, tip).await;
     let accepted_total = u64::from(connected_blocks + SUSTAINED_OFFLINE_BLOCKS + SUSTAINED_REJOINED_BLOCKS);
     assert_eq!(authority.block_count - genesis.block_count, accepted_total);
@@ -554,7 +595,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     let final_stopped_data_bytes = measure_node_data(data.path());
 
     let result = serde_json::json!({
-        "target_submission_interval_ms": SUSTAINED_INTERVAL.as_millis(),
+        "target_submission_interval_ms": pace.interval().as_millis(),
         "accepted_blocks": accepted_total,
         "connected_blocks": connected_blocks,
         "connected_first_to_last_accept_ms": connected_span.as_millis(),
