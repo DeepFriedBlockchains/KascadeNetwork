@@ -213,10 +213,13 @@ impl Daemon {
     #[cfg(feature = "phase6-staging-preview")]
     pub fn restart(mut self, fd_total_budget: i32) -> Self {
         self.shutdown();
-        let appdir = self._appdir_tempdir.take().expect("daemon data directory was already taken");
+        let appdir = self._appdir_tempdir.take();
         let manager = self.client_manager.clone();
         drop(self);
-        Self::with_manager_and_appdir(manager, fd_total_budget, appdir)
+        match appdir {
+            Some(appdir) => Self::with_manager_and_appdir(manager, fd_total_budget, appdir),
+            None => Self::with_manager_and_owner(manager, fd_total_budget, None),
+        }
     }
 
     pub fn client_manager(&self) -> Arc<ClientManager> {
