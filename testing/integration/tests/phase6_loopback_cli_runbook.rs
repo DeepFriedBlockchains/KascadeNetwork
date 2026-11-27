@@ -192,9 +192,35 @@ async fn expect_known_peer(client: &GrpcClient, address: RpcPeerAddress) {
     .unwrap_or_else(|_| panic!("address book did not learn {address}"));
 }
 
+async fn expect_outbound_peers(client: &GrpcClient, addresses: &[SocketAddr]) {
+    let mut last_seen = Vec::new();
+    timeout(Duration::from_secs(75), async {
+        loop {
+            let peers = client.get_connected_peer_info().await.unwrap().peer_info;
+            last_seen = peers.iter().filter(|peer| peer.is_outbound).map(|peer| peer.address).collect();
+            if last_seen.len() == addresses.len() && addresses.iter().all(|address| last_seen.contains(&(*address).into())) {
+                return;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("outbound peers did not converge: expected {addresses:?}, last observed {last_seen:?}"));
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires the isolated private-peer Linux network namespace and built kaspad"]
 async fn phase6_private_peer_discovery() {
+    run_private_peer_discovery(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires the isolated private-peer Linux network namespace and built kaspad"]
+async fn phase6_private_discovered_peer_reconnect() {
+    run_private_peer_discovery(true).await;
+}
+
+async fn run_private_peer_discovery(reconnect: bool) {
     let namespace = std::env::var_os("KASCADE_CLI_DISCOVERY_NAMESPACE").expect("start via the private discovery namespace script");
     assert_eq!(std::fs::read_link("/proc/self/ns/net").unwrap().as_os_str(), namespace);
     let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
@@ -214,28 +240,58 @@ async fn phase6_private_peer_discovery() {
     let mut c = Node::start_discovery(binary, data.path(), logs, 3, "c-discovery", Some(hub), 2);
     let c_rpc = connect(19310).await;
     expect_known_peer(&c_rpc, advertised.into()).await;
-    timeout(Duration::from_secs(75), async {
-        loop {
-            let peers = c_rpc.get_connected_peer_info().await.unwrap().peer_info;
-            if [hub, advertised].into_iter().all(|address| peers.iter().any(|peer| peer.is_outbound && peer.address == address.into()))
-            {
-                break;
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .expect("C did not connect outbound to both its sole bootstrap and the discovered peer");
-
+    expect_outbound_peers(&c_rpc, &[hub, advertised]).await;
     for client in [&a_rpc, &b_rpc, &c_rpc] {
         assert_eq!(client.get_current_network().await.unwrap(), NetworkType::Simnet);
         assert_eq!(expect_tip(client, SIMNET_GENESIS.hash).await.pruning_point_hash, SIMNET_GENESIS.hash);
+    }
+    eprintln!("phase6_private_discovery: C learned {advertised} through {hub} and handshook outbound with both in Simnet");
+
+    if reconnect {
+        b_rpc.disconnect().await.unwrap();
+        b.stop().await;
+        expect_outbound_peers(&c_rpc, &[hub]).await;
+        a_rpc.disconnect().await.unwrap();
+        a.stop().await;
+        expect_outbound_peers(&c_rpc, &[]).await;
+        expect_known_peer(&c_rpc, advertised.into()).await;
+
+        // With A offline, only C can initiate the B connection from its learned address.
+        let restarted = Instant::now();
+        let mut b = Node::start_discovery(binary, data.path(), logs, 2, "b-reopen", None, 0);
+        let b_rpc = connect(19210).await;
+        expect_outbound_peers(&c_rpc, &[advertised]).await;
+        let reconnect_ms = restarted.elapsed().as_millis();
+        c_rpc.disconnect().await.unwrap();
+        c.stop().await;
+        expect_peers(&b_rpc, 0).await;
+
+        // Reopening C with the unchanged, unavailable A seed requires the saved peerstore.
+        let restarted = Instant::now();
+        let mut c = Node::start_discovery(binary, data.path(), logs, 3, "c-reopen", Some(hub), 2);
+        let c_rpc = connect(19310).await;
+        expect_known_peer(&c_rpc, advertised.into()).await;
+        expect_outbound_peers(&c_rpc, &[advertised]).await;
+        let peerstore_reopen_ms = restarted.elapsed().as_millis();
+        for client in [&b_rpc, &c_rpc] {
+            assert_eq!(client.get_current_network().await.unwrap(), NetworkType::Simnet);
+            assert_eq!(expect_tip(client, SIMNET_GENESIS.hash).await.pruning_point_hash, SIMNET_GENESIS.hash);
+            client.disconnect().await.unwrap();
+        }
+        c.stop().await;
+        b.stop().await;
+        eprintln!(
+            "phase6_private_discovered_peer_reconnect: C reconnected outbound to {advertised} without its sole bootstrap {hub}; reconnect_ms={reconnect_ms}, peerstore_reopen_ms={peerstore_reopen_ms}"
+        );
+        return;
+    }
+
+    for client in [&a_rpc, &b_rpc, &c_rpc] {
         client.disconnect().await.unwrap();
     }
     c.stop().await;
     a.stop().await;
     b.stop().await;
-    eprintln!("phase6_private_discovery: C learned {advertised} through {hub} and handshook outbound with both in Simnet");
 }
 
 async fn submit_block(client: &GrpcClient) -> Hash {
