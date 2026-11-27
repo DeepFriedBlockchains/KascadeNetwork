@@ -226,19 +226,33 @@ jobs:
           if-no-files-found: error
 
       - name: Verify private Simnet peer discovery without a second seed
-        if: github.head_ref == 'test/phase6-private-peer-discovery-20261126' || github.ref_name == 'test/phase6-private-peer-discovery-20261126'
+        if: >-
+          github.head_ref == 'test/phase6-private-peer-discovery-20261126' ||
+          github.ref_name == 'test/phase6-private-peer-discovery-20261126' ||
+          github.head_ref == 'test/phase6-private-discovered-peer-reconnect-20261127' ||
+          github.ref_name == 'test/phase6-private-discovered-peer-reconnect-20261127'
         timeout-minutes: 30
         shell: bash
         run: |
+          case "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" in
+            test/phase6-private-discovered-peer-reconnect-20261127)
+              test_case=phase6_private_discovered_peer_reconnect
+              test_timeout=300s
+              ;;
+            *)
+              test_case=phase6_private_peer_discovery
+              test_timeout=180s
+              ;;
+          esac
           evidence="$RUNNER_TEMP/phase6-private-peer-discovery"
           mkdir -p "$evidence"
           cargo build --locked -p kaspad
           cargo test --locked -p kaspa-testing-integration --test phase6_loopback_cli_runbook \
             --no-run --message-format=json | jq -r 'select(.reason == "compiler-artifact" and .target.name == "phase6_loopback_cli_runbook" and .executable != null) | .executable' > "$evidence/test-binary"
           test -x "$(cat "$evidence/test-binary")"
-          sudo timeout --kill-after=10s 180s unshare --net --fork --kill-child \
+          sudo timeout --kill-after=10s "$test_timeout" unshare --net --fork --kill-child \
             bash -s -- "$(readlink /proc/self/ns/net)" "$PWD/target/debug/kaspad" \
-            "$(cat "$evidence/test-binary")" "$evidence" "$(id -un)" <<'BASH' 2>&1 | tee "$evidence/driver.log"
+            "$(cat "$evidence/test-binary")" "$evidence" "$(id -un)" "$test_case" <<'BASH' 2>&1 | tee "$evidence/driver.log"
           set -euo pipefail
           namespace="$(readlink /proc/self/ns/net)"
           test "$namespace" != "$1"
@@ -252,11 +266,16 @@ jobs:
           ip -br address show
           exec runuser -u "$5" -- env -i PATH=/usr/bin:/bin \
             KASCADE_CLI_KASPAD="$2" KASCADE_CLI_LOGS="$4" KASCADE_CLI_DISCOVERY_NAMESPACE="$namespace" \
-            "$3" --exact phase6_private_peer_discovery --ignored --nocapture
+            "$3" --exact "$6" --ignored --nocapture
           BASH
 
       - name: Save private Simnet peer discovery evidence
-        if: always() && (github.head_ref == 'test/phase6-private-peer-discovery-20261126' || github.ref_name == 'test/phase6-private-peer-discovery-20261126')
+        if: >-
+          always() && (
+            github.head_ref == 'test/phase6-private-peer-discovery-20261126' ||
+            github.ref_name == 'test/phase6-private-peer-discovery-20261126' ||
+            github.head_ref == 'test/phase6-private-discovered-peer-reconnect-20261127' ||
+            github.ref_name == 'test/phase6-private-discovered-peer-reconnect-20261127')
         uses: actions/upload-artifact@v4
         with:
           name: phase6-private-peer-discovery
