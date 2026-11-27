@@ -1,4 +1,4 @@
-use super::process_queue::ProcessQueue;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use kaspa_consensus_core::tx::TransactionId;
 use kaspa_core::debug;
@@ -6,7 +6,11 @@ use kaspa_p2p_lib::{
     Hub, make_message,
     pb::{InvTransactionsMessage, KaspadMessage, kaspad_message::Payload},
 };
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{sync::RwLock, time::Instant as BroadcastInstant};
 
 /// Interval between mempool scanning tasks (in seconds)
 const SCANNING_TASK_INTERVAL: u64 = 10;
@@ -19,8 +23,9 @@ pub struct TransactionsSpread {
     last_scanning_time: Instant,
     scanning_task_running: bool,
     scanning_job_count: u64,
-    transaction_ids: ProcessQueue<TransactionId>,
-    last_broadcast_time: Instant,
+    transaction_ids: IndexMap<TransactionId, bool>,
+    last_broadcast_time: Option<BroadcastInstant>,
+    flush_scheduled: bool,
 }
 
 impl TransactionsSpread {
@@ -30,8 +35,9 @@ impl TransactionsSpread {
             last_scanning_time: Instant::now(),
             scanning_task_running: false,
             scanning_job_count: 0,
-            transaction_ids: ProcessQueue::new(),
-            last_broadcast_time: Instant::now(),
+            transaction_ids: IndexMap::new(),
+            last_broadcast_time: None,
+            flush_scheduled: false,
         }
     }
 
@@ -70,27 +76,69 @@ impl TransactionsSpread {
     /// Add the given transactions IDs to a set of IDs to broadcast. The IDs will be broadcasted to all peers
     /// within transaction Inv messages.
     ///
-    /// The broadcast itself may happen only during a subsequent call to this function since it is done at most
-    /// every `BROADCAST_INTERVAL` milliseconds or when the queue length is larger than the Inv message
-    /// capacity.
-    ///
-    /// _GO-KASPAD: EnqueueTransactionIDsForPropagation_
-    pub async fn broadcast_transactions<I: IntoIterator<Item = TransactionId>>(&mut self, transaction_ids: I, should_throttle: bool) {
-        self.transaction_ids.enqueue_chunk(transaction_ids);
-
-        let now = Instant::now();
-        if now < self.last_broadcast_time + BROADCAST_INTERVAL && self.transaction_ids.len() < MAX_INV_PER_TX_INV_MSG {
+    /// Coalesce transactions until the broadcast interval elapses or the queue
+    /// fills one inventory message. A single timer also flushes idle queues.
+    pub async fn broadcast_transactions<I: IntoIterator<Item = TransactionId>>(
+        spread: &Arc<RwLock<Self>>,
+        transaction_ids: I,
+        should_throttle: bool,
+    ) {
+        let mut incoming = transaction_ids.into_iter().peekable();
+        if incoming.peek().is_none() {
             return;
         }
+        let mut pending = spread.write().await;
+        for id in incoming {
+            // Retain full fanout for an ID if any caller requested it.
+            *pending.transaction_ids.entry(id).or_insert(should_throttle) &= should_throttle;
+        }
+        let Some(deadline) = pending.flush_if_due().await else { return };
+        if pending.flush_scheduled {
+            return;
+        }
+        pending.flush_scheduled = true;
+        let spread = Arc::downgrade(spread);
+        tokio::spawn(async move {
+            let mut deadline = deadline;
+            loop {
+                tokio::time::sleep_until(deadline).await;
+                let Some(spread) = spread.upgrade() else { return };
+                let mut pending = spread.write().await;
+                // A full queue can flush before the timer fires, shifting the
+                // deadline for the next batch. Keep using this one timer.
+                if let Some(next) = pending.flush_if_due().await {
+                    deadline = next;
+                } else {
+                    pending.flush_scheduled = false;
+                    return;
+                }
+            }
+        });
+    }
 
-        while !self.transaction_ids.is_empty() {
-            let ids = self.transaction_ids.dequeue_chunk(MAX_INV_PER_TX_INV_MSG).map(|x| x.into()).collect_vec();
-            debug!("Transaction propagation: broadcasting {} transactions", ids.len());
-            let msg = make_message!(Payload::InvTransactions, InvTransactionsMessage { ids });
-            self.broadcast(msg, should_throttle).await;
+    async fn flush_if_due(&mut self) -> Option<BroadcastInstant> {
+        if self.transaction_ids.is_empty() {
+            return None;
+        }
+        if let Some(last) = self.last_broadcast_time
+            && self.transaction_ids.len() < MAX_INV_PER_TX_INV_MSG
+            && BroadcastInstant::now() < last + BROADCAST_INTERVAL
+        {
+            return Some(last + BROADCAST_INTERVAL);
         }
 
-        self.last_broadcast_time = Instant::now();
+        let (throttled, unrestricted): (Vec<_>, Vec<_>) = self.transaction_ids.drain(..).partition(|(_, throttle)| *throttle);
+        for (batch, should_throttle) in [(unrestricted, false), (throttled, true)] {
+            for chunk in batch.chunks(MAX_INV_PER_TX_INV_MSG) {
+                let ids = chunk.iter().map(|(id, _)| (*id).into()).collect_vec();
+                debug!("Transaction propagation: broadcasting {} transactions", ids.len());
+                let msg = make_message!(Payload::InvTransactions, InvTransactionsMessage { ids });
+                self.broadcast(msg, should_throttle).await;
+            }
+        }
+
+        self.last_broadcast_time = Some(BroadcastInstant::now());
+        None
     }
 
     async fn broadcast(&self, msg: KaspadMessage, should_throttle: bool) {
@@ -100,5 +148,43 @@ impl TransactionsSpread {
         } else {
             self.hub.broadcast(msg, None).await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_transaction_relay_flushes_without_more_inventory() {
+        let spread = Arc::new(RwLock::new(TransactionsSpread::new(Hub::new())));
+        TransactionsSpread::broadcast_transactions(&spread, [TransactionId::from(1u64)], false).await;
+        let start = spread.read().await.last_broadcast_time.expect("the first inventory is sent immediately");
+
+        TransactionsSpread::broadcast_transactions(&spread, [TransactionId::from(2u64)], false).await;
+        TransactionsSpread::broadcast_transactions(&spread, [TransactionId::from(3u64), TransactionId::from(2u64)], true).await;
+        {
+            let pending = spread.read().await;
+            assert_eq!(pending.transaction_ids.len(), 2);
+            assert!(pending.flush_scheduled);
+            assert!(!pending.transaction_ids[&TransactionId::from(2u64)]);
+            assert!(pending.transaction_ids[&TransactionId::from(3u64)]);
+        }
+
+        tokio::time::sleep(BROADCAST_INTERVAL - Duration::from_millis(1)).await;
+        assert_eq!(spread.read().await.last_broadcast_time, Some(start));
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        let pending = spread.read().await;
+        assert!(pending.transaction_ids.is_empty());
+        assert!(!pending.flush_scheduled);
+        assert!(pending.last_broadcast_time.unwrap() >= start + BROADCAST_INTERVAL);
+        let last = pending.last_broadcast_time;
+        drop(pending);
+
+        tokio::time::sleep(BROADCAST_INTERVAL).await;
+        TransactionsSpread::broadcast_transactions(&spread, [], false).await;
+        let pending = spread.read().await;
+        assert!(!pending.flush_scheduled);
+        assert_eq!(pending.last_broadcast_time, last);
     }
 }

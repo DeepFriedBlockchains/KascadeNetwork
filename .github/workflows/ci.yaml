@@ -110,6 +110,10 @@ jobs:
         with:
           tool: cargo-nextest
 
+      - name: Verify idle transaction relay flushes on schedule
+        if: github.head_ref == 'fix/phase6-idle-tx-relay-20261127' || github.ref_name == 'fix/phase6-idle-tx-relay-20261127'
+        run: cargo nextest run --locked -p kaspa-p2p-flows --lib -E 'test(=flowcontext::transactions::tests::idle_transaction_relay_flushes_without_more_inventory)'
+
       - name: Verify issuance commitment and settlement invariants
         if: >-
           github.head_ref == 'feat/phase6-issuance-commitment-20261123' || github.ref_name == 'feat/phase6-issuance-commitment-20261123' ||
