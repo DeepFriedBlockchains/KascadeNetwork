@@ -114,6 +114,10 @@ jobs:
         if: github.head_ref == 'fix/phase6-operator-whole-bps-preflight-20261125' || github.ref_name == 'fix/phase6-operator-whole-bps-preflight-20261125'
         run: cargo nextest run -p kaspad --lib -E 'test(=daemon::tests::override_preflight_requires_whole_bps_in_effective_subsidy_phases)'
 
+      - name: Inspect effective network profiles without starting the daemon
+        if: github.head_ref == 'ops/phase6-network-profile-inspection-20261127' || github.ref_name == 'ops/phase6-network-profile-inspection-20261127'
+        run: cargo nextest run -p kaspad --test network_profile_inspection
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

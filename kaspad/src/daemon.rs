@@ -145,6 +145,36 @@ fn validate_override_params(params: &Params) -> Result<(), (&'static str, &'stat
     Ok(())
 }
 
+fn load_network_params(args: &Args) -> Result<Params, String> {
+    let network = args.network();
+    let params: Params = network.into();
+    let Some(path) = &args.override_params_file else { return Ok(params) };
+    if network.is_mainnet() {
+        return Err("Overriding params on mainnet is not allowed.".into());
+    }
+    let content = fs::read_to_string(path).map_err(|err| format!("Failed to read override params file '{path}': {err}"))?;
+    let overrides: OverrideParams =
+        serde_json::from_str(&content).map_err(|err| format!("Failed to parse override params file '{path}': {err}"))?;
+    let params = params.override_params(overrides);
+    validate_override_params(&params).map_err(|(field, reason)| format!("Invalid override params file '{path}': {field} {reason}"))?;
+    Ok(params)
+}
+
+pub fn inspect_network_profile(args: &Args) -> Result<serde_json::Value, String> {
+    validate_args(args).map_err(|err| err.to_string())?;
+    let params = load_network_params(args)?;
+    Ok(serde_json::json!({
+        "network_id": args.network().to_string(),
+        "configured_genesis_hash": params.genesis.hash.to_string(),
+        "target_time_per_block_ms": params.target_time_per_block(),
+        "skip_proof_of_work": params.skip_proof_of_work,
+        "shielded_coinbase": params.shielded_coinbase,
+        "dns_seeding_enabled": !args.disable_dns_seeding,
+        "grpc_enabled": !args.disable_grpc,
+        "unsafe_rpc_enabled": args.unsafe_rpc,
+    }))
+}
+
 fn request_database_deletion_approval(approve: bool) -> bool {
     let msg = "Node database is from a different Kaspad *DB* version and needs to be fully deleted, do you confirm the delete? (y/n)";
     request_database_deletion_approval_with_message(msg, approve)
@@ -327,33 +357,10 @@ pub fn create_core_with_runtime(runtime: &Runtime, args: &Args, fd_total_budget:
         exit(1);
     }
 
-    let params = {
-        let params: Params = network.into();
-        match &args.override_params_file {
-            Some(path) => {
-                if network.is_mainnet() {
-                    println!("Overriding params on mainnet is not allowed.");
-                    exit(1);
-                }
-
-                let file_content = fs::read_to_string(path).unwrap_or_else(|err| {
-                    println!("Failed to read override params file '{}': {}", path, err);
-                    exit(1);
-                });
-                let override_params: OverrideParams = serde_json::from_str(&file_content).unwrap_or_else(|err| {
-                    println!("Failed to parse override params file '{}': {}", path, err);
-                    exit(1);
-                });
-                let params = params.override_params(override_params);
-                if let Err((field, reason)) = validate_override_params(&params) {
-                    println!("Invalid override params file '{}': {field} {reason}", path);
-                    exit(1);
-                }
-                params
-            }
-            None => params,
-        }
-    };
+    let params = load_network_params(args).unwrap_or_else(|err| {
+        println!("{err}");
+        exit(1);
+    });
 
     let config = Arc::new(
         ConfigBuilder::new(params).adjust_perf_params_to_consensus_params().apply_args(|config| args.apply_to_config(config)).build(),

@@ -100,6 +100,8 @@ pub struct Args {
     pub retention_period_days: Option<f64>,
 
     pub override_params_file: Option<String>,
+    #[serde(skip)]
+    pub inspect_network_profile: bool,
 
     pub rocksdb_preset: Option<String>,
     pub rocksdb_wal_dir: Option<String>,
@@ -169,6 +171,7 @@ impl Default for Args {
             ram_scale: 1.0,
             retention_period_days: None,
             override_params_file: None,
+            inspect_network_profile: false,
             rocksdb_preset: None,
             rocksdb_wal_dir: None,
             rocksdb_cache_size: None,
@@ -512,6 +515,7 @@ a large RAM (~64GB) can set this value to ~3.0-4.0 and gain superior performance
                 .value_parser(clap::value_parser!(String))
                 .help("Path to a JSON file containing override parameters.")
         )
+        .arg(arg!(--"inspect-network-profile" "Print the effective network profile as JSON without starting the daemon."))
         .arg(
             Arg::new("rocksdb-preset")
                 .long("rocksdb-preset")
@@ -634,12 +638,13 @@ impl Args {
             #[cfg(feature = "devnet-prealloc")]
             prealloc_amount: arg_match_unwrap_or::<u64>(&m, "prealloc-amount", defaults.prealloc_amount),
             override_params_file: m.get_one::<String>("override-params-file").cloned(),
+            inspect_network_profile: m.get_flag("inspect-network-profile"),
             rocksdb_preset: m.get_one::<String>("rocksdb-preset").cloned().or(defaults.rocksdb_preset),
             rocksdb_wal_dir: m.get_one::<String>("rocksdb-wal-dir").cloned().or(defaults.rocksdb_wal_dir),
             rocksdb_cache_size: m.get_one::<usize>("rocksdb-cache-size").cloned().or(defaults.rocksdb_cache_size),
         };
 
-        if arg_match_unwrap_or::<bool>(&m, "enable-mainnet-mining", false) {
+        if !args.inspect_network_profile && arg_match_unwrap_or::<bool>(&m, "enable-mainnet-mining", false) {
             println!("\nNOTE: The flag --enable-mainnet-mining is deprecated and defaults to true also w/o explicit setting\n")
         }
 
