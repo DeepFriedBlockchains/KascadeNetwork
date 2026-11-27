@@ -9,7 +9,7 @@ use kaspa_core::{info, signals::Signals};
 use kaspa_utils::fd_budget;
 use kaspad_lib::{
     args::parse_args,
-    daemon::{DESIRED_DAEMON_SOFT_FD_LIMIT, MINIMUM_DAEMON_SOFT_FD_LIMIT, create_core},
+    daemon::{DESIRED_DAEMON_SOFT_FD_LIMIT, MINIMUM_DAEMON_SOFT_FD_LIMIT, create_core, inspect_network_profile},
 };
 
 #[cfg(feature = "heap")]
@@ -17,12 +17,22 @@ use kaspad_lib::{
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub fn main() {
-    #[cfg(feature = "heap")]
-    let _profiler = dhat::Profiler::builder().file_name("kaspad-heap.json").build();
-
     init_allocator_with_default_settings();
 
     let args = parse_args();
+    if args.inspect_network_profile {
+        match inspect_network_profile(&args) {
+            Ok(profile) => println!("{profile}"),
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    #[cfg(feature = "heap")]
+    let _profiler = dhat::Profiler::builder().file_name("kaspad-heap.json").build();
 
     match fd_budget::try_set_fd_limit(DESIRED_DAEMON_SOFT_FD_LIMIT) {
         Ok(limit) => {
