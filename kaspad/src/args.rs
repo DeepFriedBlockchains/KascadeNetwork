@@ -637,7 +637,7 @@ impl Args {
             prealloc_address: m.get_one::<String>("prealloc-address").cloned(),
             #[cfg(feature = "devnet-prealloc")]
             prealloc_amount: arg_match_unwrap_or::<u64>(&m, "prealloc-amount", defaults.prealloc_amount),
-            override_params_file: m.get_one::<String>("override-params-file").cloned(),
+            override_params_file: m.get_one::<String>("override-params-file").cloned().or(defaults.override_params_file),
             inspect_network_profile: m.get_flag("inspect-network-profile"),
             rocksdb_preset: m.get_one::<String>("rocksdb-preset").cloned().or(defaults.rocksdb_preset),
             rocksdb_wal_dir: m.get_one::<String>("rocksdb-wal-dir").cloned().or(defaults.rocksdb_wal_dir),

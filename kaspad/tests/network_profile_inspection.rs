@@ -35,3 +35,26 @@ fn print_and_reject_network_profiles_without_starting_the_daemon() {
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("pre_crescendo_target_time_per_block"));
     assert!(!appdir.exists() && !logdir.exists());
 }
+
+#[test]
+fn inspect_uses_configured_override_unless_the_cli_supplies_one() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let config = root.join("kaspad.toml");
+    fs::write(&config, "simnet = true\noverride-params-file = 'file-profile.json'\n").unwrap();
+    fs::write(root.join("file-profile.json"), r#"{"skip_proof_of_work":false}"#).unwrap();
+    fs::write(root.join("cli-profile.json"), "{}").unwrap();
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kaspad"));
+    command.current_dir(root).args(["--configfile", "kaspad.toml", "--inspect-network-profile"]);
+    let from_config = command.output().unwrap();
+    assert!(from_config.status.success(), "{}", String::from_utf8_lossy(&from_config.stderr));
+    let profile: Value = serde_json::from_slice(&from_config.stdout).unwrap();
+    assert_eq!(profile["network_id"], "simnet");
+    assert_eq!(profile["skip_proof_of_work"], false);
+
+    let from_cli = command.arg("--override-params-file=cli-profile.json").output().unwrap();
+    assert!(from_cli.status.success(), "{}", String::from_utf8_lossy(&from_cli.stderr));
+    let profile: Value = serde_json::from_slice(&from_cli.stdout).unwrap();
+    assert_eq!(profile["skip_proof_of_work"], true);
+}
