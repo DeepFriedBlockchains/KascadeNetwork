@@ -13,6 +13,16 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 27 sustained operation and recovery results
+
+| Gate | Scope and evidence |
+| --- | --- |
+| Operator mining and persistent restart | [#93](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/93) passed 8/8 with four native blocks from the bundled miner and exact non-genesis convergence after same-directory restart. |
+| Discovered-peer reconnection | [#95](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/95) passed 8/8 with the sole seed offline and verified another outbound connection after peerstore reopen. |
+| Abrupt multi-page recovery | [#96](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/96) passed 8/8 with the real worker exit and 1,302 rows in the authenticated workload. |
+| 1,000-block native operation | [#97](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/97) passed 8/8. 0.991193 paced native BPS, maximum observed all-node tip delay 110 ms and exact offline catch-up in 1,031 ms after reopen. [#100](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/100) is the next 200 ms native workload. |
+| Native signed transaction lifecycle | [#98](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/98) encountered a mempool propagation timeout. [#94](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/94) passed the local settlement and multi-page recovery combination with 1,619 workspace tests. These scopes are tracked separately. |
+
 ## November 27 acceptance evidence
 
 | Gate | Result and scope |
