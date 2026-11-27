@@ -284,6 +284,25 @@ jobs:
             ${{ runner.temp }}/phase6-loopback-launch/health-*.json
             ${{ runner.temp }}/phase6-loopback-launch/native-pow.json
 
+      - name: Exercise the bundled native miner on the three-node launcher
+        if: github.head_ref == 'test/phase6-launcher-bundled-native-miner-20261125' || github.ref_name == 'test/phase6-launcher-bundled-native-miner-20261125'
+        timeout-minutes: 30
+        run: |
+          cargo test --locked -p kaspa-miner tests::max_blocks_is_optional_positive_and_stops_on_last_acceptance -- --exact
+          cargo build --locked -p kaspad -p kaspa-miner -p kaspa-grpc-simple-client-example
+          python3 scripts/phase6-loopback-miner-check.py \
+            --daemon target/debug/kaspad --miner target/debug/zkas-miner \
+            --health target/debug/phase6-loopback-health --directory "$RUNNER_TEMP/phase6-bundled-native-miner"
+
+      - name: Upload three-node bundled native mining evidence
+        if: always() && (github.head_ref == 'test/phase6-launcher-bundled-native-miner-20261125' || github.ref_name == 'test/phase6-launcher-bundled-native-miner-20261125')
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-bundled-native-miner
+          path: |
+            ${{ runner.temp }}/phase6-bundled-native-miner/*.json
+            ${{ runner.temp }}/phase6-bundled-native-miner/*.log
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
