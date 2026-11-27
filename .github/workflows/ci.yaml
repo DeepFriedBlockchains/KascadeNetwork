@@ -232,15 +232,18 @@ jobs:
           github.head_ref == 'test/phase6-native-1000-block-20261127' ||
           github.ref_name == 'test/phase6-native-1000-block-20261127' ||
           github.head_ref == 'test/phase6-native-five-bps-20261127' ||
-          github.ref_name == 'test/phase6-native-five-bps-20261127'
+          github.ref_name == 'test/phase6-native-five-bps-20261127' ||
+          github.head_ref == 'test/phase6-native-five-bps-1000-20261127' ||
+          github.ref_name == 'test/phase6-native-five-bps-1000-20261127'
         timeout-minutes: 65
         shell: bash
         env:
           KASCADE_CLI_CONNECTED_BLOCKS: >-
-            ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && '100' ||
+            ${{ (github.head_ref == 'test/phase6-native-five-bps-1000-20261127' || github.ref_name == 'test/phase6-native-five-bps-1000-20261127') && '1000' ||
+              (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && '100' ||
               (github.head_ref == 'test/phase6-native-1000-block-20261127' || github.ref_name == 'test/phase6-native-1000-block-20261127') && '1000' ||
               '61' }}
-          KASCADE_CLI_NATIVE_PACE: ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && 'five-bps' || 'one-second' }}
+          KASCADE_CLI_NATIVE_PACE: ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127' || github.head_ref == 'test/phase6-native-five-bps-1000-20261127' || github.ref_name == 'test/phase6-native-five-bps-1000-20261127') && 'five-bps' || 'one-second' }}
         run: |
           export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
           export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-sustained-native"
@@ -317,7 +320,9 @@ jobs:
             github.head_ref == 'test/phase6-native-1000-block-20261127' ||
             github.ref_name == 'test/phase6-native-1000-block-20261127' ||
             github.head_ref == 'test/phase6-native-five-bps-20261127' ||
-            github.ref_name == 'test/phase6-native-five-bps-20261127'
+            github.ref_name == 'test/phase6-native-five-bps-20261127' ||
+          github.head_ref == 'test/phase6-native-five-bps-1000-20261127' ||
+          github.ref_name == 'test/phase6-native-five-bps-1000-20261127'
           )
         uses: actions/upload-artifact@v4
         with:
