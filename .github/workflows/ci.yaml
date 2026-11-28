@@ -281,6 +281,24 @@ jobs:
           name: phase6-private-peer-discovery
           path: ${{ runner.temp }}/phase6-private-peer-discovery/*.log
 
+      - name: Verify bilateral daemon network isolation
+        if: github.head_ref == 'test/phase6-local-cross-network-handshake-20261128' || github.ref_name == 'test/phase6-local-cross-network-handshake-20261128'
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
+          export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-cross-network"
+          mkdir -p "$KASCADE_CLI_LOGS"
+          cargo build --locked -p kaspad
+          cargo nextest run --locked -p kaspa-testing-integration --test phase6_loopback_cli_runbook --run-ignored all --test-threads=1 --success-output immediate -E 'test(=phase6_loopback_rejects_cross_network_handshakes_in_both_directions)' 2>&1 | tee "$KASCADE_CLI_LOGS/driver.log"
+
+      - name: Save bilateral daemon network isolation evidence
+        if: always() && (github.head_ref == 'test/phase6-local-cross-network-handshake-20261128' || github.ref_name == 'test/phase6-local-cross-network-handshake-20261128')
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase6-cross-network-handshake
+          path: ${{ runner.temp }}/phase6-cross-network/*.log
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

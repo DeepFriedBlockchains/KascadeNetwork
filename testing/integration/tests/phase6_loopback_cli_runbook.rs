@@ -1,7 +1,11 @@
 #![cfg(target_os = "linux")]
 
 use kaspa_addresses::{Address, Version};
-use kaspa_consensus_core::{config::genesis::SIMNET_GENESIS, header::Header, network::NetworkType};
+use kaspa_consensus_core::{
+    config::genesis::{SIMNET_GENESIS, TESTNET_GENESIS},
+    header::Header,
+    network::NetworkType,
+};
 use kaspa_grpc_client::GrpcClient;
 use kaspa_hashes::Hash;
 use kaspa_pow::State;
@@ -161,6 +165,62 @@ async fn expect_peers(client: &GrpcClient, count: usize) {
     })
     .await
     .unwrap_or_else(|_| panic!("loopback peer topology did not converge: expected {count}, last observed {last_count:?}"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires a built kaspad binary and exclusive loopback ports"]
+async fn phase6_loopback_rejects_cross_network_handshakes_in_both_directions() {
+    let binary = std::env::var_os("KASCADE_CLI_KASPAD").unwrap();
+    let log_dir = std::env::var_os("KASCADE_CLI_LOGS").unwrap();
+    let logs = Path::new(&log_dir);
+    let data_dir = tempfile::tempdir().unwrap();
+    let start = |label: &str, rpc_port, p2p_port, peer_port, network_args: &[&str]| {
+        let mut command = Command::new(&binary);
+        command
+            .args(network_args)
+            .args(["--nodnsseed", "--disable-upnp", "--outpeers=0"])
+            .arg(format!("--appdir={}", data_dir.path().join(label).display()))
+            .arg(format!("--rpclisten=127.0.0.1:{rpc_port}"))
+            .arg(format!("--listen=127.0.0.1:{p2p_port}"))
+            .arg(format!("--addpeer=127.0.0.1:{peer_port}"));
+        Node::spawn(command, logs, label)
+    };
+    let mut simnet = start("simnet", 19110, 19111, 19211, &["--simnet"]);
+    let mut testnet = start("testnet-10", 19210, 19211, 19111, &["--testnet", "--netsuffix=10"]);
+    let (simnet_rpc, testnet_rpc) = tokio::join!(connect(19110), connect(19210));
+    assert_eq!(simnet_rpc.get_current_network().await.unwrap(), NetworkType::Simnet);
+    assert_eq!(testnet_rpc.get_current_network().await.unwrap(), NetworkType::Testnet);
+
+    let expected = [
+        ("simnet", "Network mismatch - local: zkas-simnet, remote: zkas-testnet-10"),
+        ("testnet-10", "Network mismatch - local: zkas-testnet-10, remote: zkas-simnet"),
+    ];
+    // Each inbound warning requires a connection initiated by the other daemon.
+    // This distinguishes bilateral rejection from an unreachable peer or one failed dial.
+    timeout(Duration::from_secs(75), async {
+        loop {
+            if expected.iter().all(|(label, reason)| {
+                std::fs::read_to_string(logs.join(format!("{label}.log")))
+                    .unwrap()
+                    .lines()
+                    .any(|line| line.contains("handshake failed for inbound peer") && line.contains(*reason))
+            }) {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("both daemons must log the inbound network mismatch");
+    for (rpc, genesis) in [(&simnet_rpc, SIMNET_GENESIS.hash), (&testnet_rpc, TESTNET_GENESIS.hash)] {
+        expect_peers(rpc, 0).await;
+        expect_tip(rpc, genesis).await;
+    }
+    eprintln!(
+        "phase6_cross_network: Simnet and Testnet-10 rejected each other's inbound handshakes and retained distinct genesis tips"
+    );
+    simnet.stop().await;
+    testnet.stop().await;
 }
 
 async fn expect_tip(client: &GrpcClient, tip: Hash) -> GetBlockDagInfoResponse {
