@@ -232,15 +232,18 @@ jobs:
           github.head_ref == 'test/phase6-native-1000-block-20261127' ||
           github.ref_name == 'test/phase6-native-1000-block-20261127' ||
           github.head_ref == 'test/phase6-native-five-bps-20261127' ||
-          github.ref_name == 'test/phase6-native-five-bps-20261127'
+          github.ref_name == 'test/phase6-native-five-bps-20261127' ||
+          github.head_ref == 'test/phase6-native-five-bps-1000-20261127' ||
+          github.ref_name == 'test/phase6-native-five-bps-1000-20261127'
         timeout-minutes: 65
         shell: bash
         env:
           KASCADE_CLI_CONNECTED_BLOCKS: >-
-            ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && '100' ||
+            ${{ (github.head_ref == 'test/phase6-native-five-bps-1000-20261127' || github.ref_name == 'test/phase6-native-five-bps-1000-20261127') && '1000' ||
+              (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && '100' ||
               (github.head_ref == 'test/phase6-native-1000-block-20261127' || github.ref_name == 'test/phase6-native-1000-block-20261127') && '1000' ||
               '61' }}
-          KASCADE_CLI_NATIVE_PACE: ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127') && 'five-bps' || 'one-second' }}
+          KASCADE_CLI_NATIVE_PACE: ${{ (github.head_ref == 'test/phase6-native-five-bps-20261127' || github.ref_name == 'test/phase6-native-five-bps-20261127' || github.head_ref == 'test/phase6-native-five-bps-1000-20261127' || github.ref_name == 'test/phase6-native-five-bps-1000-20261127') && 'five-bps' || 'one-second' }}
         run: |
           export KASCADE_CLI_KASPAD="$PWD/target/debug/kaspad"
           export KASCADE_CLI_LOGS="$RUNNER_TEMP/phase6-sustained-native"
@@ -290,6 +293,7 @@ jobs:
               assert summary["connected_first_to_last_accept_ms"] >= (counts["connected"] - 1) * period
               assert summary["connected_observed_bps"] <= 1
           assert summary["missed_blocks"] == counts["offline"]
+          assert summary["recovered_offline_hashes"] == [row["tip"] for row in blocks if row["phase"] == "offline"]
           assert 0 <= summary["reopen_to_rpc_ready_ms"] <= summary["reopen_to_tip_convergence_ms"]
           assert summary["final_tip"] == blocks[-1]["tip"]
           expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
@@ -317,7 +321,9 @@ jobs:
             github.head_ref == 'test/phase6-native-1000-block-20261127' ||
             github.ref_name == 'test/phase6-native-1000-block-20261127' ||
             github.head_ref == 'test/phase6-native-five-bps-20261127' ||
-            github.ref_name == 'test/phase6-native-five-bps-20261127'
+            github.ref_name == 'test/phase6-native-five-bps-20261127' ||
+          github.head_ref == 'test/phase6-native-five-bps-1000-20261127' ||
+          github.ref_name == 'test/phase6-native-five-bps-1000-20261127'
           )
         uses: actions/upload-artifact@v4
         with:
