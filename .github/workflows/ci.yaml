@@ -122,6 +122,10 @@ jobs:
         if: github.head_ref == 'fix/phase6-toml-profile-override-20261127' || github.ref_name == 'fix/phase6-toml-profile-override-20261127'
         run: cargo nextest run -p kaspad --test network_profile_inspection -E 'test(=inspect_uses_configured_override_unless_the_cli_supplies_one)'
 
+      - name: Verify effective DNS seeding in the profile inspector
+        if: github.head_ref == 'fix/phase6-effective-dns-profile-20261128' || github.ref_name == 'fix/phase6-effective-dns-profile-20261128'
+        run: cargo nextest run -p kaspad --test network_profile_inspection -E 'test(=inspect_reports_the_daemons_effective_dns_seeding_policy)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'
