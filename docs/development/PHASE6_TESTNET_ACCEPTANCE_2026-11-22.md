@@ -13,6 +13,15 @@ The [protocol draft](../../KASCADE-SPEC.md#21-required-testnet-coverage) defines
 | Network isolation | README documents local Simnet. Candidate parameters still include inherited and placeholder values. | Verify network ID and magic, genesis, ports, data directories, address prefixes, bootstrap peers, and cross-network rejection. Keep RPC on loopback for CI. |
 | Wallet, RPC, explorer and faucet | CI checks the WASM SDK and wallet components. Wallet history coverage is open. | Fund isolated test wallets, spend, restore and rescan against pruned and history-serving nodes. Compare wallet and explorer results against node commitments and issuance. |
 
+## November 28 exact-head evidence
+
+| Gate | Result |
+| --- | --- |
+| Native 200 ms pacing | [#100](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/100) passed 8/8 with 4.972084 BPS and 311 ms restart convergence. [#105 original artifact](https://github.com/DeepFriedBlockchains/KascadeNetwork/actions/runs/46076299005/artifacts/15235784390) recorded 4.970940647 BPS over 1,000 connected blocks, constant difficulty and all ten offline submissions. Its restart assertion used the pruning-sensitive retained count. Replacement acceptance pending. |
+| Native signed settlements | [#98](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/98) passed 8/8. Shut-down/fork integration and idle-inventory relay remain separately tracked, with corrected [#103](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/103) pending. |
+| Local issuance and recovery | [#101](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/101) and [#102](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/102) passed 8/8 separately. [#106](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/106) now combines those exact validations. |
+| Startup profile validation | [#99](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/99) and [#104](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/104) passed 8/8 including read-only mode and file/flag precedence. Conflict diagnostics await [#107](https://github.com/DeepFriedBlockchains/KascadeNetwork/pull/107) CI. |
+
 ## November 27 native 200 ms acceptance evidence
 
 | Gate | Measured scope |
