@@ -169,10 +169,14 @@ pub fn inspect_network_profile(args: &Args) -> Result<serde_json::Value, String>
         "target_time_per_block_ms": params.target_time_per_block(),
         "skip_proof_of_work": params.skip_proof_of_work,
         "shielded_coinbase": params.shielded_coinbase,
-        "dns_seeding_enabled": !args.disable_dns_seeding,
+        "dns_seeding_enabled": !configured_dns_seeders(args, params.dns_seeders).is_empty(),
         "grpc_enabled": !args.disable_grpc,
         "unsafe_rpc_enabled": args.unsafe_rpc,
     }))
+}
+
+fn configured_dns_seeders(args: &Args, network_seeders: &'static [&'static str]) -> &'static [&'static str] {
+    if args.disable_dns_seeding || !args.connect_peers.is_empty() || args.outbound_target == 0 { &[] } else { network_seeders }
 }
 
 fn request_database_deletion_approval(approve: bool) -> bool {
@@ -615,7 +619,7 @@ Do you confirm? (y/n)";
     // connect_peers means no DNS seeding and no outbound/inbound peers
     let outbound_target = if connect_peers.is_empty() { args.outbound_target } else { 0 };
     let inbound_limit = if connect_peers.is_empty() { args.inbound_limit } else { 0 };
-    let dns_seeders = if connect_peers.is_empty() && !args.disable_dns_seeding { config.dns_seeders } else { &[] };
+    let dns_seeders = configured_dns_seeders(args, config.dns_seeders);
 
     let grpc_server_addr = args.rpclisten.unwrap_or(ContextualNetAddress::loopback()).normalize(config.default_rpc_port());
 

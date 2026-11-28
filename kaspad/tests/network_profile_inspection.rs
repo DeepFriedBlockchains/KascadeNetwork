@@ -58,3 +58,20 @@ fn inspect_uses_configured_override_unless_the_cli_supplies_one() {
     let profile: Value = serde_json::from_slice(&from_cli.stdout).unwrap();
     assert_eq!(profile["skip_proof_of_work"], true);
 }
+
+#[test]
+fn inspect_reports_the_daemons_effective_dns_seeding_policy() {
+    let cases: &[(&[&str], bool)] = &[
+        (&[], true),
+        (&["--simnet"], false),
+        (&["--nodnsseed"], false),
+        (&["--connect=127.0.0.1:19111"], false),
+        (&["--outpeers=0"], false),
+    ];
+    for &(flags, enabled) in cases {
+        let result = Command::new(env!("CARGO_BIN_EXE_kaspad")).arg("--inspect-network-profile").args(flags).output().unwrap();
+        assert!(result.status.success(), "{flags:?}: {}", String::from_utf8_lossy(&result.stderr));
+        let profile: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(profile["dns_seeding_enabled"], enabled, "{flags:?}");
+    }
+}
