@@ -463,7 +463,8 @@ async fn mine_paced_native_blocks(
     count: u32,
     mut tip: Hash,
     pace: NativePace,
-) -> (Hash, Duration, Duration) {
+) -> (Vec<Hash>, Duration, Duration) {
+    let mut accepted_blocks = Vec::with_capacity(count as usize);
     let mut next_start = Instant::now();
     let mut accepted = next_start;
     let mut first_accepted = accepted;
@@ -478,6 +479,7 @@ async fn mine_paced_native_blocks(
             .unwrap_or_else(|_| panic!("{phase} block {sequence} could not be mined and submitted within 15 seconds"));
         assert_ne!(tip, block);
         tip = block;
+        accepted_blocks.push(block);
         accepted = Instant::now();
         // Anchor the next deadline to this actual attempt. A slow iteration cannot queue a burst.
         next_start = match pace {
@@ -513,7 +515,7 @@ async fn mine_paced_native_blocks(
             }
         }
     }
-    (tip, accepted.duration_since(first_accepted), max_tip_wait)
+    (accepted_blocks, accepted.duration_since(first_accepted), max_tip_wait)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -552,18 +554,20 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     }
     let genesis_data_bytes = measure_node_data(data.path());
 
-    let (connected_tip, connected_span, connected_max_wait) =
+    let (connected_hashes, connected_span, connected_max_wait) =
         mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "connected", connected_blocks, SIMNET_GENESIS.hash, pace).await;
+    let connected_tip = *connected_hashes.last().unwrap();
     let before = expect_tip(&c_rpc, connected_tip).await;
-    assert_eq!(before.block_count, genesis.block_count + u64::from(connected_blocks));
+    assert_eq!(before.virtual_daa_score - genesis.virtual_daa_score, u64::from(connected_blocks));
     record_node_metrics(&c_rpc, "c", "before_stop").await;
     c_rpc.disconnect().await.unwrap();
     c.stop().await;
     expect_peers(&a_rpc, 1).await;
 
     let offline_started = Instant::now();
-    let (offline_tip, offline_span, _) =
+    let (offline_hashes, offline_span, _) =
         mine_paced_native_blocks(&a_rpc, &[&b_rpc], "offline", SUSTAINED_OFFLINE_BLOCKS, connected_tip, pace).await;
+    let offline_tip = *offline_hashes.last().unwrap();
     let offline_duration = offline_started.elapsed();
     let reopen_started = Instant::now();
     let mut c = Node::start(binary, data.path(), logs, 3, "c-sustained-reopen", false, options);
@@ -573,18 +577,26 @@ async fn phase6_loopback_cli_sustained_native_pow() {
     expect_peers(&c_rpc, 1).await;
     let recovered = expect_tip(&c_rpc, offline_tip).await;
     let reopen_converged = reopen_started.elapsed();
-    assert_eq!(recovered.block_count - before.block_count, u64::from(SUSTAINED_OFFLINE_BLOCKS));
+    // The RPC block-count estimate is relative to the retention root, which
+    // can advance during catch-up. Verify the exact selected suffix instead.
+    let recovered_chain = c_rpc.get_virtual_chain_from_block(connected_tip, false, None).await.unwrap();
+    assert!(recovered_chain.removed_chain_block_hashes.is_empty());
+    assert_eq!(recovered_chain.added_chain_block_hashes, offline_hashes);
+    assert_eq!(recovered.virtual_daa_score - before.virtual_daa_score, u64::from(SUSTAINED_OFFLINE_BLOCKS));
 
-    let (tip, rejoined_span, _) =
+    let (rejoined_hashes, rejoined_span, _) =
         mine_paced_native_blocks(&a_rpc, &[&b_rpc, &c_rpc], "rejoined", SUSTAINED_REJOINED_BLOCKS, offline_tip, pace).await;
+    let tip = *rejoined_hashes.last().unwrap();
     let authority = expect_tip(&a_rpc, tip).await;
     let accepted_total = u64::from(connected_blocks + SUSTAINED_OFFLINE_BLOCKS + SUSTAINED_REJOINED_BLOCKS);
-    assert_eq!(authority.block_count - genesis.block_count, accepted_total);
+    assert_eq!(authority.virtual_daa_score - genesis.virtual_daa_score, accepted_total);
     for (name, client) in [("a", &a_rpc), ("b", &b_rpc), ("c", &c_rpc)] {
         let dag = expect_tip(client, tip).await;
-        assert_eq!(dag.block_count, authority.block_count);
         assert_eq!(dag.pruning_point_hash, authority.pruning_point_hash);
         assert_eq!(dag.virtual_daa_score, authority.virtual_daa_score);
+        let chain = client.get_virtual_chain_from_block(offline_tip, false, None).await.unwrap();
+        assert!(chain.removed_chain_block_hashes.is_empty(), "node {name} replaced the recovered tip");
+        assert_eq!(chain.added_chain_block_hashes, rejoined_hashes, "node {name} selected a different suffix after rejoin");
         record_node_metrics(client, name, "converged").await;
         client.disconnect().await.unwrap();
     }
@@ -601,7 +613,9 @@ async fn phase6_loopback_cli_sustained_native_pow() {
         "connected_first_to_last_accept_ms": connected_span.as_millis(),
         "connected_observed_bps": f64::from(connected_blocks - 1) / connected_span.as_secs_f64(),
         "connected_max_all_expected_nodes_selected_ms": connected_max_wait.as_millis(),
-        "missed_blocks": recovered.block_count - before.block_count,
+        "missed_blocks": recovered_chain.added_chain_block_hashes.len(),
+        "recovered_offline_hashes": recovered_chain.added_chain_block_hashes.iter().map(ToString::to_string).collect::<Vec<_>>(),
+        "follower_retained_block_estimate": {"before_stop": before.block_count, "after_recovery": recovered.block_count},
         "offline_first_to_last_accept_ms": offline_span.as_millis(),
         "offline_workload_ms": offline_duration.as_millis(),
         "reopen_to_rpc_ready_ms": reopen_rpc_ready.as_millis(),
@@ -609,7 +623,7 @@ async fn phase6_loopback_cli_sustained_native_pow() {
         "rejoined_blocks": SUSTAINED_REJOINED_BLOCKS,
         "rejoined_first_to_last_accept_ms": rejoined_span.as_millis(),
         "final_tip": tip.to_string(),
-        "final_block_count": authority.block_count,
+        "final_retained_block_estimate": authority.block_count,
         "final_pruning_point": authority.pruning_point_hash.to_string(),
         "final_virtual_daa_score": authority.virtual_daa_score,
         "node_data_logical_bytes": {

@@ -293,6 +293,7 @@ jobs:
               assert summary["connected_first_to_last_accept_ms"] >= (counts["connected"] - 1) * period
               assert summary["connected_observed_bps"] <= 1
           assert summary["missed_blocks"] == counts["offline"]
+          assert summary["recovered_offline_hashes"] == [row["tip"] for row in blocks if row["phase"] == "offline"]
           assert 0 <= summary["reopen_to_rpc_ready_ms"] <= summary["reopen_to_tip_convergence_ms"]
           assert summary["final_tip"] == blocks[-1]["tip"]
           expected = {(node, stage) for node in "abc" for stage in ("genesis", "converged")}
