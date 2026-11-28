@@ -43,6 +43,9 @@ tokio-stream = { workspace = true, features = ["net"] }
 uuid = { workspace = true, features = ["v4", "fast-rng"] }
 chrono.workspace = true
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
 [features]
 test-staging-interruption = ["kaspa-consensus-core/test-staging-interruption"]
 # Lowers `SMT_CHUNK_SIZE` and `SMT_FLOW_CONTROL_WINDOW` to tiny values so

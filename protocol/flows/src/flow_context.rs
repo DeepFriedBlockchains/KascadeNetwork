@@ -267,7 +267,7 @@ pub struct FlowContextInner {
     hub: Hub,
     orphans_pool: AsyncRwLock<OrphanBlocksPool>,
     shared_block_requests: Arc<Mutex<HashMap<Hash, RequestScopeMetadata>>>,
-    transactions_spread: AsyncRwLock<TransactionsSpread>,
+    transactions_spread: Arc<AsyncRwLock<TransactionsSpread>>,
     shared_transaction_requests: Arc<Mutex<HashMap<TransactionId, RequestScopeMetadata>>>,
     is_ibd_running: Arc<AtomicBool>,
     ibd_metadata: Arc<RwLock<Option<IbdMetadata>>>,
@@ -385,7 +385,7 @@ impl FlowContext {
                 consensus_manager,
                 orphans_pool: AsyncRwLock::new(OrphanBlocksPool::new(max_orphans)),
                 shared_block_requests: Arc::new(Mutex::new(HashMap::new())),
-                transactions_spread: AsyncRwLock::new(TransactionsSpread::new(hub.clone())),
+                transactions_spread: Arc::new(AsyncRwLock::new(TransactionsSpread::new(hub.clone()))),
                 shared_transaction_requests: Arc::new(Mutex::new(HashMap::new())),
                 is_ibd_running: Default::default(),
                 ibd_metadata: Default::default(),
@@ -722,8 +722,9 @@ impl FlowContext {
             .clone()
             .validate_and_insert_transaction(consensus, transaction, Priority::High, orphan, RbfPolicy::Forbidden)
             .await?;
+        let accepted_ids: Vec<_> = transaction_insertion.accepted.iter().map(|tx| tx.id()).collect();
         self.broadcast_transactions(
-            transaction_insertion.accepted.iter().map(|x| x.id()),
+            accepted_ids,
             false, // RPC transactions are considered high priority, so we don't want to throttle them
         )
         .await;
@@ -747,8 +748,9 @@ impl FlowContext {
             .clone()
             .validate_and_insert_transaction(consensus, transaction, Priority::High, Orphan::Forbidden, RbfPolicy::Mandatory)
             .await?;
+        let accepted_ids: Vec<_> = transaction_insertion.accepted.iter().map(|tx| tx.id()).collect();
         self.broadcast_transactions(
-            transaction_insertion.accepted.iter().map(|x| x.id()),
+            accepted_ids,
             false, // RPC transactions are considered high priority, so we don't want to throttle them
         )
         .await;
@@ -783,7 +785,7 @@ impl FlowContext {
     /// The broadcast itself may happen only during a subsequent call to this function since it is done at most
     /// after a predefined interval or when the queue length is larger than the Inv message capacity.
     pub async fn broadcast_transactions<I: IntoIterator<Item = TransactionId>>(&self, transaction_ids: I, should_throttle: bool) {
-        self.transactions_spread.write().await.broadcast_transactions(transaction_ids, should_throttle).await
+        TransactionsSpread::broadcast_transactions(&self.transactions_spread, transaction_ids, should_throttle).await
     }
 }
 
