@@ -722,8 +722,9 @@ impl FlowContext {
             .clone()
             .validate_and_insert_transaction(consensus, transaction, Priority::High, orphan, RbfPolicy::Forbidden)
             .await?;
+        let accepted_ids: Vec<_> = transaction_insertion.accepted.iter().map(|tx| tx.id()).collect();
         self.broadcast_transactions(
-            transaction_insertion.accepted.iter().map(|x| x.id()),
+            accepted_ids,
             false, // RPC transactions are considered high priority, so we don't want to throttle them
         )
         .await;
@@ -747,8 +748,9 @@ impl FlowContext {
             .clone()
             .validate_and_insert_transaction(consensus, transaction, Priority::High, Orphan::Forbidden, RbfPolicy::Mandatory)
             .await?;
+        let accepted_ids: Vec<_> = transaction_insertion.accepted.iter().map(|tx| tx.id()).collect();
         self.broadcast_transactions(
-            transaction_insertion.accepted.iter().map(|x| x.id()),
+            accepted_ids,
             false, // RPC transactions are considered high priority, so we don't want to throttle them
         )
         .await;
