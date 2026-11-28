@@ -122,6 +122,10 @@ jobs:
         if: github.head_ref == 'fix/phase6-toml-profile-override-20261127' || github.ref_name == 'fix/phase6-toml-profile-override-20261127'
         run: cargo nextest run -p kaspad --test network_profile_inspection -E 'test(=inspect_uses_configured_override_unless_the_cli_supplies_one)'
 
+      - name: Reject conflicting effective network selectors before startup
+        if: github.head_ref == 'fix/phase6-effective-network-selector-20261128' || github.ref_name == 'fix/phase6-effective-network-selector-20261128'
+        run: cargo nextest run -p kaspad --test network_profile_inspection -E 'test(=conflicting_effective_network_selectors_fail_before_startup_or_inspection)'
+
       - name: Run bounded shielded persistent reopen regression
         env:
           RUST_BACKTRACE: '1'

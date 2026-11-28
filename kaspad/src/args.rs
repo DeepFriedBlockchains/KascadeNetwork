@@ -644,6 +644,13 @@ impl Args {
             rocksdb_cache_size: m.get_one::<usize>("rocksdb-cache-size").cloned().or(defaults.rocksdb_cache_size),
         };
 
+        if [args.testnet, args.devnet, args.simnet].into_iter().filter(|enabled| *enabled).count() > 1 {
+            return Err(clap::Error::raw(
+                clap::error::ErrorKind::ArgumentConflict,
+                "Only one of testnet, devnet, or simnet may be enabled across the command line and configuration file.",
+            ));
+        }
+
         if !args.inspect_network_profile && arg_match_unwrap_or::<bool>(&m, "enable-mainnet-mining", false) {
             println!("\nNOTE: The flag --enable-mainnet-mining is deprecated and defaults to true also w/o explicit setting\n")
         }
