@@ -38,21 +38,24 @@ consensus values.
 
 Consensus monetary arithmetic is integer KASMI only. Never use floating
 point. - KASMI_PER_KCADE = 100,000,000 - MAX_SUPPLY_KCADE =
-23,000,000,000 - MAX_SUPPLY_KASMI = 2,300,000,000,000,000,000 Audit
+29,000,000,000 - MAX_SUPPLY_KASMI = 2,900,000,000,000,000,000 Audit
 upstream integer types and overflow safety.
 
 ## 4. Cascading Emission
 
-Primary issuance is exactly 21,000,000,000 KCADE. - Initial subsidy: 50
+The main-phase budget is 21,000,000,000 KCADE. The candidate Cascade
+curve starts at 50
 KCADE - Standard Cascade interval: 16,470,000 rewarding units, subject
 to audit of the upstream reward clock - Reward sequence: 50, 49, 48 … 2,
 1 KCADE - 16,470,000 \* sum(1..50) = 20,999,250,000 KCADE - Extend the
 final 1-KCADE stage by 750,000 units - Total primary units:
 824,250,000 - Exact primary issuance: 21B KCADE
 
-Finite tail: - 0.5 KCADE per rewarding unit - Exactly 4,000,000,000 tail
-units - Exact tail issuance: 2B KCADE - Subsidy becomes 0 permanently
-afterward - Exact scheduled maximum: 23B KCADE
+The finite tail budget is 8,000,000,000 KCADE. A candidate uniform
+rate of 0.5 KCADE would use 16,000,000,000 rewarding units, with a
+permanent zero subsidy afterward. The rewarding-unit definition, exact
+curve, duration, activation, and migration need approval and validation.
+The total policy maximum is 29,000,000,000 KCADE.
 
 Add independent full-schedule tests and boundary vectors for every
 Cascade, primary-to-tail, and tail-to-zero.
@@ -311,7 +314,7 @@ separately.
 1.  Independent KASCADE chain
 2.  No premine
 3.  No founder/creator allocation
-4.  Exact scheduled maximum 23B KCADE
+4.  Hard cap of 29B KCADE, including a 21B main phase and 8B finite tail
 5.  Integer KASMI monetary consensus
 6.  Native kHeavyHash remains valid
 7.  5-BPS target with engineered supporting parameters
