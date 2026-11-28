@@ -58,3 +58,25 @@ fn inspect_uses_configured_override_unless_the_cli_supplies_one() {
     let profile: Value = serde_json::from_slice(&from_cli.stdout).unwrap();
     assert_eq!(profile["skip_proof_of_work"], true);
 }
+
+#[test]
+fn conflicting_effective_network_selectors_fail_before_startup_or_inspection() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fs::write(root.join("kaspad.toml"), "simnet = true\n").unwrap();
+
+    for arguments in [&["--simnet", "--devnet"][..], &["--configfile", "kaspad.toml", "--devnet"][..]] {
+        for mode in [&[][..], &["--inspect-network-profile"][..]] {
+            let output = Command::new(env!("CARGO_BIN_EXE_kaspad"))
+                .current_dir(root)
+                .args(["--appdir=node", "--logdir=logs"])
+                .args(arguments)
+                .args(mode)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(String::from_utf8_lossy(&output.stdout).contains("Only one of testnet, devnet, or simnet may be enabled"));
+            assert!(!root.join("node").exists() && !root.join("logs").exists());
+        }
+    }
+}
